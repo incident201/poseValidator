@@ -63,12 +63,7 @@ fun CameraScreen(
     val timerSeconds by viewModel.timerSeconds.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
     val defeatReason by viewModel.defeatReason.collectAsState()
-    val driftScore by viewModel.driftScore.collectAsState()
-    val motionScore by viewModel.motionScore.collectAsState()
-    val driftThreshold by viewModel.driftThreshold.collectAsState()
-    val motionThreshold by viewModel.motionThreshold.collectAsState()
-
-    val isAIVersionAvailable by viewModel.isAIVersionAvailable.collectAsState()
+    val selectedDurationSeconds by viewModel.selectedDurationSeconds.collectAsState()
 
     val downloadProgress by viewModel.downloadProgress.collectAsState()
     val downloadBytesInfo by viewModel.downloadBytesInfo.collectAsState()
@@ -140,9 +135,6 @@ fun CameraScreen(
             .background(DarkBg)
             .windowInsetsPadding(WindowInsets.statusBars)
     ) {
-        // 1. Header Row
-        HeaderArea(isAIPossible = isAIVersionAvailable)
-
         // 2. Camera feed viewport with overlay graphics
         Box(
             modifier = Modifier
@@ -214,23 +206,6 @@ fun CameraScreen(
                 )
             }
 
-            // Top overlay tags
-            StatusOverlayTags(gameState = gameState)
-
-            // Dynamic skeletal / progress tracking feedback overlay
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
-                    .padding(16.dp)
-            ) {
-                StabilityIndicators(
-                    driftScore = driftScore,
-                    driftThreshold = driftThreshold,
-                    motionScore = motionScore,
-                    motionThreshold = motionThreshold
-                )
-            }
         }
 
         // 3. Bottom Controls HUD
@@ -239,247 +214,24 @@ fun CameraScreen(
             statusMessage = statusMessage,
             defeatReason = defeatReason,
             timerSeconds = timerSeconds,
+            selectedDurationSeconds = selectedDurationSeconds,
+            onDurationChanged = { viewModel.updateSelectedDurationMinutes(it) },
             onStart = { viewModel.startSession() },
             onStop = { viewModel.stopSession() }
         )
     }
 }
 
-@Composable
-fun HeaderArea(
-    isAIPossible: Boolean
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(DarkPrimary)
-                    ,
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .border(2.5.dp, DarkOnPrimary, CircleShape)
-                )
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text(
-                    text = "Pose Guard",
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = (-0.5).sp
-                )
-                Text(
-                    text = "Gemma-4-E4B-it + LiteRT-LM",
-                    color = DarkTertiary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Normal
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(20.dp))
-                .background(DarkSurface)
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(AccentGreen)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = if (isAIPossible) "LOCAL AI" else "ACTIVE-CAM",
-                color = DarkPrimary,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.5.sp
-            )
-        }
-    }
-}
 
 @Composable
-fun StatusOverlayTags(gameState: GameState) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp)
-    ) {
-        // Pulse red Live tag (Left)
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .clip(RoundedCornerShape(100.dp))
-                .background(Color.Black.copy(alpha = 0.6f))
-                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(100.dp))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val infiniteTransition = rememberInfiniteTransition()
-            val scale by infiniteTransition.animateFloat(
-                initialValue = 0.7f,
-                targetValue = 1.2f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(1000, easing = LinearEasing),
-                    repeatMode = RepeatMode.Reverse
-                )
-            )
-
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(AccentRed, CircleShape)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "LIVE FEED",
-                color = Color.White,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 1.sp
-            )
-        }
-
-        // Pose Status Accepted Tag (Right)
-        AnimatedVisibility(
-            visible = gameState == GameState.HoldingPose || gameState == GameState.CheckingFinalPose || gameState == GameState.Success,
-            enter = fadeIn() + scaleIn(),
-            exit = fadeOut() + scaleOut(),
-            modifier = Modifier.align(Alignment.TopEnd)
-        ) {
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(100.dp))
-                    .background(AccentGreen.copy(alpha = 0.9f))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "POSE ACCEPTED",
-                    color = AccentGreenText,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun StabilityIndicators(
-    driftScore: Float,
-    driftThreshold: Float,
-    motionScore: Float,
-    motionThreshold: Float
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(Color.Black.copy(alpha = 0.55f))
-            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(24.dp))
-            .padding(16.dp)
-    ) {
-        Text(
-            text = "STABILITY MONITORING (MEDIAPIPE)",
-            color = DarkTertiary,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.sp,
-            modifier = Modifier.padding(bottom = 12.dp)
-        )
-
-        // Drift (Slow shift away from reference)
-        val normalizedDrift = (driftScore / (driftThreshold * 1.5f).coerceAtLeast(0.01f)).coerceIn(0f, 1f)
-        val driftColor = when {
-            driftScore > driftThreshold -> AccentRed
-            driftScore > driftThreshold * 0.7f -> Color(0xFFFFB74D) // Warning Orange
-            else -> DarkPrimary
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Смещение (Drift)",
-                color = Color.White.copy(alpha = 0.8f),
-                fontSize = 11.sp
-            )
-            Text(
-                text = String.format("%.2f / %.2f", driftScore, driftThreshold),
-                color = driftColor,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        LinearProgressIndicator(
-            progress = { normalizedDrift },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(6.dp)
-                .clip(CircleShape),
-            color = driftColor,
-            trackColor = DarkSecondary
-        )
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // Motion (Sudden spikes)
-        val normalizedMotion = (motionScore / (motionThreshold * 1.5f).coerceAtLeast(0.01f)).coerceIn(0f, 1f)
-        val motionColor = when {
-            motionScore > motionThreshold -> AccentRed
-            motionScore > motionThreshold * 0.7f -> Color(0xFFFFB74D)
-            else -> DarkPrimary
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Резкое движение (Motion)",
-                color = Color.White.copy(alpha = 0.8f),
-                fontSize = 11.sp
-            )
-            Text(
-                text = String.format("%.2f / %.2f", motionScore, motionThreshold),
-                color = motionColor,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        LinearProgressIndicator(
-            progress = { normalizedMotion },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(6.dp)
-                .clip(CircleShape),
-            color = motionColor,
-            trackColor = DarkSecondary
-        )
-    }
+fun DurationPicker(selectedMinutes: Int, onMinutesChanged: (Int) -> Unit) {
+    OutlinedTextField(
+        value = selectedMinutes.toString(),
+        onValueChange = { onMinutesChanged(it.toIntOrNull() ?: 3) },
+        label = { Text("Минуты (мин. 3)") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
 }
 
 @Composable
@@ -488,6 +240,8 @@ fun BottomHUDEngine(
     statusMessage: String,
     defeatReason: String,
     timerSeconds: Int,
+    selectedDurationSeconds: Int,
+    onDurationChanged: (Int) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit
 ) {
@@ -549,7 +303,11 @@ fun BottomHUDEngine(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+            if (gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success) {
+                DurationPicker(selectedDurationSeconds / 60, onDurationChanged)
+                Spacer(modifier = Modifier.height(16.dp))
+            }
 
             // Timer & Action Button Row
             Row(
@@ -635,40 +393,10 @@ fun BottomHUDEngine(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Footer tips
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = "Tips",
-                    tint = DarkPrimary,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Дыхательные покачивания автоматически отсеиваются фильтром.",
-                    color = DarkTertiary,
-                    fontSize = 11.sp,
-                    style = androidx.compose.ui.text.TextStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
-                )
-            }
         }
     }
 }
 
-// Extension function for cleaner coding
-@Composable
-fun Modifier.opacityAlpha(alpha: Float): Modifier {
-    return this.then(Modifier.drawBehindAlpha(alpha))
-}
-
-fun Modifier.drawBehindAlpha(alpha: Float): Modifier {
-    return this
-}
 
 private fun rotateBitmap(bitmap: Bitmap, rotationDegrees: Int): Bitmap {
     val matrix = android.graphics.Matrix()

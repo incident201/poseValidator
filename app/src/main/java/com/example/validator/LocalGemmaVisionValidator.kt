@@ -28,6 +28,8 @@ object LocalGemmaVisionValidator {
     private val jsonAdapter = moshi.adapter(LocalGemmaJsonOutput::class.java).lenient()
 
     private var engine: Engine? = null
+    private const val GEMMA_IMAGE_MAX_LONG_SIDE = 640
+    private const val GEMMA_IMAGE_JPEG_QUALITY = 72
 
     @Synchronized
     private fun getOrInitializeEngine(context: Context): Engine {
@@ -103,8 +105,8 @@ object LocalGemmaVisionValidator {
                 tempImgFile.delete()
             }
             FileOutputStream(tempImgFile).use { out ->
-                val resized = getResizedBitmap(bitmap, 768)
-                resized.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                val resized = getResizedBitmap(bitmap, GEMMA_IMAGE_MAX_LONG_SIDE)
+                resized.compress(Bitmap.CompressFormat.JPEG, GEMMA_IMAGE_JPEG_QUALITY, out)
             }
 
             val prompt = """
