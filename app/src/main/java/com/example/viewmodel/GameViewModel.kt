@@ -107,7 +107,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 _gameState.value = GameState.ModelDownloadRequired
                 _statusMessage.value = "Ошибка скачивания. Пожалуйста, попробуйте снова."
             }
-        }
     }
     }
 
