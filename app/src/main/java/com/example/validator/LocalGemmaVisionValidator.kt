@@ -15,7 +15,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
-@com.squareup.moshi.JsonClass(generateAdapter = true)
 data class LocalGemmaJsonOutput(
     @com.squareup.moshi.Json(name = "person_present") val personPresent: Boolean?,
     @com.squareup.moshi.Json(name = "facing_away") val facingAway: Boolean?,

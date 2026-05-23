@@ -13,8 +13,11 @@ import com.example.validator.GemmaPoseValidator
 import com.example.validator.PoseValidationResult
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
@@ -77,6 +80,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isAIVersionAvailable = MutableStateFlow(false)
     val isAIVersionAvailable: StateFlow<Boolean> = _isAIVersionAvailable.asStateFlow()
+    private val _voiceEvents = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val voiceEvents: SharedFlow<String> = _voiceEvents.asSharedFlow()
 
     private var latestBitmap: Bitmap? = null
     private var latestLandmarks: PoseLandmarks? = null
@@ -147,6 +152,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startSession() {
         if (_gameState.value != GameState.Idle && _gameState.value != GameState.Failed && _gameState.value != GameState.Success) return
+        speak("Займите позицию")
 
         _defeatReason.value = ""
         _driftScore.value = 0f
@@ -188,6 +194,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             _gameState.value = GameState.HoldingPose
             _statusMessage.value = "Таймер запущен. Проверяю стартовую позу..."
             startTimerLoop()
+            speak("Время пошло")
 
             launchGemmaCheck(
                 checkName = "Стартовая проверка",
@@ -221,6 +228,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun performFinalChecking() {
         timerJob?.cancel()
+        speak("Время вышло")
         val finalSnapshot = latestBitmap
         if (finalSnapshot == null) {
             triggerDefeat("Финальная проверка: камера не предоставила кадр")
@@ -243,6 +251,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
         activeGemmaCheckJob = viewModelScope.launch {
             _isGemmaChecking.value = true
+            Log.i(TAG, "$checkName: isGemmaChecking=true")
             try {
                 val result = GemmaPoseValidator.validatePose(getApplication(), snapshot)
                 Log.i(TAG, "$checkName rawJson=${result.rawJson}")
@@ -263,6 +272,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 triggerDefeat("$checkName: ошибка Gemma: ${e.message}")
             } finally {
                 _isGemmaChecking.value = false
+                Log.i(TAG, "$checkName: isGemmaChecking=false")
+                activeGemmaCheckJob = null
             }
         }
     }
@@ -280,13 +291,22 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun triggerDefeat(reason: String) {
+        val alreadyFailed = _gameState.value == GameState.Failed
         startDelayJob?.cancel()
         timerJob?.cancel()
         _isGemmaChecking.value = false
+        Log.i(TAG, "triggerDefeat: isGemmaChecking=false")
         _startDelayRemainingSeconds.value = 0
         _gameState.value = GameState.Failed
         _defeatReason.value = reason
         _statusMessage.value = "Проверка не пройдена"
+        if (!alreadyFailed) {
+            speak("Вы не справились.")
+        }
+    }
+
+    private fun speak(text: String) {
+        _voiceEvents.tryEmit(text)
     }
 
     fun stopSession() {

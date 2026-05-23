@@ -3,6 +3,7 @@ package com.example.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -50,7 +51,11 @@ import com.example.tracker.PoseLandmarkerService
 import com.example.ui.theme.*
 import com.example.viewmodel.GameState
 import com.example.viewmodel.GameViewModel
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import java.io.ByteArrayOutputStream
+import java.util.Locale
 import android.util.Size
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -62,6 +67,7 @@ fun CameraScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    VoiceAnnouncer(viewModel = viewModel)
 
     val gameState by viewModel.gameState.collectAsState()
     val timerSeconds by viewModel.timerSeconds.collectAsState()
@@ -194,9 +200,10 @@ fun CameraScreen(
                                     val analysisBitmap = resizeBitmapLongSide(finalBitmap, 640)
                                     // Pipe to ViewModel current frame bitmap
                                     viewModel.setLatestBitmap(analysisBitmap)
-
-                                    // Run landmarker detection
-                                    landmarkerService?.detectLiveStreamFrame(analysisBitmap, System.currentTimeMillis())
+                                    landmarkerService?.detectLiveStreamFrame(
+                                        analysisBitmap,
+                                        System.currentTimeMillis()
+                                    )
                                 } catch (e: Exception) {
                                     Log.e("CameraScreen", "Frame analysis failed", e)
                                 } finally {
@@ -238,6 +245,63 @@ fun CameraScreen(
             onStart = { viewModel.startSession() },
             onStop = { viewModel.stopSession() }
         )
+    }
+}
+
+@Composable
+private fun VoiceAnnouncer(viewModel: GameViewModel) {
+    val context = LocalContext.current
+    val pendingMessages = remember { ConcurrentLinkedQueue<String>() }
+    val ttsRef = remember { AtomicReference<TextToSpeech?>(null) }
+    val isReady = remember { AtomicBoolean(false) }
+
+    DisposableEffect(context) {
+        val engine = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                val tts = ttsRef.get() ?: return@TextToSpeech
+                val result = tts.setLanguage(Locale("ru", "RU"))
+                val ready = result != TextToSpeech.LANG_MISSING_DATA &&
+                    result != TextToSpeech.LANG_NOT_SUPPORTED
+                isReady.set(ready)
+
+                if (ready) {
+                    while (true) {
+                        val message = pendingMessages.poll() ?: break
+                        tts.speak(
+                            message,
+                            TextToSpeech.QUEUE_FLUSH,
+                            null,
+                            "voice_${System.currentTimeMillis()}"
+                        )
+                    }
+                }
+            }
+        }
+        ttsRef.set(engine)
+
+        onDispose {
+            engine.stop()
+            engine.shutdown()
+            ttsRef.set(null)
+            isReady.set(false)
+            pendingMessages.clear()
+        }
+    }
+
+    LaunchedEffect(viewModel) {
+        viewModel.voiceEvents.collect { message ->
+            val engine = ttsRef.get()
+            if (isReady.get() && engine != null) {
+                engine.speak(
+                    message,
+                    TextToSpeech.QUEUE_FLUSH,
+                    null,
+                    "voice_${System.currentTimeMillis()}"
+                )
+            } else {
+                pendingMessages.add(message)
+            }
+        }
     }
 }
 
@@ -292,6 +356,9 @@ fun BottomHUDEngine(
     onStart: () -> Unit,
     onStop: () -> Unit
 ) {
+    val canStart = (gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success) &&
+        !isGemmaChecking
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -378,7 +445,7 @@ fun BottomHUDEngine(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-            if (gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success) {
+            if (canStart) {
                 DurationPicker(selectedDurationSeconds / 60, onDurationChanged)
                 Spacer(modifier = Modifier.height(16.dp))
             }
@@ -418,7 +485,7 @@ fun BottomHUDEngine(
                 }
 
                 // Action Button
-                if (gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success) {
+                if (canStart) {
                     Button(
                         onClick = onStart,
                         modifier = Modifier
