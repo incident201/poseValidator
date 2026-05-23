@@ -14,8 +14,8 @@ import java.net.URL
 
 object GemmaModelManager {
     private const val TAG = "GemmaModelManager"
-    const val MODEL_FILENAME = "gemma-4-E4B-it.litertlm"
-    private const val DOWNLOAD_URL = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm"
+    const val MODEL_FILENAME = "gemma-4-E2B-it.litertlm"
+    private const val DOWNLOAD_URL = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm"
 
     private val _downloadProgress = MutableStateFlow(0f)
     val downloadProgress: StateFlow<Float> = _downloadProgress

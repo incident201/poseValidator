@@ -227,9 +227,23 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                // Check local Gemma + landmark heuristics validation
-                val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot, latestLandmarks)
+                // Check local Gemma validation using the camera bitmap snapshot
+                val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot)
                 if (aiResult.isPassed) {
+                    if (latestLandmarks == null) {
+                        _statusMessage.value = "Ожидаем трекер движений MediaPipe..."
+                        var retries = 0
+                        while (latestLandmarks == null && retries < 50) {
+                            delay(100)
+                            retries++
+                        }
+                        if (latestLandmarks == null) {
+                            _gameState.value = GameState.Failed
+                            _statusMessage.value = "MediaPipe не готов"
+                            _defeatReason.value = "Камера активна, но трекер MediaPipe не среагировал"
+                            return@launch
+                        }
+                    }
                     initiateHoldingState()
                 } else {
                     _gameState.value = GameState.Failed
@@ -319,7 +333,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             val bitmapSnapshot = latestBitmap
             if (bitmapSnapshot != null) {
-                val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot, latestLandmarks)
+                val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot)
                 if (aiResult.isPassed) {
                     _gameState.value = GameState.HoldingPose
                     _statusMessage.value = "Поза подтверждена"
@@ -352,7 +366,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot, latestLandmarks)
+                val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot)
                 if (aiResult.isPassed) {
                     _gameState.value = GameState.Success
                     _statusMessage.value = "Победа"
