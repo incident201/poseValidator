@@ -2,13 +2,21 @@ package com.example.validator
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.util.Base64
 import android.util.Log
+import com.example.api.GenerateContentRequest
+import com.example.api.Content
+import com.example.api.Part
+import com.example.api.InlineData
+import com.example.api.GenerationConfig
+import com.example.api.RetrofitClient
 import com.example.tracker.PoseLandmarks
-import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import com.example.BuildConfig
 
 data class PoseValidationResult(
     val personPresent: Boolean,
@@ -32,121 +40,126 @@ object GemmaPoseValidator {
 
     private fun buildPrompt(): String {
         return """
-You are a pose validation helper. Convert the following metadata check into a strict JSON output matching the specifications below.
+Look at the image and answer these questions:
 
-Requirement: Return JSON ONLY with exact keys "person_present", "facing_away", and "kneeling", each set to true.
+1. Is a person present in the image?
+2. Is the person facing away from the camera?
+3. Is the person kneeling?
 
-JSON:
+Answer with JSON only:
 {
   "person_present": true,
   "facing_away": true,
   "kneeling": true
 }
-"""
+""".trimIndent()
     }
 
-    // Keep an instance of local LlmInference
-    private var localLlmInference: LlmInference? = null
-    private var loadedModelPath: String? = null
-
-    private fun getOrInitLlmInference(context: Context): LlmInference? {
-        val modelFile = GemmaModelManager.getModelFile(context)
-        if (!modelFile.exists()) {
-            localLlmInference = null
-            loadedModelPath = null
-            return null
-        }
-
-        val currentPath = modelFile.absolutePath
-        if (localLlmInference != null && loadedModelPath == currentPath) {
-            return localLlmInference
-        }
-
-        try {
-            Log.i(TAG, "Initializing local Gemma LiteRT-LM from path: $currentPath")
-            // Configure LlmInference options
-            val options = LlmInference.LlmInferenceOptions.builder()
-                .setModelPath(currentPath)
-                .setMaxTokens(128)
-                .setTemperature(0.1f)
-                .build()
-            localLlmInference = LlmInference.createFromOptions(context, options)
-            loadedModelPath = currentPath
-            Log.i(TAG, "Local Gemma LiteRT-LM initialized successfully!")
-            return localLlmInference
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize local Gemma LiteRT-LM: ${e.message}", e)
-            localLlmInference = null
-            loadedModelPath = null
-            return null
-        }
+    private fun failedResult(rawJson: String? = null): PoseValidationResult {
+        return PoseValidationResult(
+            personPresent = false,
+            facingAway = false,
+            kneeling = false,
+            isPassed = false,
+            rawJson = rawJson
+        )
     }
 
-    suspend fun validatePose(context: Context, bitmap: Bitmap, landmarks: PoseLandmarks? = null): PoseValidationResult = withContext(Dispatchers.IO) {
-        val isModelDownloaded = GemmaModelManager.isModelDownloaded(context)
-        Log.i(TAG, "validatePose: model downloaded = $isModelDownloaded, has landmarks = ${landmarks != null}")
+    private fun bitmapToBase64(bitmap: Bitmap): String {
+        val byteArrayOutputStream = ByteArrayOutputStream()
+        val resized = getResizedBitmap(bitmap, 768)
+        resized.compress(Bitmap.CompressFormat.JPEG, 85, byteArrayOutputStream)
+        val byteArray = byteArrayOutputStream.toByteArray()
+        return Base64.encodeToString(byteArray, Base64.NO_WRAP)
+    }
 
-        // 1. Check landmarks presence in code first (any landmarks! if null, fails immediately)
+    private fun getResizedBitmap(image: Bitmap, maxSize: Int): Bitmap {
+        var width = image.width
+        var height = image.height
+
+        val bitmapRatio = width.toFloat() / height.toFloat()
+        if (bitmapRatio > 1) {
+            width = maxSize
+            height = (width / bitmapRatio).toInt()
+        } else {
+            height = maxSize
+            width = (height * bitmapRatio).toInt()
+        }
+        return Bitmap.createScaledBitmap(image, width, height, true)
+    }
+
+    suspend fun validatePose(
+        context: Context,
+        bitmap: Bitmap,
+        landmarks: PoseLandmarks?
+    ): PoseValidationResult = withContext(Dispatchers.IO) {
+
         if (landmarks == null) {
-            return@withContext PoseValidationResult(
-                personPresent = false,
-                facingAway = false,
-                kneeling = false,
-                isPassed = false,
-                rawJson = "{\"person_present\": false, \"facing_away\": false, \"kneeling\": false}"
-            )
+            return@withContext failedResult()
         }
 
-        // 2. Check through local Gemma if downloaded
-        var localJsonText: String? = null
-        var isLocalInferenceExecuted = false
-
-        if (isModelDownloaded) {
-            val inference = getOrInitLlmInference(context)
-            if (inference != null) {
-                try {
-                    Log.i(TAG, "Running local Gemma Pose validation inference...")
-                    val prompt = buildPrompt()
-                    localJsonText = inference.generateResponse(prompt)
-                    isLocalInferenceExecuted = true
-                    Log.i(TAG, "Local Gemma output response: $localJsonText")
-                } catch (e: Throwable) {
-                    Log.e(TAG, "Local Gemma LiteRT-LM execution error: ${e.message}", e)
-                }
-            }
+        val apiKey = try {
+            BuildConfig.GEMINI_API_KEY
+        } catch (e: Exception) {
+            ""
         }
 
-        if (isLocalInferenceExecuted && !localJsonText.isNullOrBlank()) {
-            try {
-                val cleanJson = extractJson(localJsonText)
-                val parsedOutput = jsonAdapter.fromJson(cleanJson)
-                if (parsedOutput != null) {
-                    val personPresent = parsedOutput.personPresent == true
-                    val facingAway = parsedOutput.facingAway == true
-                    val kneeling = parsedOutput.kneeling == true
-                    val isPassed = personPresent && facingAway && kneeling
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+            Log.e(TAG, "Gemini API key is missing or not configured!")
+            return@withContext failedResult("{\"error\": \"Gemini API key is not configured\"}")
+        }
 
-                    return@withContext PoseValidationResult(
-                        personPresent = personPresent,
-                        facingAway = facingAway,
-                        kneeling = kneeling,
-                        isPassed = isPassed,
-                        rawJson = cleanJson
+        val prompt = buildPrompt()
+        val base64Image = try {
+            bitmapToBase64(bitmap)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to encode bitmap to Base64: ${e.message}", e)
+            return@withContext failedResult()
+        }
+
+        val request = GenerateContentRequest(
+            contents = listOf(
+                Content(
+                    parts = listOf(
+                        Part(text = prompt),
+                        Part(inlineData = InlineData(mimeType = "image/jpeg", data = base64Image))
                     )
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to parse local Gemma JSON output", e)
-            }
-        }
+                )
+            ),
+            generationConfig = GenerationConfig(
+                responseMimeType = "application/json",
+                temperature = 0.1f
+            )
+        )
 
-        // 3. Fallback if local model execution fails or not downloaded - since landmarks are detected, we assume true
-        Log.i(TAG, "Using MediaPipe local pose validation fallback (any landmarks present)...")
+        Log.i(TAG, "Running multimodal validation via Gemini API...")
+        val responseText = try {
+            val response = RetrofitClient.service.generateContent(apiKey, request)
+            response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+        } catch (e: Exception) {
+            Log.e(TAG, "Vertex/Gemini multimodal web API call failed: ${e.message}", e)
+            null
+        } ?: return@withContext failedResult()
+
+        val cleanJson = extractJson(responseText)
+        Log.i(TAG, "Multimodal API raw response: $responseText | Cleaned JSON: $cleanJson")
+
+        val parsed = try {
+            jsonAdapter.fromJson(cleanJson)
+        } catch (e: Exception) {
+            null
+        } ?: return@withContext failedResult(cleanJson)
+
+        val personPresent = parsed.personPresent == true
+        val facingAway = parsed.facingAway == true
+        val kneeling = parsed.kneeling == true
+
         return@withContext PoseValidationResult(
-            personPresent = true,
-            facingAway = true,
-            kneeling = true,
-            isPassed = true,
-            rawJson = "{\"person_present\": true, \"facing_away\": true, \"kneeling\": true}"
+            personPresent = personPresent,
+            facingAway = facingAway,
+            kneeling = kneeling,
+            isPassed = personPresent && facingAway && kneeling,
+            rawJson = cleanJson
         )
     }
 
@@ -161,13 +174,6 @@ JSON:
     }
 
     fun close() {
-        try {
-            localLlmInference?.close()
-        } catch (e: Exception) {
-            // Ignore
-        } finally {
-            localLlmInference = null
-            loadedModelPath = null
-        }
+        // No-op for network API, kept for interface compatibility
     }
 }
