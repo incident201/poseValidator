@@ -256,10 +256,10 @@ private fun VoiceAnnouncer(viewModel: GameViewModel) {
     val isReady = remember { AtomicBoolean(false) }
 
     DisposableEffect(context) {
-        lateinit var engine: TextToSpeech
-        engine = TextToSpeech(context) { status ->
+        val engine = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                val result = engine.setLanguage(Locale("ru", "RU"))
+                val tts = ttsRef.get() ?: return@TextToSpeech
+                val result = tts.setLanguage(Locale("ru", "RU"))
                 val ready = result != TextToSpeech.LANG_MISSING_DATA &&
                     result != TextToSpeech.LANG_NOT_SUPPORTED
                 isReady.set(ready)
@@ -267,7 +267,7 @@ private fun VoiceAnnouncer(viewModel: GameViewModel) {
                 if (ready) {
                     while (true) {
                         val message = pendingMessages.poll() ?: break
-                        engine.speak(
+                        tts.speak(
                             message,
                             TextToSpeech.QUEUE_FLUSH,
                             null,
@@ -356,6 +356,9 @@ fun BottomHUDEngine(
     onStart: () -> Unit,
     onStop: () -> Unit
 ) {
+    val canStart = (gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success) &&
+        !isGemmaChecking
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -442,7 +445,7 @@ fun BottomHUDEngine(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-            if (gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success) {
+            if (canStart) {
                 DurationPicker(selectedDurationSeconds / 60, onDurationChanged)
                 Spacer(modifier = Modifier.height(16.dp))
             }
@@ -482,7 +485,7 @@ fun BottomHUDEngine(
                 }
 
                 // Action Button
-                if (gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success) {
+                if (canStart) {
                     Button(
                         onClick = onStart,
                         modifier = Modifier
