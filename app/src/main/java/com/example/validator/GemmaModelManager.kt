@@ -14,8 +14,10 @@ import java.net.URL
 
 object GemmaModelManager {
     private const val TAG = "GemmaModelManager"
-    const val MODEL_FILENAME = "gemma-4-E2B-it.litertlm"
-    private const val DOWNLOAD_URL = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm"
+    const val MODEL_FILENAME = "gemma-4-E4B-it.litertlm"
+    private const val DOWNLOAD_URL = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm"
+
+    private const val MIN_MODEL_SIZE_BYTES = 3L * 1024 * 1024 * 1024
 
     private val _downloadProgress = MutableStateFlow(0f)
     val downloadProgress: StateFlow<Float> = _downloadProgress
@@ -29,7 +31,7 @@ object GemmaModelManager {
 
     fun isModelDownloaded(context: Context): Boolean {
         val file = getModelFile(context)
-        return file.exists() && file.length() > 500 * 1024 * 1024 // Model is around 1GB+, so must be of a realistic size
+        return file.exists() && file.length() > MIN_MODEL_SIZE_BYTES
     }
 
     suspend fun deleteModel(context: Context): Boolean = withContext(Dispatchers.IO) {

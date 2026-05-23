@@ -68,7 +68,6 @@ fun CameraScreen(
     val driftThreshold by viewModel.driftThreshold.collectAsState()
     val motionThreshold by viewModel.motionThreshold.collectAsState()
 
-    val isSimulatorEnabled by viewModel.isSimulatorEnabled.collectAsState()
     val isAIVersionAvailable by viewModel.isAIVersionAvailable.collectAsState()
 
     val downloadProgress by viewModel.downloadProgress.collectAsState()
@@ -80,7 +79,6 @@ fun CameraScreen(
             downloadProgress = downloadProgress,
             downloadBytesInfo = downloadBytesInfo,
             onStartDownload = { viewModel.startModelDownload() },
-            onSkipForTesting = { viewModel.skipDownloadForTesting() },
             modifier = modifier
         )
         return
@@ -143,12 +141,7 @@ fun CameraScreen(
             .windowInsetsPadding(WindowInsets.statusBars)
     ) {
         // 1. Header Row
-        HeaderArea(
-            onToggleSimulator = { viewModel.setSimulatorEnabled(!isSimulatorEnabled) },
-            isSimulatorEnabled = isSimulatorEnabled,
-            isAIPossible = isAIVersionAvailable,
-            onDeleteModel = { viewModel.deleteModelForTesting() }
-        )
+        HeaderArea(isAIPossible = isAIVersionAvailable)
 
         // 2. Camera feed viewport with overlay graphics
         Box(
@@ -160,7 +153,7 @@ fun CameraScreen(
                 .background(Color.Black)
                 .testTag("camera_preview_container")
         ) {
-            if (hasCameraPermission && !isSimulatorEnabled) {
+            if (hasCameraPermission) {
                 // Initialize CameraX Process
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
@@ -219,14 +212,6 @@ fun CameraScreen(
                         previewView
                     }
                 )
-            } else {
-                // Display placeholder with simulated kneeling skeleton
-                SimulatedBaselinePreview(
-                    gameState = gameState,
-                    driftScore = driftScore,
-                    motionScore = motionScore,
-                    isSimulator = isSimulatorEnabled
-                )
             }
 
             // Top overlay tags
@@ -254,21 +239,15 @@ fun CameraScreen(
             statusMessage = statusMessage,
             defeatReason = defeatReason,
             timerSeconds = timerSeconds,
-            isSimulatorMode = isSimulatorEnabled,
             onStart = { viewModel.startSession() },
-            onStop = { viewModel.stopSession() },
-            onTriggerDrift = { viewModel.simulateDriftStep() },
-            onTriggerMotion = { viewModel.simulateSuddenMotion() }
+            onStop = { viewModel.stopSession() }
         )
     }
 }
 
 @Composable
 fun HeaderArea(
-    onToggleSimulator: () -> Unit,
-    isSimulatorEnabled: Boolean,
-    isAIPossible: Boolean,
-    onDeleteModel: () -> Unit
+    isAIPossible: Boolean
 ) {
     Row(
         modifier = Modifier
@@ -285,7 +264,7 @@ fun HeaderArea(
                     .size(34.dp)
                     .clip(CircleShape)
                     .background(DarkPrimary)
-                    .clickable { onDeleteModel() },
+                    ,
                 contentAlignment = Alignment.Center
             ) {
                 Box(
@@ -304,7 +283,7 @@ fun HeaderArea(
                     letterSpacing = (-0.5).sp
                 )
                 Text(
-                    text = "Gemma + MediaPipe",
+                    text = "Gemma-4-E4B-it + LiteRT-LM",
                     color = DarkTertiary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Normal
@@ -312,12 +291,10 @@ fun HeaderArea(
             }
         }
 
-        // Mode switch pill
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(20.dp))
                 .background(DarkSurface)
-                .clickable { onToggleSimulator() }
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -325,124 +302,15 @@ fun HeaderArea(
                 modifier = Modifier
                     .size(8.dp)
                     .clip(CircleShape)
-                    .background(if (isSimulatorEnabled) DarkPrimary else AccentGreen)
+                    .background(AccentGreen)
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = if (isSimulatorEnabled) "SIMULATOR" else if (isAIPossible) "A.I. MODE" else "ACTIVE-CAM",
-                color = if (isSimulatorEnabled) Color.White else DarkPrimary,
+                text = if (isAIPossible) "LOCAL AI" else "ACTIVE-CAM",
+                color = DarkPrimary,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.5.sp
-            )
-        }
-    }
-}
-
-@Composable
-fun SimulatedBaselinePreview(
-    gameState: GameState,
-    driftScore: Float,
-    motionScore: Float,
-    isSimulator: Boolean
-) {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        // Draw elegant decorative kneeling human mockup vector using Canvas
-        Canvas(
-            modifier = Modifier
-                .width(220.dp)
-                .height(300.dp)
-                .opacityAlpha(0.4f)
-        ) {
-            val w = size.width
-            val h = size.height
-
-            // Head (facing away - colored solid dark gray)
-            drawCircle(
-                color = DarkTertiary.copy(alpha = 0.5f),
-                radius = 24.dp.toPx(),
-                center = androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.22f)
-            )
-
-            // Spine & Shoulders
-            val leftSh = androidx.compose.ui.geometry.Offset(w * 0.35f, h * 0.35f)
-            val rightSh = androidx.compose.ui.geometry.Offset(w * 0.65f, h * 0.35f)
-            val spineTop = androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.35f)
-            val spineBase = androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.60f)
-
-            // Shoulders line
-            drawLine(
-                color = DarkPrimary,
-                start = leftSh,
-                end = rightSh,
-                strokeWidth = 4.dp.toPx()
-            )
-
-            // Spine
-            drawLine(
-                color = DarkPrimary,
-                start = spineTop,
-                end = spineBase,
-                strokeWidth = 5.dp.toPx()
-            )
-
-            // Left Arm
-            val leftEl = androidx.compose.ui.geometry.Offset(w * 0.28f, h * 0.48f)
-            drawLine(color = DarkPrimary, start = leftSh, end = leftEl, strokeWidth = 3.5.dp.toPx())
-
-            // Right Arm
-            val rightEl = androidx.compose.ui.geometry.Offset(w * 0.72f, h * 0.48f)
-            drawLine(color = DarkPrimary, start = rightSh, end = rightEl, strokeWidth = 3.5.dp.toPx())
-
-            // Hip Line & Legs kneeling
-            val leftHip = androidx.compose.ui.geometry.Offset(w * 0.40f, h * 0.60f)
-            val rightHip = androidx.compose.ui.geometry.Offset(w * 0.60f, h * 0.60f)
-            drawLine(color = DarkPrimary, start = leftHip, end = rightHip, strokeWidth = 4.dp.toPx())
-
-            // Left Knee kneeling
-            val leftKnee = androidx.compose.ui.geometry.Offset(w * 0.42f, h * 0.82f)
-            drawLine(color = DarkPrimary, start = leftHip, end = leftKnee, strokeWidth = 4.dp.toPx())
-
-            // Right Knee kneeling
-            val rightKnee = androidx.compose.ui.geometry.Offset(w * 0.58f, h * 0.82f)
-            drawLine(color = DarkPrimary, start = rightHip, end = rightKnee, strokeWidth = 4.dp.toPx())
-
-            // Outer posture limits
-            drawRoundRect(
-                color = DarkSecondary,
-                topLeft = androidx.compose.ui.geometry.Offset(10f, 10f),
-                size = size.copy(width = size.width - 20f, height = size.height - 20f),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(16f, 16f),
-                style = Stroke(width = 1.5.dp.toPx(), pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(15f, 10f), 0f))
-            )
-        }
-
-        // Text banner inside camera view
-        Column(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .offset(y = 110.dp)
-                .padding(horizontal = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = if (isSimulator) "СИМУЛЯТОР КАМЕРЫ" else "КАМЕРА АКТИВНА",
-                color = if (isSimulator) DarkTertiary else AccentGreen,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.5.sp,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Встань на колени спиной к камере",
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 12.sp,
-                textAlign = TextAlign.Center,
-                lineHeight = 16.sp
             )
         }
     }
@@ -620,11 +488,8 @@ fun BottomHUDEngine(
     statusMessage: String,
     defeatReason: String,
     timerSeconds: Int,
-    isSimulatorMode: Boolean,
     onStart: () -> Unit,
-    onStop: () -> Unit,
-    onTriggerDrift: () -> Unit,
-    onTriggerMotion: () -> Unit
+    onStop: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -770,46 +635,6 @@ fun BottomHUDEngine(
                 }
             }
 
-            // Interactive Simulator Controls Panel (only active and displayed during simulator mode in HoldingPose)
-            if (isSimulatorMode && gameState == GameState.HoldingPose) {
-                Spacer(modifier = Modifier.height(20.dp))
-                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-                Spacer(modifier = Modifier.height(14.dp))
-                
-                Text(
-                    text = "ИНТЕРАКТИВНЫЙ ТЕСТ ДЛЯ ПРОВЕРКИ (MVP DEMO):",
-                    color = DarkTertiary,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = onTriggerDrift,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = DarkPrimary),
-                        border = BorderStroke(1.dp, DarkPrimary.copy(alpha = 0.4f)),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("Сдвинуться (Drift)", fontSize = 11.sp)
-                    }
-
-                    OutlinedButton(
-                        onClick = onTriggerMotion,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = DarkPrimary),
-                        border = BorderStroke(1.dp, DarkPrimary.copy(alpha = 0.4f)),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("Резкий толчок (Motion)", fontSize = 11.sp)
-                    }
-                }
-            }
-
             Spacer(modifier = Modifier.height(16.dp))
 
             // Footer tips
@@ -857,7 +682,6 @@ fun GemmaDownloadScreen(
     downloadProgress: Float,
     downloadBytesInfo: String,
     onStartDownload: () -> Unit,
-    onSkipForTesting: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -910,7 +734,7 @@ fun GemmaDownloadScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Для локальной проверки осанки и полной конфиденциальности требуется установить веса модели Gemma-4-E4B-it (LiteRT-LM) размером ~3.4 ГБ. Приложение работает без интернета, кадры не отправляются на сервер.",
+                    text = "Для локальной проверки осанки и полной конфиденциальности требуется установить веса модели Gemma-4-E4B-it (LiteRT-LM) размером ~3.66 ГБ. Приложение работает без интернета, кадры не отправляются на сервер.",
                     color = Color.White.copy(alpha = 0.7f),
                     fontSize = 14.sp,
                     lineHeight = 20.sp,
@@ -937,7 +761,7 @@ fun GemmaDownloadScreen(
                     )
                     Spacer(modifier = Modifier.width(16.dp))
                     Text(
-                        text = "Внимание: Размер модели ~3.4 ГБ. Для скачивания настоятельно рекомендуется Wi-Fi соединение во избежание расходов мобильного трафика.",
+                        text = "Внимание: Размер модели ~3.66 ГБ. Для скачивания настоятельно рекомендуется Wi-Fi соединение во избежание расходов мобильного трафика.",
                         color = Color.White.copy(alpha = 0.85f),
                         fontSize = 12.sp,
                         lineHeight = 16.sp,
@@ -985,21 +809,6 @@ fun GemmaDownloadScreen(
                             color = DarkOnPrimary,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    androidx.compose.material3.TextButton(
-                        onClick = onSkipForTesting,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("skip_download_button")
-                    ) {
-                        Text(
-                            text = "Пропустить для симуляции >",
-                            color = DarkTertiary,
-                            fontSize = 14.sp
                         )
                     }
                 }

@@ -140,34 +140,6 @@ class PoseLandmarkerService(
         listener.onResults(pose, width, height)
     }
 
-    // Generate simulated ideal posture with minor noise
-    fun generateSimulatedPose(
-        timestamp: Long,
-        driftOffset: Float = 0f,
-        motionOffset: Float = 0f
-    ): PoseLandmarks {
-        val breathe = kotlin.math.sin(timestamp.toDouble() / 500.0).toFloat() * 0.005f
-        val driftX = driftOffset
-        val driftY = driftOffset * 0.5f
-
-        val jitterX = ((timestamp % 17).toFloat() / 1700f) * motionOffset
-        val jitterY = ((timestamp % 13).toFloat() / 1300f) * motionOffset
-
-        val offsetTotalX = driftX + jitterX
-        val offsetTotalY = driftY + jitterY + breathe
-
-        return PoseLandmarks(
-            leftShoulder = Point3D(0.40f + offsetTotalX, 0.35f + offsetTotalY, 0.1f),
-            rightShoulder = Point3D(0.60f + offsetTotalX, 0.35f + offsetTotalY, 0.1f),
-            leftElbow = Point3D(0.35f + offsetTotalX, 0.45f + offsetTotalY, 0.2f),
-            rightElbow = Point3D(0.65f + offsetTotalX, 0.45f + offsetTotalY, 0.2f),
-            leftHip = Point3D(0.42f + offsetTotalX, 0.60f + offsetTotalY, 0.0f),
-            rightHip = Point3D(0.58f + offsetTotalX, 0.60f + offsetTotalY, 0.0f),
-            leftKnee = Point3D(0.45f + offsetTotalX, 0.80f + offsetTotalY, -0.1f),
-            rightKnee = Point3D(0.55f + offsetTotalX, 0.80f + offsetTotalY, -0.1f)
-        )
-    }
-
     fun close() {
         poseLandmarker?.close()
     }
