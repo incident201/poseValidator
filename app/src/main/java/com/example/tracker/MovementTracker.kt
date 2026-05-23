@@ -49,8 +49,8 @@ class MovementTracker {
 
     // Configuration / Thresholds from TZ Section 8
     // Thresholds are normalized relative to bodyScale
-    var driftThresholdFactor: Float = 0.34f
-    var motionThresholdFactor: Float = 0.24f
+    var driftThresholdFactor: Float = 0.46f
+    var motionThresholdFactor: Float = 0.32f
 
     var referencePose: PoseLandmarks? = null
     var previousPose: PoseLandmarks? = null
