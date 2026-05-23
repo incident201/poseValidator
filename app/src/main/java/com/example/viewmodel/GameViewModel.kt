@@ -343,9 +343,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _motionScore.value = 0f
         movementTracker.reset()
     }
-    }
-        }
-    }
 
     private fun formatTime(seconds: Int): String {
         val mins = seconds / 60
