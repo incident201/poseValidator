@@ -71,6 +71,21 @@ fun CameraScreen(
     val isSimulatorEnabled by viewModel.isSimulatorEnabled.collectAsState()
     val isAIVersionAvailable by viewModel.isAIVersionAvailable.collectAsState()
 
+    val downloadProgress by viewModel.downloadProgress.collectAsState()
+    val downloadBytesInfo by viewModel.downloadBytesInfo.collectAsState()
+
+    if (gameState == GameState.ModelDownloadRequired || gameState == GameState.ModelDownloading) {
+        GemmaDownloadScreen(
+            gameState = gameState,
+            downloadProgress = downloadProgress,
+            downloadBytesInfo = downloadBytesInfo,
+            onStartDownload = { viewModel.startModelDownload() },
+            onSkipForTesting = { viewModel.skipDownloadForTesting() },
+            modifier = modifier
+        )
+        return
+    }
+
     // Camera Permissions State
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -131,7 +146,8 @@ fun CameraScreen(
         HeaderArea(
             onToggleSimulator = { viewModel.setSimulatorEnabled(!isSimulatorEnabled) },
             isSimulatorEnabled = isSimulatorEnabled,
-            isAIPossible = isAIVersionAvailable
+            isAIPossible = isAIVersionAvailable,
+            onDeleteModel = { viewModel.deleteModelForTesting() }
         )
 
         // 2. Camera feed viewport with overlay graphics
@@ -251,7 +267,8 @@ fun CameraScreen(
 fun HeaderArea(
     onToggleSimulator: () -> Unit,
     isSimulatorEnabled: Boolean,
-    isAIPossible: Boolean
+    isAIPossible: Boolean,
+    onDeleteModel: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -267,7 +284,8 @@ fun HeaderArea(
                 modifier = Modifier
                     .size(34.dp)
                     .clip(CircleShape)
-                    .background(DarkPrimary),
+                    .background(DarkPrimary)
+                    .clickable { onDeleteModel() },
                 contentAlignment = Alignment.Center
             ) {
                 Box(
@@ -311,7 +329,7 @@ fun HeaderArea(
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = if (isSimulatorEnabled) "SIMULATOR" else if (isAIPossible) "A.I. MODE" else "NO API KEY",
+                text = if (isSimulatorEnabled) "SIMULATOR" else if (isAIPossible) "A.I. MODE" else "ACTIVE-CAM",
                 color = if (isSimulatorEnabled) Color.White else DarkPrimary,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
@@ -623,9 +641,12 @@ fun BottomHUDEngine(
             // Status/Instruction Box
             Column(modifier = Modifier.fillMaxWidth()) {
                 val stateHeadline = when (gameState) {
+                    GameState.ModelDownloadRequired -> "НУЖНА ЗАГРУЗКА"
+                    GameState.ModelDownloading -> "СКАЧИВАНИЕ МОДЕЛИ..."
                     GameState.Idle -> "ЖДЁМ СТАРТА"
                     GameState.CheckingStartPose -> "АНАЛИЗИРУЕМ С Gemma VLM..."
                     GameState.HoldingPose -> "СТАБИЛИЗАЦИЯ ТЕЛА"
+                    GameState.CheckingControlPose -> "ПРОМЕЖУТОЧНАЯ Gemma ПРОВЕРКА..."
                     GameState.CheckingFinalPose -> "ФИНАЛЬНАЯ ПРОВЕРКА Gemma..."
                     GameState.Success -> "ПОЗДРАВЛЯЕМ! ПОБЕДА"
                     GameState.Failed -> "ПОВАЛЕНО"
@@ -828,4 +849,161 @@ private fun rotateBitmap(bitmap: Bitmap, rotationDegrees: Int): Bitmap {
     val matrix = android.graphics.Matrix()
     matrix.postRotate(rotationDegrees.toFloat())
     return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+}
+
+@Composable
+fun GemmaDownloadScreen(
+    gameState: GameState,
+    downloadProgress: Float,
+    downloadBytesInfo: String,
+    onStartDownload: () -> Unit,
+    onSkipForTesting: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(DarkBg)
+            .windowInsetsPadding(WindowInsets.safeDrawing),
+        contentAlignment = Alignment.Center
+    ) {
+        androidx.compose.material3.Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = DarkSurface),
+            shape = RoundedCornerShape(32.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                // Info icon inside circle
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(DarkPrimary.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "Download Info",
+                        tint = DarkPrimary,
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text(
+                    text = "Gemma-4-E4B-it",
+                    color = Color.White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Для локальной проверки осанки и полной конфиденциальности требуется установить веса модели Gemma-4-E4B-it (LiteRT-LM). Приложение работает без интернета, кадры не отправляются на сервер.",
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Network Warning panel
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(AccentRed.copy(alpha = 0.1f))
+                        .border(1.dp, AccentRed.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = "Warning",
+                        tint = DarkPrimary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(
+                        text = "Внимание: Размер модели ~1.6 ГБ. Для скачивания настоятельно рекомендуется Wi-Fi соединение во избежание расходов мобильного трафика.",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                // Progress Bar or Download Button
+                if (gameState == GameState.ModelDownloading) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        androidx.compose.material3.LinearProgressIndicator(
+                            progress = { downloadProgress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(CircleShape),
+                            color = DarkPrimary,
+                            trackColor = DarkSecondary
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = downloadBytesInfo,
+                            color = DarkPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                } else {
+                    androidx.compose.material3.Button(
+                        onClick = onStartDownload,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .testTag("download_model_button"),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = DarkPrimary),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Text(
+                            text = "СКАЧАТЬ МОДЕЛЬ",
+                            color = DarkOnPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    androidx.compose.material3.TextButton(
+                        onClick = onSkipForTesting,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("skip_download_button")
+                    ) {
+                        Text(
+                            text = "Пропустить для симуляции >",
+                            color = DarkTertiary,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
 }

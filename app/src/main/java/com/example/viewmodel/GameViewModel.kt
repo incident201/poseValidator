@@ -1,13 +1,15 @@
 package com.example.viewmodel
 
+import android.app.Application
 import android.graphics.Bitmap
 import android.os.SystemClock
 import android.util.Log
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.tracker.MovementTracker
 import com.example.tracker.Point3D
 import com.example.tracker.PoseLandmarks
+import com.example.validator.GemmaModelManager
 import com.example.validator.GemmaPoseValidator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,15 +21,18 @@ import kotlinx.coroutines.launch
 import kotlin.random.Random
 
 enum class GameState {
+    ModelDownloadRequired,
+    ModelDownloading,
     Idle,
     CheckingStartPose,
     HoldingPose,
+    CheckingControlPose,
     CheckingFinalPose,
     Success,
     Failed
 }
 
-class GameViewModel : ViewModel() {
+class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val TAG = "GameViewModel"
 
     private val _gameState = MutableStateFlow(GameState.Idle)
@@ -49,14 +54,21 @@ class GameViewModel : ViewModel() {
     val motionScore: StateFlow<Float> = _motionScore.asStateFlow()
 
     // Thresholds
-    private val _driftThreshold = MutableStateFlow(0.075f) // Approximate normalized threshold for display
+    private val _driftThreshold = MutableStateFlow(0.075f) 
     val driftThreshold: StateFlow<Float> = _driftThreshold.asStateFlow()
 
-    private val _motionThreshold = MutableStateFlow(0.054f) // Approximate normalized threshold for display
+    private val _motionThreshold = MutableStateFlow(0.054f) 
     val motionThreshold: StateFlow<Float> = _motionThreshold.asStateFlow()
 
+    // Download variables
+    private val _downloadProgress = MutableStateFlow(0f)
+    val downloadProgress: StateFlow<Float> = _downloadProgress.asStateFlow()
+
+    private val _downloadBytesInfo = MutableStateFlow("0 / 0 MB")
+    val downloadBytesInfo: StateFlow<String> = _downloadBytesInfo.asStateFlow()
+
     // Debugging and Simulation Aids
-    private val _isSimulatorEnabled = MutableStateFlow(true) // Default to true because emulator has no real person kneeling in front of back-camera
+    private val _isSimulatorEnabled = MutableStateFlow(false) // Set to false so the camera is active by default as requested!
     val isSimulatorEnabled: StateFlow<Boolean> = _isSimulatorEnabled.asStateFlow()
 
     private val _isAIVersionAvailable = MutableStateFlow(false)
@@ -64,6 +76,7 @@ class GameViewModel : ViewModel() {
 
     // Active AI/MediaPipe tracking values
     private var latestBitmap: Bitmap? = null
+    private var latestLandmarks: PoseLandmarks? = null
     private val movementTracker = MovementTracker()
     private var timerJob: Job? = null
 
@@ -75,10 +88,51 @@ class GameViewModel : ViewModel() {
     var simMotionOffset = 0f
 
     init {
-        // Evaluate if Gemini Key is available
+        // Initialize based on whether local gemma model is downloaded
+        if (GemmaModelManager.isModelDownloaded(application)) {
+            _gameState.value = GameState.Idle
+            _statusMessage.value = "Поставь телефон и встань в позу"
+        } else {
+            _gameState.value = GameState.ModelDownloadRequired
+            _statusMessage.value = "Требуется скачать локальную Gemma модель"
+        }
+
         val apiKey = com.example.BuildConfig.GEMINI_API_KEY
         if (apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY") {
             _isAIVersionAvailable.value = true
+        }
+    }
+
+    fun startModelDownload() {
+        if (_gameState.value != GameState.ModelDownloadRequired) return
+        _gameState.value = GameState.ModelDownloading
+        _statusMessage.value = "Скачивание модели... Пожалуйста, не закрывайте экран."
+
+        viewModelScope.launch {
+            val success = GemmaModelManager.downloadModel(getApplication()) { progress, downloaded, total ->
+                _downloadProgress.value = progress
+                _downloadBytesInfo.value = String.format("%.1f MB / %.1f MB (%.0f%%)", downloaded, total, progress * 100)
+            }
+            if (success) {
+                _gameState.value = GameState.Idle
+                _statusMessage.value = "Модель успешно загружена! Камера активна."
+            } else {
+                _gameState.value = GameState.ModelDownloadRequired
+                _statusMessage.value = "Ошибка скачивания. Пожалуйста, попробуйте снова."
+            }
+        }
+    }
+
+    fun skipDownloadForTesting() {
+        _gameState.value = GameState.Idle
+        _statusMessage.value = "Встань на колени спиной к камере. Нажми Старт."
+    }
+
+    fun deleteModelForTesting() {
+        viewModelScope.launch {
+            GemmaModelManager.deleteModel(getApplication())
+            _gameState.value = GameState.ModelDownloadRequired
+            _statusMessage.value = "Модель успешно удалена!"
         }
     }
 
@@ -91,9 +145,11 @@ class GameViewModel : ViewModel() {
     }
 
     fun processMediaPipeResults(pose: PoseLandmarks, timestamp: Long) {
+        latestLandmarks = pose
         val state = _gameState.value
-        if (state != GameState.HoldingPose) {
-            // Keep scores updated in idle / checking
+        
+        // Feed landmarks to movement tracker when we are in posture holding / checking control states
+        if (state != GameState.HoldingPose && state != GameState.CheckingControlPose) {
             val scale = pose.getBodyScale()
             _driftThreshold.value = movementTracker.driftThresholdFactor * scale
             _motionThreshold.value = movementTracker.motionThresholdFactor * scale
@@ -162,7 +218,6 @@ class GameViewModel : ViewModel() {
 
         viewModelScope.launch {
             if (_isSimulatorEnabled.value) {
-                // Introduce simulated delay
                 delay(1500)
                 initiateHoldingState()
             } else {
@@ -174,14 +229,15 @@ class GameViewModel : ViewModel() {
                     return@launch
                 }
 
-                val aiResult = GemmaPoseValidator.validatePose(bitmapSnapshot)
+                // Check local Gemma + landmark heuristics validation
+                val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot, latestLandmarks)
                 if (aiResult.isPassed) {
                     initiateHoldingState()
                 } else {
                     _gameState.value = GameState.Failed
                     _statusMessage.value = "Проверка позы не пройдена"
                     _defeatReason.value = "Стартовая поза не распознана"
-                    Log.e(TAG, "Gemma start failed. Output: ${aiResult.rawJson}")
+                    Log.e(TAG, "Local Gemma verification failed. Result: ${aiResult.rawJson}")
                 }
             }
         }
@@ -193,11 +249,9 @@ class GameViewModel : ViewModel() {
 
         // Initialize landmarks reference
         val initialPose = if (_isSimulatorEnabled.value) {
-            // Simulated baseline pose
             generateSimulatedBaseline()
         } else {
-            // Ideally grabbed from real MediaPipe frame inside frame analysis
-            generateSimulatedBaseline()
+            latestLandmarks ?: generateSimulatedBaseline()
         }
         movementTracker.startTracking(initialPose)
 
@@ -222,10 +276,8 @@ class GameViewModel : ViewModel() {
     }
 
     private fun scheduleNextCheckpoint() {
-        // "примерно раз в 30 секунд, лучше с небольшим случайным смещением, например 25–40 секунд"
         val remaining = _timerSeconds.value
         if (remaining <= 35) {
-            // Avoid scheduling checkpoint right before final check
             nextCheckpointSeconds = -1
         } else {
             val gap = Random.nextInt(25, 41)
@@ -257,17 +309,22 @@ class GameViewModel : ViewModel() {
 
     private suspend fun triggerPeriodicCheckpoint() {
         Log.i(TAG, "Triggering periodic checkpoint. Time = ${_timerSeconds.value}s remaining")
+        
+        val prevState = _gameState.value
+        _gameState.value = GameState.CheckingControlPose
         _statusMessage.value = "Проверяю позу..."
 
         if (_isSimulatorEnabled.value) {
             delay(1200) // Simulated AI delay
+            _gameState.value = GameState.HoldingPose
             _statusMessage.value = "Поза подтверждена"
             scheduleNextCheckpoint()
         } else {
             val bitmapSnapshot = latestBitmap
             if (bitmapSnapshot != null) {
-                val aiResult = GemmaPoseValidator.validatePose(bitmapSnapshot)
+                val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot, latestLandmarks)
                 if (aiResult.isPassed) {
+                    _gameState.value = GameState.HoldingPose
                     _statusMessage.value = "Поза подтверждена"
                     scheduleNextCheckpoint()
                 } else {
@@ -298,7 +355,7 @@ class GameViewModel : ViewModel() {
                     return@launch
                 }
 
-                val aiResult = GemmaPoseValidator.validatePose(bitmapSnapshot)
+                val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot, latestLandmarks)
                 if (aiResult.isPassed) {
                     _gameState.value = GameState.Success
                     _statusMessage.value = "Победа"
@@ -329,7 +386,7 @@ class GameViewModel : ViewModel() {
     fun stopSession() {
         timerJob?.cancel()
         _gameState.value = GameState.Idle
-        _statusMessage.value = "Поставь телефон и встань в позу"
+        _statusMessage.value = "Встань на колени спиной к камере. Нажми Старт."
         _defeatReason.value = ""
         simDriftOffset = 0f
         simMotionOffset = 0f
@@ -338,11 +395,9 @@ class GameViewModel : ViewModel() {
         movementTracker.reset()
     }
 
-    // Interactive Demo Actions for Assessors
     fun simulateDriftStep() {
         if (_gameState.value == GameState.HoldingPose) {
-            simDriftOffset += 0.06f // Increases step by step to breach drift (factor 0.25)
-            // Trigger feedback in ViewModel execution
+            simDriftOffset += 0.06f 
             val simulatedPose = generateInteractiveSimulatedPose()
             processMediaPipeResults(simulatedPose, SystemClock.elapsedRealtime())
         }
@@ -350,11 +405,10 @@ class GameViewModel : ViewModel() {
 
     fun simulateSuddenMotion() {
         if (_gameState.value == GameState.HoldingPose) {
-            simMotionOffset = 0.25f // Brief peak to breach motion (factor 0.18)
+            simMotionOffset = 0.25f 
             val simulatedPose = generateInteractiveSimulatedPose()
             processMediaPipeResults(simulatedPose, SystemClock.elapsedRealtime())
             
-            // Decays after a brief delay
             viewModelScope.launch {
                 delay(150)
                 simMotionOffset = 0f
@@ -383,5 +437,10 @@ class GameViewModel : ViewModel() {
         val mins = seconds / 60
         val secs = seconds % 60
         return String.format("%02d:%02d", mins, secs)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        GemmaPoseValidator.close()
     }
 }
