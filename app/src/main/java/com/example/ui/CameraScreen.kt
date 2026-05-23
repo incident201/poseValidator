@@ -9,6 +9,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.*
@@ -49,6 +51,7 @@ import com.example.ui.theme.*
 import com.example.viewmodel.GameState
 import com.example.viewmodel.GameViewModel
 import java.io.ByteArrayOutputStream
+import android.util.Size
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -165,6 +168,16 @@ fun CameraScreen(
 
                             val imageAnalysis = ImageAnalysis.Builder()
                                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                .setResolutionSelector(
+                                    ResolutionSelector.Builder()
+                                        .setResolutionStrategy(
+                                            ResolutionStrategy(
+                                                Size(640, 480),
+                                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                                            )
+                                        )
+                                        .build()
+                                )
                                 .build()
 
                             imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
@@ -178,11 +191,12 @@ fun CameraScreen(
                                         bitmap
                                     }
 
+                                    val analysisBitmap = resizeBitmapLongSide(finalBitmap, 640)
                                     // Pipe to ViewModel current frame bitmap
-                                    viewModel.setLatestBitmap(finalBitmap)
+                                    viewModel.setLatestBitmap(analysisBitmap)
 
                                     // Run landmarker detection
-                                    landmarkerService?.detectLiveStreamFrame(finalBitmap, System.currentTimeMillis())
+                                    landmarkerService?.detectLiveStreamFrame(analysisBitmap, System.currentTimeMillis())
                                 } catch (e: Exception) {
                                     Log.e("CameraScreen", "Frame analysis failed", e)
                                 } finally {
@@ -462,6 +476,18 @@ private fun rotateBitmap(bitmap: Bitmap, rotationDegrees: Int): Bitmap {
     val matrix = android.graphics.Matrix()
     matrix.postRotate(rotationDegrees.toFloat())
     return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+}
+
+private fun resizeBitmapLongSide(bitmap: Bitmap, maxLongSide: Int): Bitmap {
+    val width = bitmap.width
+    val height = bitmap.height
+    val longSide = maxOf(width, height)
+    if (longSide <= maxLongSide) return bitmap
+
+    val scale = maxLongSide.toFloat() / longSide.toFloat()
+    val newWidth = (width * scale).toInt().coerceAtLeast(1)
+    val newHeight = (height * scale).toInt().coerceAtLeast(1)
+    return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
 }
 
 @Composable
