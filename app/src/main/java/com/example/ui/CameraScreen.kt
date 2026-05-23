@@ -3,6 +3,7 @@ package com.example.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -51,6 +52,7 @@ import com.example.ui.theme.*
 import com.example.viewmodel.GameState
 import com.example.viewmodel.GameViewModel
 import java.io.ByteArrayOutputStream
+import java.util.Locale
 import android.util.Size
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -62,6 +64,7 @@ fun CameraScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    VoiceAnnouncer(viewModel = viewModel)
 
     val gameState by viewModel.gameState.collectAsState()
     val timerSeconds by viewModel.timerSeconds.collectAsState()
@@ -238,6 +241,61 @@ fun CameraScreen(
             onStart = { viewModel.startSession() },
             onStop = { viewModel.stopSession() }
         )
+    }
+}
+
+@Composable
+private fun VoiceAnnouncer(viewModel: GameViewModel) {
+    val context = LocalContext.current
+    val pendingMessages = remember { mutableStateListOf<String>() }
+    var tts by remember { mutableStateOf<TextToSpeech?>(null) }
+    var isReady by remember { mutableStateOf(false) }
+
+    DisposableEffect(context) {
+        lateinit var engine: TextToSpeech
+        engine = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                val result = engine.setLanguage(Locale("ru", "RU"))
+                isReady = result != TextToSpeech.LANG_MISSING_DATA &&
+                    result != TextToSpeech.LANG_NOT_SUPPORTED
+
+                if (isReady) {
+                    pendingMessages.forEach { message ->
+                        engine.speak(
+                            message,
+                            TextToSpeech.QUEUE_FLUSH,
+                            null,
+                            "voice_${System.currentTimeMillis()}"
+                        )
+                    }
+                    pendingMessages.clear()
+                }
+            }
+        }
+        tts = engine
+
+        onDispose {
+            engine.stop()
+            engine.shutdown()
+            tts = null
+            isReady = false
+        }
+    }
+
+    LaunchedEffect(viewModel, tts, isReady) {
+        viewModel.voiceEvents.collect { message ->
+            val engine = tts
+            if (isReady && engine != null) {
+                engine.speak(
+                    message,
+                    TextToSpeech.QUEUE_FLUSH,
+                    null,
+                    "voice_${System.currentTimeMillis()}"
+                )
+            } else {
+                pendingMessages.add(message)
+            }
+        }
     }
 }
 

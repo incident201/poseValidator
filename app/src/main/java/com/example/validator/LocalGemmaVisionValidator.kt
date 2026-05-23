@@ -19,7 +19,7 @@ import java.io.FileOutputStream
 data class LocalGemmaJsonOutput(
     @com.squareup.moshi.Json(name = "person_present") val personPresent: Boolean?,
     @com.squareup.moshi.Json(name = "facing_away") val facingAway: Boolean?,
-    @com.squareup.moshi.Json(name = "kneeling") val kneeling: Boolean?
+    @com.squareup.moshi.Json(name = "naked") val naked: Boolean?
 )
 
 object LocalGemmaVisionValidator {
@@ -94,10 +94,10 @@ Look at the image and answer only with JSON.
 Questions:
 1. Is a person present?
 2. Is the person facing away from the camera?
-3. Is the person kneeling?
+3. Is the person naked?
 
 JSON format:
-{"person_present":true,"facing_away":true,"kneeling":true}
+{"person_present":true,"facing_away":true,"naked":true}
 
 Use only true or false.
 """.trimIndent()
@@ -135,8 +135,8 @@ Use only true or false.
                 cleanJson.contains("\"facing_away\"\\s*:\\s*true".toRegex(RegexOption.IGNORE_CASE)) || 
                 cleanJson.contains("\"facingAway\"\\s*:\\s*true".toRegex(RegexOption.IGNORE_CASE))
             )
-            val kneeling = parsedResult?.kneeling ?: (
-                cleanJson.contains("\"kneeling\"\\s*:\\s*true".toRegex(RegexOption.IGNORE_CASE))
+            val naked = parsedResult?.naked ?: (
+                cleanJson.contains("\"naked\"\\s*:\\s*true".toRegex(RegexOption.IGNORE_CASE))
             )
 
             // Cleanup the temporary image file
@@ -149,8 +149,8 @@ Use only true or false.
             return@withContext PoseValidationResult(
                 personPresent = personPresent,
                 facingAway = facingAway,
-                kneeling = kneeling,
-                isPassed = personPresent && facingAway && kneeling,
+                naked = naked,
+                isPassed = personPresent && facingAway && naked,
                 rawJson = cleanJson
             )
         } catch (t: Throwable) {
@@ -158,7 +158,7 @@ Use only true or false.
             return@withContext PoseValidationResult(
                 personPresent = false,
                 facingAway = false,
-                kneeling = false,
+                naked = false,
                 isPassed = false,
                 rawJson = "{\"error\": \"Local Gemma validation failed: ${t.message}\"}"
             )

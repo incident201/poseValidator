@@ -7,7 +7,7 @@ import com.example.tracker.PoseLandmarks
 data class PoseValidationResult(
     val personPresent: Boolean,
     val facingAway: Boolean,
-    val kneeling: Boolean,
+    val naked: Boolean,
     val isPassed: Boolean,
     val rawJson: String? = null
 )
