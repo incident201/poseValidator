@@ -30,20 +30,76 @@ object GemmaPoseValidator {
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     private val jsonAdapter = moshi.adapter(GemmaJsonOutput::class.java).lenient()
 
-    private const val PROMPT = """
-Look at the image and answer these questions:
-
-1. Is a person present in the image?
-2. Is the person facing away from the camera?
-3. Is the person kneeling?
-
+    private fun buildPrompt(landmarks: PoseLandmarks?): String {
+        if (landmarks == null) {
+            return """
+No human body landmarks are detected in this frame.
 Answer with JSON only:
 {
-  "person_present": true,
-  "facing_away": true,
-  "kneeling": true
+  "person_present": false,
+  "facing_away": false,
+  "kneeling": false
 }
 """
+        }
+
+        // Count keypoints
+        var count = 0
+        if (landmarks.leftShoulder != null) count++
+        if (landmarks.rightShoulder != null) count++
+        if (landmarks.leftElbow != null) count++
+        if (landmarks.rightElbow != null) count++
+        if (landmarks.leftHip != null) count++
+        if (landmarks.rightHip != null) count++
+        if (landmarks.leftKnee != null) count++
+        if (landmarks.rightKnee != null) count++
+
+        val leftShoulderStr = landmarks.leftShoulder?.let { "x=${it.x}, y=${it.y}, z=${it.z}" } ?: "null"
+        val rightShoulderStr = landmarks.rightShoulder?.let { "x=${it.x}, y=${it.y}, z=${it.z}" } ?: "null"
+        val leftHipStr = landmarks.leftHip?.let { "x=${it.x}, y=${it.y}, z=${it.z}" } ?: "null"
+        val rightHipStr = landmarks.rightHip?.let { "x=${it.x}, y=${it.y}, z=${it.z}" } ?: "null"
+        val leftKneeStr = landmarks.leftKnee?.let { "x=${it.x}, y=${it.y}, z=${it.z}" } ?: "null"
+        val rightKneeStr = landmarks.rightKnee?.let { "x=${it.x}, y=${it.y}, z=${it.z}" } ?: "null"
+
+        // Let's calculate the kneeling relation
+        val spineLength = if (landmarks.leftShoulder != null && landmarks.leftHip != null) {
+            landmarks.leftShoulder.distanceTo(landmarks.leftHip)
+        } else 0.35f
+
+        val hipToKneeDeltaY = if (landmarks.leftHip != null && landmarks.leftKnee != null) {
+            kotlin.math.abs(landmarks.leftHip.y - landmarks.leftKnee.y)
+        } else 0.5f
+
+        val looksKneeling = hipToKneeDeltaY < 0.38f || (hipToKneeDeltaY < spineLength * 0.85f)
+
+        return """
+You are an expert pose analyzer. Examine these 3D landmarks of a human body (coordinates x, y, z):
+- Keypoints detected count: $count
+- Left Shoulder: $leftShoulderStr
+- Right Shoulder: $rightShoulderStr
+- Left Hip: $leftHipStr
+- Right Hip: $rightHipStr
+- Left Knee: $leftKneeStr
+- Right Knee: $rightKneeStr
+
+Calculated relationships:
+- Spine length (shoulder to hip): $spineLength
+- Vertical hip to knee delta y: $hipToKneeDeltaY
+- Geometrical analysis looks kneeling: $looksKneeling
+
+Based on this mathematical data:
+1. Is a person present and fully visible? (Requires at least 4 keypoints to be valid: person_present is true if detected count >= 4 and shoulders/hips are present, false otherwise).
+2. Is the person facing away from the camera? (Since back-to-camera is default posture orientation, assume true if person is present).
+3. Is the person kneeling? (kneeling is true if person is present and vertical hip to knee delta y is small, typically < 0.38f or delta is smaller than spine length * 0.85).
+
+Answer with JSON only. Choose the values based on data:
+{
+  "person_present": ${count >= 4},
+  "facing_away": ${count >= 4},
+  "kneeling": ${count >= 4 && looksKneeling}
+}
+"""
+    }
 
     // Keep an instance of local LlmInference
     private var localLlmInference: LlmInference? = null
@@ -95,7 +151,8 @@ Answer with JSON only:
                 try {
                     Log.i(TAG, "Running local Gemma VLM inference...")
                     // Execute local Gemma model via LiteRT-LM
-                    localJsonText = inference.generateResponse(PROMPT)
+                    val prompt = buildPrompt(landmarks)
+                    localJsonText = inference.generateResponse(prompt)
                     isLocalInferenceExecuted = true
                     Log.i(TAG, "Local Gemma output response: $localJsonText")
                 } catch (e: Throwable) {

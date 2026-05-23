@@ -194,7 +194,7 @@ fun CameraScreen(
                                     viewModel.setLatestBitmap(finalBitmap)
 
                                     // Run landmarker detection
-                                    landmarkerService?.detectLiveStreamFrame(imageProxy, System.currentTimeMillis())
+                                    landmarkerService?.detectLiveStreamFrame(finalBitmap, System.currentTimeMillis())
                                 } catch (e: Exception) {
                                     Log.e("CameraScreen", "Frame analysis failed", e)
                                 } finally {
@@ -910,7 +910,7 @@ fun GemmaDownloadScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Для локальной проверки осанки и полной конфиденциальности требуется установить веса модели Gemma-4-E4B-it (LiteRT-LM). Приложение работает без интернета, кадры не отправляются на сервер.",
+                    text = "Для локальной проверки осанки и полной конфиденциальности требуется установить веса модели Gemma-4-E4B-it (LiteRT-LM) размером ~3.4 ГБ. Приложение работает без интернета, кадры не отправляются на сервер.",
                     color = Color.White.copy(alpha = 0.7f),
                     fontSize = 14.sp,
                     lineHeight = 20.sp,
@@ -937,7 +937,7 @@ fun GemmaDownloadScreen(
                     )
                     Spacer(modifier = Modifier.width(16.dp))
                     Text(
-                        text = "Внимание: Размер модели ~1.6 ГБ. Для скачивания настоятельно рекомендуется Wi-Fi соединение во избежание расходов мобильного трафика.",
+                        text = "Внимание: Размер модели ~3.4 ГБ. Для скачивания настоятельно рекомендуется Wi-Fi соединение во избежание расходов мобильного трафика.",
                         color = Color.White.copy(alpha = 0.85f),
                         fontSize = 12.sp,
                         lineHeight = 16.sp,

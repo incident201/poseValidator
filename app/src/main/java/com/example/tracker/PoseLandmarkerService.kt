@@ -7,6 +7,9 @@ import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
+import java.io.File
+import java.io.FileOutputStream
+import java.net.URL
 
 class PoseLandmarkerService(
     private val context: Context,
@@ -27,23 +30,51 @@ class PoseLandmarkerService(
     }
 
     private fun setupLandmarker() {
+        val localFile = File(context.filesDir, "pose_landmarker_full.task")
+        
+        if (localFile.exists() && localFile.length() > 5 * 1024 * 1024) {
+            initializeRealLandmarker(localFile)
+        } else {
+            isSimulated = true
+            // Asynchronously download model in background
+            Thread {
+                try {
+                    Log.i(TAG, "Downloading pose_landmarker_full.task to ${localFile.absolutePath}...")
+                    val url = URL("https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task")
+                    val connection = url.openConnection()
+                    connection.connectTimeout = 15000
+                    connection.readTimeout = 15000
+                    
+                    val inputStream = connection.getInputStream()
+                    val tempFile = File(context.filesDir, "pose_landmarker_full.task.tmp")
+                    val outputStream = FileOutputStream(tempFile)
+                    
+                    val buffer = ByteArray(8192)
+                    var bytesRead: Int
+                    while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                        outputStream.write(buffer, 0, bytesRead)
+                    }
+                    outputStream.close()
+                    inputStream.close()
+                    
+                    if (tempFile.renameTo(localFile)) {
+                        Log.i(TAG, "pose_landmarker_full.task downloaded successfully!")
+                        initializeRealLandmarker(localFile)
+                    } else {
+                        Log.e(TAG, "Failed to rename temp pose landmarker model file")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to download pose landmarker model: ${e.message}", e)
+                }
+            }.start()
+        }
+    }
+
+    private fun initializeRealLandmarker(modelFile: File) {
         try {
-            // Check if the asset exists
-            val assetExists = try {
-                context.assets.open("pose_landmarker_full.task").close()
-                true
-            } catch (e: Exception) {
-                false
-            }
-
-            if (!assetExists) {
-                Log.w(TAG, "pose_landmarker_full.task not found in assets. Falling back to Simulated landmarks.")
-                isSimulated = true
-                return
-            }
-
+            Log.i(TAG, "Initializing MediaPipe Pose Landmarker from local path: ${modelFile.absolutePath}")
             val baseOptions = BaseOptions.builder()
-                .setModelAssetPath("pose_landmarker_full.task")
+                .setModelAssetPath(modelFile.absolutePath)
                 .build()
 
             val options = PoseLandmarker.PoseLandmarkerOptions.builder()
@@ -59,48 +90,41 @@ class PoseLandmarkerService(
                 .build()
 
             poseLandmarker = PoseLandmarker.createFromOptions(context, options)
-            Log.i(TAG, "MediaPipe Pose Landmarker loaded successfully!")
             isSimulated = false
+            Log.i(TAG, "MediaPipe Pose Landmarker loaded successfully from local file!")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize MediaPipe Pose Landmarker: ${e.message}. Using Simulated landmarks.", e)
+            Log.e(TAG, "Failed to initialize MediaPipe Pose Landmarker: ${e.message}", e)
             isSimulated = true
         }
     }
 
-    fun detectLiveStreamFrame(imageProxy: androidx.camera.core.ImageProxy, timestamp: Long) {
-        if (isSimulated) {
-            // In simulation, we bypass real frame execution and generate matching pose landmarks
-            val simulatedPose = generateSimulatedPose(timestamp)
-            listener.onResults(simulatedPose, imageProxy.width, imageProxy.height)
-            return
-        }
-
-        try {
-            val bitmap = imageProxyToBitmap(imageProxy)
-            // Note: In real stream, we can pass to MediaPipe.
-            // But since this is a heavy task and might crash on emulator, we ensure safety.
-            // If poseLandmarker is available, map inputs.
-            val landmarker = poseLandmarker
-            if (landmarker != null) {
+    fun detectLiveStreamFrame(bitmap: Bitmap, timestamp: Long) {
+        val landmarker = poseLandmarker
+        if (landmarker != null) {
+            try {
                 val mpImage = com.google.mediapipe.framework.image.BitmapImageBuilder(bitmap).build()
                 landmarker.detectAsync(mpImage, timestamp)
-            } else {
-                val simulatedPose = generateSimulatedPose(timestamp)
-                listener.onResults(simulatedPose, imageProxy.width, imageProxy.height)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in detectLiveStreamFrame", e)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in detectLiveStreamFrame", e)
+        } else {
+            // Model not loaded yet (or downloading). Report empty landmarks to prevent faking a person.
+            listener.onResults(PoseLandmarks(), bitmap.width, bitmap.height)
         }
     }
 
     private fun processResult(result: PoseLandmarkerResult, width: Int, height: Int) {
         val landmarksList = result.landmarks()
         if (landmarksList.isNullOrEmpty()) {
+            listener.onResults(PoseLandmarks(), width, height)
             return
         }
 
         val firstLandmarks = landmarksList[0]
-        if (firstLandmarks.size < 33) return
+        if (firstLandmarks.size < 33) {
+            listener.onResults(PoseLandmarks(), width, height)
+            return
+        }
 
         val pose = PoseLandmarks(
             leftShoulder = Point3D(firstLandmarks[11].x(), firstLandmarks[11].y(), firstLandmarks[11].z()),
@@ -122,13 +146,10 @@ class PoseLandmarkerService(
         driftOffset: Float = 0f,
         motionOffset: Float = 0f
     ): PoseLandmarks {
-        // Human kneeling facing away model parameters
-        // Add tiny breathing oscillations to emulate realistic noise
         val breathe = kotlin.math.sin(timestamp.toDouble() / 500.0).toFloat() * 0.005f
         val driftX = driftOffset
         val driftY = driftOffset * 0.5f
 
-        // Random jitter (motion noise)
         val jitterX = ((timestamp % 17).toFloat() / 1700f) * motionOffset
         val jitterY = ((timestamp % 13).toFloat() / 1300f) * motionOffset
 
@@ -145,14 +166,6 @@ class PoseLandmarkerService(
             leftKnee = Point3D(0.45f + offsetTotalX, 0.80f + offsetTotalY, -0.1f),
             rightKnee = Point3D(0.55f + offsetTotalX, 0.80f + offsetTotalY, -0.1f)
         )
-    }
-
-    private fun imageProxyToBitmap(image: androidx.camera.core.ImageProxy): Bitmap {
-        val planeProxy = image.planes[0]
-        val buffer = planeProxy.buffer
-        val bytes = ByteArray(buffer.remaining())
-        buffer.get(bytes)
-        return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
     }
 
     fun close() {
