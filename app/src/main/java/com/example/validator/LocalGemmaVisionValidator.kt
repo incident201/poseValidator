@@ -45,38 +45,17 @@ object LocalGemmaVisionValidator {
 
         Log.i(TAG, "Initializing local LiteRT-LM Engine using ${modelFile.name}")
         
-        // Setup GPU Configuration with CPU fallback
-        return try {
-            val config = EngineConfig(
-                modelPath = modelFile.absolutePath,
-                backend = Backend.GPU(),
-                visionBackend = Backend.GPU(),
-                cacheDir = context.cacheDir.absolutePath
-            )
-            val newEngine = Engine(config)
-            newEngine.initialize()
-            engine = newEngine
-            Log.i(TAG, "Successfully initialized LiteRT-LM Engine on GPU backend")
-            newEngine
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed GPU initialization: ${e.message}. Cascading down to CPU fallback...", e)
-            try {
-                val config = EngineConfig(
-                    modelPath = modelFile.absolutePath,
-                    backend = Backend.CPU(),
-                    visionBackend = Backend.CPU(),
-                    cacheDir = context.cacheDir.absolutePath
-                )
-                val newEngine = Engine(config)
-                newEngine.initialize()
-                engine = newEngine
-                Log.i(TAG, "Successfully initialized LiteRT-LM Engine on CPU fallback")
-                newEngine
-            } catch (ex: Exception) {
-                Log.e(TAG, "Failed critically to load LiteRT-LM model even on CPU fallback: ${ex.message}", ex)
-                throw ex
-            }
-        }
+        val config = EngineConfig(
+            modelPath = modelFile.absolutePath,
+            backend = Backend.GPU(),
+            visionBackend = Backend.GPU(),
+            cacheDir = context.cacheDir.absolutePath
+        )
+        val newEngine = Engine(config)
+        newEngine.initialize()
+        engine = newEngine
+        Log.i(TAG, "Successfully initialized LiteRT-LM Engine on GPU backend")
+        return newEngine
     }
 
     private fun getResizedBitmap(image: Bitmap, maxSize: Int): Bitmap {
@@ -142,8 +121,8 @@ Use only true or false.
             // Parse response
             val parsedResult = try {
                 jsonAdapter.fromJson(cleanJson)
-            } catch (e: Exception) {
-                Log.w(TAG, "Standard parser error: ${e.message}. Using fallback regex extraction.", e)
+            } catch (t: Throwable) {
+                Log.w(TAG, "Standard parser error: ${t.message}. Using fallback regex extraction.", t)
                 null
             }
 
@@ -163,7 +142,7 @@ Use only true or false.
             // Cleanup the temporary image file
             try {
                 if (tempImgFile.exists()) tempImgFile.delete()
-            } catch (e: Exception) {
+            } catch (t: Throwable) {
                 // Ignore
             }
 
@@ -174,14 +153,14 @@ Use only true or false.
                 isPassed = personPresent && facingAway && kneeling,
                 rawJson = cleanJson
             )
-        } catch (e: Exception) {
-            Log.e(TAG, "Error performing on-device local model validation: ${e.message}", e)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Error performing on-device local model validation: ${t.message}", t)
             return@withContext PoseValidationResult(
                 personPresent = false,
                 facingAway = false,
                 kneeling = false,
                 isPassed = false,
-                rawJson = "{\"error\": \"Local Gemma validation failed: ${e.message}\"}"
+                rawJson = "{\"error\": \"Local Gemma validation failed: ${t.message}\"}"
             )
         }
     }
@@ -202,8 +181,8 @@ Use only true or false.
             engine?.close()
             engine = null
             Log.i(TAG, "LiteRT-LM Engine closed and resource handles cleared")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error closing LiteRT-LM Engine: ${e.message}", e)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Error closing LiteRT-LM Engine: ${t.message}", t)
         }
     }
 }
