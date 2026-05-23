@@ -97,10 +97,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             _statusMessage.value = "Требуется скачать локальную Gemma модель"
         }
 
-        val apiKey = com.example.BuildConfig.GEMINI_API_KEY
-        if (apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY") {
-            _isAIVersionAvailable.value = true
-        }
+        // Always enable AI designation for local Gemma implementation
+        _isAIVersionAvailable.value = true
     }
 
     fun startModelDownload() {
@@ -277,12 +275,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun scheduleNextCheckpoint() {
         val remaining = _timerSeconds.value
-        if (remaining <= 35) {
+        if (remaining <= 30) {
             nextCheckpointSeconds = -1
         } else {
-            val gap = Random.nextInt(25, 41)
-            nextCheckpointSeconds = remaining - gap
-            Log.i(TAG, "Scheduled dynamic Gemma checkpoint at $nextCheckpointSeconds seconds remaining")
+            nextCheckpointSeconds = remaining - 30
+            Log.i(TAG, "Scheduled Gemma checkpoint at $nextCheckpointSeconds seconds remaining")
         }
     }
 
