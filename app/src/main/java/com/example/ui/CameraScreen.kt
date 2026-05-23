@@ -201,8 +201,13 @@ fun CameraScreen(
                                     // Pipe to ViewModel current frame bitmap
                                     viewModel.setLatestBitmap(analysisBitmap)
 
-                                    // Run landmarker detection
-                                    landmarkerService?.detectLiveStreamFrame(analysisBitmap, System.currentTimeMillis())
+                                    // Run landmarker detection only when Gemma is not checking
+                                    if (!viewModel.isGemmaCheckingNow()) {
+                                        landmarkerService?.detectLiveStreamFrame(
+                                            analysisBitmap,
+                                            System.currentTimeMillis()
+                                        )
+                                    }
                                 } catch (e: Exception) {
                                     Log.e("CameraScreen", "Frame analysis failed", e)
                                 } finally {

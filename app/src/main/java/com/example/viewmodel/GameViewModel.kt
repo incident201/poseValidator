@@ -71,6 +71,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isGemmaChecking = MutableStateFlow(false)
     val isGemmaChecking: StateFlow<Boolean> = _isGemmaChecking.asStateFlow()
+    fun isGemmaCheckingNow(): Boolean = _isGemmaChecking.value
 
     private val _downloadProgress = MutableStateFlow(0f)
     val downloadProgress: StateFlow<Float> = _downloadProgress.asStateFlow()
@@ -271,6 +272,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 triggerDefeat("$checkName: ошибка Gemma: ${e.message}")
             } finally {
                 _isGemmaChecking.value = false
+                activeGemmaCheckJob = null
             }
         }
     }
@@ -291,7 +293,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val alreadyFailed = _gameState.value == GameState.Failed
         startDelayJob?.cancel()
         timerJob?.cancel()
-        _isGemmaChecking.value = false
         _startDelayRemainingSeconds.value = 0
         _gameState.value = GameState.Failed
         _defeatReason.value = reason

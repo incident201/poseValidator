@@ -11,7 +11,6 @@ import com.google.ai.edge.litertlm.Contents
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -31,7 +30,6 @@ object LocalGemmaVisionValidator {
     private var engine: Engine? = null
     private const val GEMMA_IMAGE_MAX_LONG_SIDE = 640
     private const val GEMMA_IMAGE_JPEG_QUALITY = 72
-    private const val GEMMA_TIMEOUT_MS = 45_000L
 
     @Synchronized
     private fun getOrInitializeEngine(context: Context): Engine {
@@ -111,10 +109,8 @@ Use only true or false.
                 Content.Text(prompt)
             )
 
-            val messageOutput = withTimeout(GEMMA_TIMEOUT_MS) {
-                localEngine.createConversation().use { conversation ->
-                    conversation.sendMessage(contentsPacket)
-                }
+            val messageOutput = localEngine.createConversation().use { conversation ->
+                conversation.sendMessage(contentsPacket)
             }
             val rawOutput = messageOutput.contents.contents.filterIsInstance<Content.Text>().firstOrNull()?.text ?: ""
             
