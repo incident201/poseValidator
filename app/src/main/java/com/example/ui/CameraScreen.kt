@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -64,6 +65,8 @@ fun CameraScreen(
     val statusMessage by viewModel.statusMessage.collectAsState()
     val defeatReason by viewModel.defeatReason.collectAsState()
     val selectedDurationSeconds by viewModel.selectedDurationSeconds.collectAsState()
+    val startDelayRemainingSeconds by viewModel.startDelayRemainingSeconds.collectAsState()
+    val isGemmaChecking by viewModel.isGemmaChecking.collectAsState()
 
     val downloadProgress by viewModel.downloadProgress.collectAsState()
     val downloadBytesInfo by viewModel.downloadBytesInfo.collectAsState()
@@ -215,6 +218,8 @@ fun CameraScreen(
             defeatReason = defeatReason,
             timerSeconds = timerSeconds,
             selectedDurationSeconds = selectedDurationSeconds,
+            startDelayRemainingSeconds = startDelayRemainingSeconds,
+            isGemmaChecking = isGemmaChecking,
             onDurationChanged = { viewModel.updateSelectedDurationMinutes(it) },
             onStart = { viewModel.startSession() },
             onStop = { viewModel.stopSession() }
@@ -225,13 +230,39 @@ fun CameraScreen(
 
 @Composable
 fun DurationPicker(selectedMinutes: Int, onMinutesChanged: (Int) -> Unit) {
-    OutlinedTextField(
-        value = selectedMinutes.toString(),
-        onValueChange = { onMinutesChanged(it.toIntOrNull() ?: 3) },
-        label = { Text("Минуты (мин. 3)") },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth()
-    )
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Длительность (минуты)",
+            color = Color.White.copy(alpha = 0.9f),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(DarkBg)
+                .border(1.dp, DarkSecondary, RoundedCornerShape(16.dp))
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = { onMinutesChanged((selectedMinutes - 1).coerceAtLeast(3)) }) {
+                Text("−", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+            }
+            Text(
+                text = "$selectedMinutes мин",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center
+            )
+            IconButton(onClick = { onMinutesChanged((selectedMinutes + 1).coerceAtMost(120)) }) {
+                Icon(Icons.Default.Add, contentDescription = "Увеличить", tint = Color.White)
+            }
+        }
+    }
 }
 
 @Composable
@@ -241,6 +272,8 @@ fun BottomHUDEngine(
     defeatReason: String,
     timerSeconds: Int,
     selectedDurationSeconds: Int,
+    startDelayRemainingSeconds: Int,
+    isGemmaChecking: Boolean,
     onDurationChanged: (Int) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit
@@ -263,6 +296,7 @@ fun BottomHUDEngine(
                     GameState.ModelDownloadRequired -> "НУЖНА ЗАГРУЗКА"
                     GameState.ModelDownloading -> "СКАЧИВАНИЕ МОДЕЛИ..."
                     GameState.Idle -> "ЖДЁМ СТАРТА"
+                    GameState.StartingDelay -> "СТАРТ ЧЕРЕЗ ${startDelayRemainingSeconds}s"
                     GameState.CheckingStartPose -> "АНАЛИЗИРУЕМ С Gemma VLM..."
                     GameState.HoldingPose -> "СТАБИЛИЗАЦИЯ ТЕЛА"
                     GameState.CheckingControlPose -> "ПРОМЕЖУТОЧНАЯ Gemma ПРОВЕРКА..."
@@ -291,6 +325,32 @@ fun BottomHUDEngine(
                     fontWeight = FontWeight.Light,
                     lineHeight = 24.sp
                 )
+
+                if (isGemmaChecking) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(DarkPrimary.copy(alpha = 0.2f))
+                            .border(1.dp, DarkPrimary, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = DarkPrimary,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Идёт проверка Gemma... Не двигайтесь",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
 
                 if (defeatReason.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(4.dp))

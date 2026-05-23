@@ -22,6 +22,7 @@ enum class GameState {
     ModelDownloadRequired,
     ModelDownloading,
     Idle,
+    StartingDelay,
     CheckingStartPose,
     HoldingPose,
     CheckingControlPose,
@@ -33,6 +34,7 @@ enum class GameState {
 class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val TAG = "GameViewModel"
     private val minimumDurationSeconds = 180
+    private val startDelaySeconds = 10
 
     private val _gameState = MutableStateFlow(GameState.Idle)
     val gameState: StateFlow<GameState> = _gameState.asStateFlow()
@@ -60,6 +62,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _motionThreshold = MutableStateFlow(0.054f)
     val motionThreshold: StateFlow<Float> = _motionThreshold.asStateFlow()
+
+    private val _startDelayRemainingSeconds = MutableStateFlow(0)
+    val startDelayRemainingSeconds: StateFlow<Int> = _startDelayRemainingSeconds.asStateFlow()
+
+    private val _isGemmaChecking = MutableStateFlow(false)
+    val isGemmaChecking: StateFlow<Boolean> = _isGemmaChecking.asStateFlow()
 
     private val _downloadProgress = MutableStateFlow(0f)
     val downloadProgress: StateFlow<Float> = _downloadProgress.asStateFlow()
@@ -156,11 +164,31 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
         movementTracker.startTracking(initialPose)
         _timerSeconds.value = _selectedDurationSeconds.value.coerceAtLeast(minimumDurationSeconds)
-        _gameState.value = GameState.HoldingPose
-        _statusMessage.value = "Таймер запущен. Проверяю стартовую позу..."
+        startDelayThenSession(bitmapSnapshot)
+    }
 
-        startTimerLoop()
-        launchGemmaCheck(checkName = "Стартовая проверка", snapshot = bitmapSnapshot)
+    private fun startDelayThenSession(initialSnapshot: Bitmap) {
+        timerJob?.cancel()
+        timerJob = viewModelScope.launch {
+            _gameState.value = GameState.StartingDelay
+            for (seconds in startDelaySeconds downTo 1) {
+                _startDelayRemainingSeconds.value = seconds
+                _statusMessage.value = "Старт через $seconds сек. Прими позу"
+                delay(1000)
+            }
+            _startDelayRemainingSeconds.value = 0
+            _gameState.value = GameState.CheckingStartPose
+            _statusMessage.value = "Проверяю стартовую позу через Gemma..."
+            launchGemmaCheck(
+                checkName = "Стартовая проверка",
+                snapshot = initialSnapshot,
+                onSuccess = {
+                    _gameState.value = GameState.HoldingPose
+                    _statusMessage.value = "Таймер запущен"
+                    startTimerLoop()
+                }
+            )
+        }
     }
 
     private fun startTimerLoop() {
@@ -196,7 +224,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun launchGemmaCheck(checkName: String, snapshot: Bitmap?, onSuccess: (() -> Unit)? = null) {
-        if (snapshot == null || (_gameState.value != GameState.HoldingPose && _gameState.value != GameState.CheckingFinalPose)) return
+        if (snapshot == null || (_gameState.value != GameState.HoldingPose && _gameState.value != GameState.CheckingFinalPose && _gameState.value != GameState.CheckingStartPose)) return
         if (activeGemmaCheckJob?.isActive == true) {
             Log.i(TAG, "$checkName пропущена: предыдущая Gemma-проверка ещё выполняется")
             return
@@ -206,19 +234,24 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             if (_gameState.value == GameState.HoldingPose && checkName == "Контрольная проверка") {
                 _gameState.value = GameState.CheckingControlPose
             }
-            val result = GemmaPoseValidator.validatePose(getApplication(), snapshot)
-            Log.i(TAG, "$checkName rawJson=${result.rawJson}")
+            _isGemmaChecking.value = true
+            try {
+                val result = GemmaPoseValidator.validatePose(getApplication(), snapshot)
+                Log.i(TAG, "$checkName rawJson=${result.rawJson}")
 
-            if (!result.isPassed) {
-                triggerDefeat(buildGemmaFailReason(result, checkName))
-                return@launch
-            }
+                if (!result.isPassed) {
+                    triggerDefeat(buildGemmaFailReason(result, checkName))
+                    return@launch
+                }
 
-            if (_gameState.value == GameState.CheckingControlPose) {
-                _gameState.value = GameState.HoldingPose
-                _statusMessage.value = "Поза подтверждена"
+                if (_gameState.value == GameState.CheckingControlPose) {
+                    _gameState.value = GameState.HoldingPose
+                    _statusMessage.value = "Поза подтверждена"
+                }
+                onSuccess?.invoke()
+            } finally {
+                _isGemmaChecking.value = false
             }
-            onSuccess?.invoke()
         }
     }
 
@@ -237,6 +270,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     fun triggerDefeat(reason: String) {
         timerJob?.cancel()
         activeGemmaCheckJob?.cancel()
+        _isGemmaChecking.value = false
+        _startDelayRemainingSeconds.value = 0
         _gameState.value = GameState.Failed
         _defeatReason.value = reason
         _statusMessage.value = "Проверка не пройдена"
@@ -244,6 +279,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopSession() {
         timerJob?.cancel(); activeGemmaCheckJob?.cancel()
+        _isGemmaChecking.value = false
+        _startDelayRemainingSeconds.value = 0
         _gameState.value = GameState.Idle
         _statusMessage.value = "Поставь телефон и встань в позу"
         _defeatReason.value = ""
