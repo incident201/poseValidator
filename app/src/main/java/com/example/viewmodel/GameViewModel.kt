@@ -90,6 +90,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private var timerJob: Job? = null
     private var activeGemmaCheckJob: Job? = null
 
+    private fun setGemmaChecking(value: Boolean, checkName: String) {
+        _isGemmaChecking.value = value
+        Log.i(TAG, "$checkName: isGemmaChecking=$value")
+    }
+
     init {
         if (GemmaModelManager.isModelDownloaded(application)) {
             _gameState.value = GameState.Idle
@@ -250,10 +255,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         activeGemmaCheckJob = viewModelScope.launch {
-            _isGemmaChecking.value = true
-            Log.i(TAG, "$checkName: isGemmaChecking=true")
+            setGemmaChecking(true, checkName)
             try {
                 val result = GemmaPoseValidator.validatePose(getApplication(), snapshot)
+                setGemmaChecking(false, checkName)
                 Log.i(TAG, "$checkName rawJson=${result.rawJson}")
 
                 if (!result.isPassed) {
@@ -271,8 +276,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 Log.e(TAG, "$checkName failed", e)
                 triggerDefeat("$checkName: ошибка Gemma: ${e.message}")
             } finally {
-                _isGemmaChecking.value = false
-                Log.i(TAG, "$checkName: isGemmaChecking=false")
+                setGemmaChecking(false, checkName)
                 activeGemmaCheckJob = null
             }
         }
