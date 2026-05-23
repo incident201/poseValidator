@@ -7,9 +7,6 @@ import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
-import java.io.File
-import java.io.FileOutputStream
-import java.net.URL
 
 class PoseLandmarkerService(
     private val context: Context,
@@ -17,8 +14,6 @@ class PoseLandmarkerService(
 ) {
     private val TAG = "PoseLandmarkerService"
     private var poseLandmarker: PoseLandmarker? = null
-    var isSimulated: Boolean = false
-        private set
 
     interface LandmarkerListener {
         fun onError(error: String)
@@ -30,51 +25,14 @@ class PoseLandmarkerService(
     }
 
     private fun setupLandmarker() {
-        val localFile = File(context.filesDir, "pose_landmarker_full.task")
-        
-        if (localFile.exists() && localFile.length() > 5 * 1024 * 1024) {
-            initializeRealLandmarker(localFile)
-        } else {
-            isSimulated = true
-            // Asynchronously download model in background
-            Thread {
-                try {
-                    Log.i(TAG, "Downloading pose_landmarker_full.task to ${localFile.absolutePath}...")
-                    val url = URL("https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task")
-                    val connection = url.openConnection()
-                    connection.connectTimeout = 15000
-                    connection.readTimeout = 15000
-                    
-                    val inputStream = connection.getInputStream()
-                    val tempFile = File(context.filesDir, "pose_landmarker_full.task.tmp")
-                    val outputStream = FileOutputStream(tempFile)
-                    
-                    val buffer = ByteArray(8192)
-                    var bytesRead: Int
-                    while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                        outputStream.write(buffer, 0, bytesRead)
-                    }
-                    outputStream.close()
-                    inputStream.close()
-                    
-                    if (tempFile.renameTo(localFile)) {
-                        Log.i(TAG, "pose_landmarker_full.task downloaded successfully!")
-                        initializeRealLandmarker(localFile)
-                    } else {
-                        Log.e(TAG, "Failed to rename temp pose landmarker model file")
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to download pose landmarker model: ${e.message}", e)
-                }
-            }.start()
-        }
+        initializeRealLandmarker()
     }
 
-    private fun initializeRealLandmarker(modelFile: File) {
+    private fun initializeRealLandmarker() {
         try {
-            Log.i(TAG, "Initializing MediaPipe Pose Landmarker from local path: ${modelFile.absolutePath}")
+            Log.i(TAG, "Initializing MediaPipe Pose Landmarker from assets")
             val baseOptions = BaseOptions.builder()
-                .setModelAssetPath(modelFile.absolutePath)
+                .setModelAssetPath("pose_landmarker_full.task")
                 .build()
 
             val options = PoseLandmarker.PoseLandmarkerOptions.builder()
@@ -90,26 +48,22 @@ class PoseLandmarkerService(
                 .build()
 
             poseLandmarker = PoseLandmarker.createFromOptions(context, options)
-            isSimulated = false
-            Log.i(TAG, "MediaPipe Pose Landmarker loaded successfully from local file!")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize MediaPipe Pose Landmarker: ${e.message}", e)
-            isSimulated = true
+            Log.i(TAG, "MediaPipe Pose Landmarker loaded successfully from assets")
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to initialize MediaPipe Pose Landmarker", t)
+            listener.onError(t.message ?: "Failed to initialize MediaPipe")
         }
     }
 
     fun detectLiveStreamFrame(bitmap: Bitmap, timestamp: Long) {
-        val landmarker = poseLandmarker
-        if (landmarker != null) {
-            try {
-                val mpImage = com.google.mediapipe.framework.image.BitmapImageBuilder(bitmap).build()
-                landmarker.detectAsync(mpImage, timestamp)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in detectLiveStreamFrame", e)
-            }
-        } else {
-            // Model not loaded yet (or downloading). Report empty landmarks to prevent faking a person.
-            listener.onResults(PoseLandmarks(), bitmap.width, bitmap.height)
+        val landmarker = poseLandmarker ?: return
+
+        try {
+            val mpImage = com.google.mediapipe.framework.image.BitmapImageBuilder(bitmap).build()
+            landmarker.detectAsync(mpImage, timestamp)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Error in detectLiveStreamFrame", t)
+            listener.onError(t.message ?: "MediaPipe detect error")
         }
     }
 
