@@ -55,8 +55,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val _driftThreshold = MutableStateFlow(0.075f) 
     val driftThreshold: StateFlow<Float> = _driftThreshold.asStateFlow()
 
-    private val _motionThreshold = MutableStateFlow(0.054f) 
+    private val _motionThreshold = MutableStateFlow(0.078f) 
     val motionThreshold: StateFlow<Float> = _motionThreshold.asStateFlow()
+
+    private val _isGemmaCheckInProgress = MutableStateFlow(false)
+    val isGemmaCheckInProgress: StateFlow<Boolean> = _isGemmaCheckInProgress.asStateFlow()
 
     // Download variables
     private val _downloadProgress = MutableStateFlow(0f)
@@ -183,6 +186,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _driftScore.value = 0f
         _motionScore.value = 0f
         movementTracker.reset()
+        _isGemmaCheckInProgress.value = false
 
         viewModelScope.launch {
             val bitmapSnapshot = latestBitmap
@@ -193,12 +197,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot)
-                if (!aiResult.isPassed) {
+                val passed = runGemmaPoseCheck()
+                if (!passed) {
                     _gameState.value = GameState.Failed
                     _statusMessage.value = "Проверка позы не пройдена"
                     _defeatReason.value = "Стартовая поза не распознана"
-                    Log.e(TAG, "Local Gemma verification failed. Result: ${aiResult.rawJson}")
+                    Log.e(TAG, "Local Gemma verification failed.")
                     return@launch
                 }
 
@@ -218,6 +222,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
                 initiateHoldingState()
             
+        }
+    }
+
+    private suspend fun runGemmaPoseCheck(): Boolean {
+        _isGemmaCheckInProgress.value = true
+        return try {
+            val bitmapSnapshot = latestBitmap
+            if (bitmapSnapshot == null) {
+                false
+            } else {
+                GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot).isPassed
+            }
+        } finally {
+            _isGemmaCheckInProgress.value = false
         }
     }
 
@@ -277,18 +295,17 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _gameState.value = GameState.CheckingControlPose
         _statusMessage.value = "Проверяю позу..."
 
-        val bitmapSnapshot = latestBitmap
-        if (bitmapSnapshot != null) {
-            val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot)
-            if (aiResult.isPassed) {
-                _gameState.value = GameState.HoldingPose
-                _statusMessage.value = "Поза подтверждена"
-                scheduleNextCheckpoint()
+        val passed = runGemmaPoseCheck()
+        if (passed) {
+            _gameState.value = GameState.HoldingPose
+            _statusMessage.value = "Поза подтверждена"
+            scheduleNextCheckpoint()
+        } else {
+            if (latestBitmap == null) {
+                triggerDefeat("Ошибка анализа изображения")
             } else {
                 triggerDefeat("Контрольная проверка позы не пройдена")
             }
-        } else {
-            triggerDefeat("Ошибка анализа изображения")
         }
     }
 
@@ -306,8 +323,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
 
-            val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot)
-            if (aiResult.isPassed) {
+            val passed = runGemmaPoseCheck()
+            if (passed) {
                 _gameState.value = GameState.Success
                 _statusMessage.value = "Победа"
             } else {
@@ -330,6 +347,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             "Человек пропал из кадра" -> "Человек пропал из кадра"
             else -> "Ошибка позы или движения"
         }
+        _isGemmaCheckInProgress.value = false
         Log.w(TAG, "Defeat triggered! Reason: $reason")
     }
 
@@ -341,6 +359,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _driftScore.value = 0f
         _motionScore.value = 0f
         movementTracker.reset()
+        _isGemmaCheckInProgress.value = false
     }
 
     private fun formatTime(seconds: Int): String {

@@ -49,8 +49,8 @@ class MovementTracker {
 
     // Configuration / Thresholds from TZ Section 8
     // Thresholds are normalized relative to bodyScale
-    var driftThresholdFactor: Float = 0.25f
-    var motionThresholdFactor: Float = 0.18f
+    var driftThresholdFactor: Float = 0.35f
+    var motionThresholdFactor: Float = 0.26f
 
     var referencePose: PoseLandmarks? = null
     var previousPose: PoseLandmarks? = null
@@ -104,7 +104,7 @@ class MovementTracker {
         if (driftScore > driftThreshold) {
             if (driftExceededSince == null) {
                 driftExceededSince = currentTime
-            } else if (currentTime - driftExceededSince!! > 1000) {
+            } else if (currentTime - driftExceededSince!! > 1400) {
                 Log.w(TAG, "Drift breach! Score: $driftScore, Threshold: $driftThreshold")
                 return Violation.DriftLimitExceeded(driftScore, driftThreshold)
             }
@@ -116,7 +116,7 @@ class MovementTracker {
         if (motionScore > motionThreshold) {
             if (motionExceededSince == null) {
                 motionExceededSince = currentTime
-            } else if (currentTime - motionExceededSince!! > 500) {
+            } else if (currentTime - motionExceededSince!! > 800) {
                 Log.w(TAG, "Motion breach! Score: $motionScore, Threshold: $motionThreshold")
                 return Violation.MotionLimitExceeded(motionScore, motionThreshold)
             }

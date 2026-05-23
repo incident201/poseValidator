@@ -67,6 +67,7 @@ fun CameraScreen(
     val motionScore by viewModel.motionScore.collectAsState()
     val driftThreshold by viewModel.driftThreshold.collectAsState()
     val motionThreshold by viewModel.motionThreshold.collectAsState()
+    val isGemmaCheckInProgress by viewModel.isGemmaCheckInProgress.collectAsState()
 
     val isAIVersionAvailable by viewModel.isAIVersionAvailable.collectAsState()
 
@@ -215,7 +216,7 @@ fun CameraScreen(
             }
 
             // Top overlay tags
-            StatusOverlayTags(gameState = gameState)
+            StatusOverlayTags(gameState = gameState, isGemmaCheckInProgress = isGemmaCheckInProgress)
 
             // Dynamic skeletal / progress tracking feedback overlay
             Box(
@@ -317,7 +318,7 @@ fun HeaderArea(
 }
 
 @Composable
-fun StatusOverlayTags(gameState: GameState) {
+fun StatusOverlayTags(gameState: GameState, isGemmaCheckInProgress: Boolean) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -356,6 +357,38 @@ fun StatusOverlayTags(gameState: GameState) {
                 fontWeight = FontWeight.SemiBold,
                 letterSpacing = 1.sp
             )
+        }
+
+
+
+        AnimatedVisibility(
+            visible = isGemmaCheckInProgress,
+            enter = fadeIn() + slideInVertically(initialOffsetY = { -it / 2 }),
+            exit = fadeOut() + slideOutVertically(targetOffsetY = { -it / 2 }),
+            modifier = Modifier.align(Alignment.TopCenter)
+        ) {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(100.dp))
+                    .background(Color(0xFF1D2235).copy(alpha = 0.96f))
+                    .border(1.dp, DarkPrimary.copy(alpha = 0.5f), RoundedCornerShape(100.dp))
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    strokeWidth = 2.dp,
+                    color = DarkPrimary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "ИДЁТ ПРОВЕРКА GEMMA",
+                    color = Color.White,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp
+                )
+            }
         }
 
         // Pose Status Accepted Tag (Right)
