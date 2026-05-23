@@ -1,7 +1,9 @@
 package com.example
 
+import android.app.Application
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
+import androidx.test.core.app.ApplicationProvider
 import com.example.ui.CameraScreen
 import com.example.viewmodel.GameViewModel
 import com.example.ui.theme.MyApplicationTheme
@@ -23,9 +25,10 @@ class GreetingScreenshotTest {
 
   @Test
   fun greeting_screenshot() {
+    val application = ApplicationProvider.getApplicationContext<Application>()
     composeTestRule.setContent {
       MyApplicationTheme {
-        CameraScreen(viewModel = GameViewModel())
+        CameraScreen(viewModel = GameViewModel(application))
       }
     }
 
