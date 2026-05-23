@@ -22,6 +22,15 @@ data class PoseLandmarks(
     val leftKnee: Point3D? = null,
     val rightKnee: Point3D? = null,
 ) {
+    fun hasEnoughKeypoints(): Boolean {
+        return leftShoulder != null &&
+            rightShoulder != null &&
+            leftHip != null &&
+            rightHip != null &&
+            leftKnee != null &&
+            rightKnee != null
+    }
+
     fun getBodyScale(): Float {
         if (leftShoulder != null && rightShoulder != null) {
             val dist = leftShoulder.distanceTo(rightShoulder)
@@ -82,8 +91,8 @@ class MovementTracker {
 
         // Check if person is valid (or vanished completely if major keypoints are missing)
         val keypointsPresent = countKeypoints(currentPose)
-        if (keypointsPresent < 4) {
-            Log.w(TAG, "Keypoints disappeared! Count = $keypointsPresent")
+        if (!currentPose.hasEnoughKeypoints()) {
+            Log.w(TAG, "Keypoints disappeared or insufficient. Count = $keypointsPresent")
             return Violation.PersonDisappeared
         }
 

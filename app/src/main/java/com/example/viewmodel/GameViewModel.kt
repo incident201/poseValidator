@@ -2,7 +2,6 @@ package com.example.viewmodel
 
 import android.app.Application
 import android.graphics.Bitmap
-import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -18,7 +17,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlin.random.Random
 
 enum class GameState {
     ModelDownloadRequired,
@@ -66,11 +64,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _downloadBytesInfo = MutableStateFlow("0 / 0 MB")
     val downloadBytesInfo: StateFlow<String> = _downloadBytesInfo.asStateFlow()
-
-    // Debugging and Simulation Aids
-    private val _isSimulatorEnabled = MutableStateFlow(false) // Set to false so the camera is active by default as requested!
-    val isSimulatorEnabled: StateFlow<Boolean> = _isSimulatorEnabled.asStateFlow()
-
     private val _isAIVersionAvailable = MutableStateFlow(false)
     val isAIVersionAvailable: StateFlow<Boolean> = _isAIVersionAvailable.asStateFlow()
 
@@ -82,10 +75,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     // Schedulers for Periodic Gemma Checks
     private var nextCheckpointSeconds = 0
-
-    // SimulationOffsets
-    var simDriftOffset = 0f
-    var simMotionOffset = 0f
 
     init {
         // Initialize based on whether local gemma model is downloaded
@@ -120,22 +109,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-
-    fun skipDownloadForTesting() {
-        _gameState.value = GameState.Idle
-        _statusMessage.value = "Встань на колени спиной к камере. Нажми Старт."
-    }
-
-    fun deleteModelForTesting() {
-        viewModelScope.launch {
-            GemmaModelManager.deleteModel(getApplication())
-            _gameState.value = GameState.ModelDownloadRequired
-            _statusMessage.value = "Модель успешно удалена!"
-        }
-    }
-
-    fun setSimulatorEnabled(enabled: Boolean) {
-        _isSimulatorEnabled.value = enabled
     }
 
     fun setLatestBitmap(bitmap: Bitmap) {
@@ -208,50 +181,44 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _statusMessage.value = "Проверяю позу через Gemma..."
         _defeatReason.value = ""
         _timerSeconds.value = 180
-        simDriftOffset = 0f
-        simMotionOffset = 0f
         _driftScore.value = 0f
         _motionScore.value = 0f
         movementTracker.reset()
 
         viewModelScope.launch {
-            if (_isSimulatorEnabled.value) {
-                delay(1500)
-                initiateHoldingState()
-            } else {
-                val bitmapSnapshot = latestBitmap
-                if (bitmapSnapshot == null) {
+            val bitmapSnapshot = latestBitmap
+            if (bitmapSnapshot == null) {
                     _gameState.value = GameState.Failed
                     _statusMessage.value = "Ошибка анализа изображения"
                     _defeatReason.value = "Камера не предоставила кадр"
                     return@launch
                 }
 
-                // Check local Gemma validation using the camera bitmap snapshot
                 val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot)
-                if (aiResult.isPassed) {
-                    if (latestLandmarks == null) {
-                        _statusMessage.value = "Ожидаем трекер движений MediaPipe..."
-                        var retries = 0
-                        while (latestLandmarks == null && retries < 50) {
-                            delay(100)
-                            retries++
-                        }
-                        if (latestLandmarks == null) {
-                            _gameState.value = GameState.Failed
-                            _statusMessage.value = "MediaPipe не готов"
-                            _defeatReason.value = "Камера активна, но трекер MediaPipe не среагировал"
-                            return@launch
-                        }
-                    }
-                    initiateHoldingState()
-                } else {
+                if (!aiResult.isPassed) {
                     _gameState.value = GameState.Failed
                     _statusMessage.value = "Проверка позы не пройдена"
                     _defeatReason.value = "Стартовая поза не распознана"
                     Log.e(TAG, "Local Gemma verification failed. Result: ${aiResult.rawJson}")
+                    return@launch
                 }
-            }
+
+                _statusMessage.value = "Ожидаем landmarks MediaPipe..."
+                var retries = 0
+                while ((latestLandmarks?.hasEnoughKeypoints() != true) && retries < 50) {
+                    delay(100)
+                    retries++
+                }
+
+                if (latestLandmarks?.hasEnoughKeypoints() != true) {
+                    _gameState.value = GameState.Failed
+                    _statusMessage.value = "MediaPipe не видит человека"
+                    _defeatReason.value = "Недостаточно ключевых точек (плечи/таз/колени)"
+                    return@launch
+                }
+
+                initiateHoldingState()
+            
         }
     }
 
@@ -260,10 +227,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _statusMessage.value = "Поза принята"
 
         // Initialize landmarks reference
-        val initialPose = if (_isSimulatorEnabled.value) {
-            generateSimulatedBaseline()
-        } else {
-            latestLandmarks ?: generateSimulatedBaseline()
+        val initialPose = latestLandmarks
+        if (initialPose == null || !initialPose.hasEnoughKeypoints()) {
+            triggerDefeat("Недостаточно ключевых точек для отслеживания")
+            return
         }
         movementTracker.startTracking(initialPose)
 
@@ -272,19 +239,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
         // Begin holding timer loop
         startTimerLoop()
-    }
-
-    private fun generateSimulatedBaseline(): PoseLandmarks {
-        return PoseLandmarks(
-            leftShoulder = Point3D(0.40f, 0.35f, 0.1f),
-            rightShoulder = Point3D(0.60f, 0.35f, 0.1f),
-            leftElbow = Point3D(0.35f, 0.45f, 0.2f),
-            rightElbow = Point3D(0.65f, 0.45f, 0.2f),
-            leftHip = Point3D(0.42f, 0.60f, 0.0f),
-            rightHip = Point3D(0.58f, 0.60f, 0.0f),
-            leftKnee = Point3D(0.45f, 0.80f, -0.1f),
-            rightKnee = Point3D(0.55f, 0.80f, -0.1f)
-        )
     }
 
     private fun scheduleNextCheckpoint() {
@@ -321,29 +275,21 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun triggerPeriodicCheckpoint() {
         Log.i(TAG, "Triggering periodic checkpoint. Time = ${_timerSeconds.value}s remaining")
         
-        val prevState = _gameState.value
         _gameState.value = GameState.CheckingControlPose
         _statusMessage.value = "Проверяю позу..."
 
-        if (_isSimulatorEnabled.value) {
-            delay(1200) // Simulated AI delay
-            _gameState.value = GameState.HoldingPose
-            _statusMessage.value = "Поза подтверждена"
-            scheduleNextCheckpoint()
-        } else {
-            val bitmapSnapshot = latestBitmap
-            if (bitmapSnapshot != null) {
-                val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot)
-                if (aiResult.isPassed) {
-                    _gameState.value = GameState.HoldingPose
-                    _statusMessage.value = "Поза подтверждена"
-                    scheduleNextCheckpoint()
-                } else {
-                    triggerDefeat("Контрольная проверка позы не пройдена")
-                }
+        val bitmapSnapshot = latestBitmap
+        if (bitmapSnapshot != null) {
+            val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot)
+            if (aiResult.isPassed) {
+                _gameState.value = GameState.HoldingPose
+                _statusMessage.value = "Поза подтверждена"
+                scheduleNextCheckpoint()
             } else {
-                triggerDefeat("Ошибка анализа изображения")
+                triggerDefeat("Контрольная проверка позы не пройдена")
             }
+        } else {
+            triggerDefeat("Ошибка анализа изображения")
         }
     }
 
@@ -353,28 +299,22 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _statusMessage.value = "Финальная проверка позы..."
 
         viewModelScope.launch {
-            if (_isSimulatorEnabled.value) {
-                delay(1500)
+            val bitmapSnapshot = latestBitmap
+            if (bitmapSnapshot == null) {
+                _gameState.value = GameState.Failed
+                _statusMessage.value = "Ошибка анализа изображения"
+                _defeatReason.value = "Камера не предоставила кадр"
+                return@launch
+            }
+
+            val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot)
+            if (aiResult.isPassed) {
                 _gameState.value = GameState.Success
                 _statusMessage.value = "Победа"
             } else {
-                val bitmapSnapshot = latestBitmap
-                if (bitmapSnapshot == null) {
-                    _gameState.value = GameState.Failed
-                    _statusMessage.value = "Ошибка анализа изображения"
-                    _defeatReason.value = "Камера не предоставила кадр"
-                    return@launch
-                }
-
-                val aiResult = GemmaPoseValidator.validatePose(getApplication(), bitmapSnapshot)
-                if (aiResult.isPassed) {
-                    _gameState.value = GameState.Success
-                    _statusMessage.value = "Победа"
-                } else {
-                    _gameState.value = GameState.Failed
-                    _statusMessage.value = "Проверка позы не пройдена"
-                    _defeatReason.value = "Финальная проверка позы не пройдена"
-                }
+                _gameState.value = GameState.Failed
+                _statusMessage.value = "Проверка позы не пройдена"
+                _defeatReason.value = "Финальная проверка позы не пройдена"
             }
         }
     }
@@ -399,49 +339,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _gameState.value = GameState.Idle
         _statusMessage.value = "Встань на колени спиной к камере. Нажми Старт."
         _defeatReason.value = ""
-        simDriftOffset = 0f
-        simMotionOffset = 0f
         _driftScore.value = 0f
         _motionScore.value = 0f
         movementTracker.reset()
     }
-
-    fun simulateDriftStep() {
-        if (_gameState.value == GameState.HoldingPose) {
-            simDriftOffset += 0.06f 
-            val simulatedPose = generateInteractiveSimulatedPose()
-            processMediaPipeResults(simulatedPose, SystemClock.elapsedRealtime())
-        }
     }
-
-    fun simulateSuddenMotion() {
-        if (_gameState.value == GameState.HoldingPose) {
-            simMotionOffset = 0.25f 
-            val simulatedPose = generateInteractiveSimulatedPose()
-            processMediaPipeResults(simulatedPose, SystemClock.elapsedRealtime())
-            
-            viewModelScope.launch {
-                delay(150)
-                simMotionOffset = 0f
-            }
         }
-    }
-
-    fun generateInteractiveSimulatedPose(): PoseLandmarks {
-        val breathe = kotlin.math.sin(SystemClock.elapsedRealtime().toDouble() / 500.0).toFloat() * 0.005f
-        val offsetTotalX = simDriftOffset + simMotionOffset
-        val offsetTotalY = (simDriftOffset * 0.5f) + breathe
-
-        return PoseLandmarks(
-            leftShoulder = Point3D(0.40f + offsetTotalX, 0.35f + offsetTotalY, 0.1f),
-            rightShoulder = Point3D(0.60f + offsetTotalX, 0.35f + offsetTotalY, 0.1f),
-            leftElbow = Point3D(0.35f + offsetTotalX, 0.45f + offsetTotalY, 0.2f),
-            rightElbow = Point3D(0.65f + offsetTotalX, 0.45f + offsetTotalY, 0.2f),
-            leftHip = Point3D(0.42f + offsetTotalX, 0.60f + offsetTotalY, 0.0f),
-            rightHip = Point3D(0.58f + offsetTotalX, 0.60f + offsetTotalY, 0.0f),
-            leftKnee = Point3D(0.45f + offsetTotalX, 0.80f + offsetTotalY, -0.1f),
-            rightKnee = Point3D(0.55f + offsetTotalX, 0.80f + offsetTotalY, -0.1f)
-        )
     }
 
     private fun formatTime(seconds: Int): String {

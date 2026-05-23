@@ -96,7 +96,6 @@ object LocalGemmaVisionValidator {
             val localEngine = getOrInitializeEngine(context)
             
             // Re-create a light isolated conversation scope to ensure past images/history do not leak or pollute this check
-            val conversation = localEngine.createConversation()
 
             // Resize and write bitmap to temporary cached file for SDK input support
             val tempImgFile = File(context.cacheDir, "gemma_vision_frame.jpg")
@@ -124,13 +123,14 @@ Use only true or false.
 
             Log.i(TAG, "Sending message packet locally to LiteRT-LM engine (image path: ${tempImgFile.absolutePath})")
             
-            val contentList = listOf(
+            val contentsPacket = Contents.of(
                 Content.ImageFile(tempImgFile.absolutePath),
                 Content.Text(prompt)
             )
-            val contentsPacket = Contents.of(contentList)
-            
-            val messageOutput = conversation.sendMessage(contentsPacket)
+
+            val messageOutput = localEngine.createConversation().use { conversation ->
+                conversation.sendMessage(contentsPacket)
+            }
             val rawOutput = messageOutput.contents.contents.filterIsInstance<Content.Text>().firstOrNull()?.text ?: ""
             
             Log.i(TAG, "Raw feedback string from LiteRT-LM: $rawOutput")
