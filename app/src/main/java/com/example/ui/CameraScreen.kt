@@ -82,7 +82,8 @@ fun CameraScreen(
     val downloadProgress by viewModel.downloadProgress.collectAsState()
     val downloadBytesInfo by viewModel.downloadBytesInfo.collectAsState()
 
-    val keepScreenOn = gameState == GameState.StartingDelay ||
+    val keepScreenOn = gameState == GameState.ModelDownloading ||
+        gameState == GameState.StartingDelay ||
         gameState == GameState.HoldingPose ||
         gameState == GameState.CheckingFinalPose ||
         isGemmaChecking
