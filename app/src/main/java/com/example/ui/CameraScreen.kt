@@ -120,6 +120,14 @@ fun CameraScreen(
         )
         return
     }
+    if (gameState == GameState.ModelStarting) {
+        GemmaStartingScreen(
+            statusMessage = statusMessage,
+            timerSeconds = timerSeconds,
+            modifier = modifier
+        )
+        return
+    }
 
     // Camera Permissions State
     var hasCameraPermission by remember {
@@ -623,6 +631,60 @@ fun GemmaPreparingScreen(statusMessage: String, modifier: Modifier = Modifier) {
             CircularProgressIndicator(color = DarkPrimary)
             Spacer(modifier = Modifier.height(16.dp))
             Text(text = statusMessage, color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp))
+        }
+    }
+}
+
+@Composable
+fun GemmaStartingScreen(
+    statusMessage: String,
+    timerSeconds: Int,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(DarkBg)
+            .windowInsetsPadding(WindowInsets.safeDrawing),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            shape = RoundedCornerShape(32.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "ЗАПУСК GEMMA...",
+                    color = DarkPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+                CircularProgressIndicator(color = DarkPrimary)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = statusMessage,
+                    color = Color.White,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = String.format("%02d:%02d", timerSeconds / 60, timerSeconds % 60),
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 26.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }
