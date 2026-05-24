@@ -296,6 +296,17 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         movementViolationCount += 1
+        if (movementViolationCount >= 4) {
+            val reason = when (violation) {
+                is MovementTracker.Violation.DriftLimitExceeded -> "Пользователь сильно сдвинулся"
+                is MovementTracker.Violation.MotionLimitExceeded -> "Пользователь резко двинулся"
+                is MovementTracker.Violation.PersonDisappeared -> "Человек пропал из кадра"
+                else -> "Пользователь нарушил условия неподвижности"
+            }
+            triggerDefeat(reason, "Вы не справились. Попробуйте снова")
+            return
+        }
+
         when (movementViolationCount) {
             1 -> {
                 _timerSeconds.value += 60
@@ -311,12 +322,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 lastMovementPenaltyAtMs = now
             }
 
-            else -> {
+            3 -> {
                 _timerSeconds.value += 180
                 speak("Вы снова двинулись. Плюс 3 минуты к таймеру")
-                _statusMessage.value = "Зафиксировано повторное движение: +3 минуты"
+                _statusMessage.value = "Зафиксировано третье движение: +3 минуты"
                 lastMovementPenaltyAtMs = now
             }
+
+            else -> Unit
         }
 
         if (_gameState.value == GameState.HoldingPose) {
