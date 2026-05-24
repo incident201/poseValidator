@@ -123,7 +123,6 @@ fun CameraScreen(
     if (gameState == GameState.ModelStarting) {
         GemmaStartingScreen(
             statusMessage = statusMessage,
-            timerSeconds = timerSeconds,
             modifier = modifier
         )
         return
@@ -638,7 +637,6 @@ fun GemmaPreparingScreen(statusMessage: String, modifier: Modifier = Modifier) {
 @Composable
 fun GemmaStartingScreen(
     statusMessage: String,
-    timerSeconds: Int,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -675,14 +673,6 @@ fun GemmaStartingScreen(
                     text = statusMessage,
                     color = Color.White,
                     textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = String.format("%02d:%02d", timerSeconds / 60, timerSeconds % 60),
-                    color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 26.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold
                 )
             }
         }
