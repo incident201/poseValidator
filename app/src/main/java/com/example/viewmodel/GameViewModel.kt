@@ -218,30 +218,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 _timerSeconds.value -= 1
                 val remaining = _timerSeconds.value
                 _statusMessage.value = "Осталось: ${formatTime(remaining)}"
-                val totalDuration = _selectedDurationSeconds.value.coerceAtLeast(minimumDurationSeconds)
-                val elapsed = totalDuration - remaining
-
-                if (remaining > 0 && elapsed > 0 && elapsed % 60 == 0) {
-                    launchGemmaCheck("Контрольная проверка", latestBitmap, isFinal = false)
-                }
             }
             if (_timerSeconds.value <= 0 && _gameState.value == GameState.HoldingPose) {
-                performFinalChecking()
+                _gameState.value = GameState.Success
+                _statusMessage.value = "Победа"
+                speak("Время вышло")
             }
         }
-    }
-
-    private fun performFinalChecking() {
-        timerJob?.cancel()
-        speak("Время вышло")
-        val finalSnapshot = latestBitmap
-        if (finalSnapshot == null) {
-            triggerDefeat("Финальная проверка: камера не предоставила кадр")
-            return
-        }
-        _gameState.value = GameState.CheckingFinalPose
-        _statusMessage.value = "Финальная проверка..."
-        launchGemmaCheck("Финальная проверка", finalSnapshot, isFinal = true)
     }
 
     private fun launchGemmaCheck(checkName: String, snapshot: Bitmap?, isFinal: Boolean) {
