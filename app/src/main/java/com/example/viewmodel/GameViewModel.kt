@@ -287,7 +287,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val failed = mutableListOf<String>()
         if (!result.personPresent) failed += "person_present"
         if (!result.facingAway) failed += "facing_away"
-        if (!result.kneeling) failed += "kneeling"
+        if (!result.nude) failed += "nude"
         return if (failed.isEmpty()) {
             "$checkName: не удалось распарсить ответ Gemma"
         } else {
