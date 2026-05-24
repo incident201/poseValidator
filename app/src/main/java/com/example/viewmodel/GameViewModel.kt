@@ -112,7 +112,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         } else if (GemmaPoseValidator.requiresRuntimeResetAfterAppUpdate(application)) {
             recoverGemmaAfterAppUpdate()
         } else if (GemmaPoseValidator.hasCompletedInitialRuntimePreparation(application)) {
-            startGemmaRuntimeFromPreparedCache()
+            _defeatReason.value = ""
+            _gameState.value = GameState.Idle
+            _statusMessage.value = "Gemma готова. Камера активна."
         } else {
             prepareGemmaRuntime(forceRebuild = false)
         }
@@ -158,22 +160,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 GemmaPoseValidator.prepare(getApplication())
             }
-            if (prepared) {
-                _gameState.value = GameState.Idle
-                _statusMessage.value = "Gemma готова. Камера активна."
-            } else {
-                _gameState.value = GameState.ModelError
-                _statusMessage.value = "Не удалось подготовить Gemma runtime. Можно пересобрать runtime или скачать модель заново."
-            }
-        }
-    }
-
-    private fun startGemmaRuntimeFromPreparedCache() {
-        _defeatReason.value = ""
-        _gameState.value = GameState.ModelStarting
-        _statusMessage.value = "Запуск Gemma runtime..."
-        viewModelScope.launch {
-            val prepared = GemmaPoseValidator.prepare(getApplication())
             if (prepared) {
                 _gameState.value = GameState.Idle
                 _statusMessage.value = "Gemma готова. Камера активна."

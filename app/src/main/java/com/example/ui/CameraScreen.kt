@@ -84,7 +84,6 @@ fun CameraScreen(
 
     val keepScreenOn = gameState == GameState.ModelDownloading ||
         gameState == GameState.ModelPreparing ||
-        gameState == GameState.ModelStarting ||
         gameState == GameState.StartingDelay ||
         gameState == GameState.HoldingPose ||
         gameState == GameState.CheckingFinalPose ||
@@ -117,13 +116,6 @@ fun CameraScreen(
             statusMessage = statusMessage,
             onRebuildCache = { viewModel.retryGemmaPreparation() },
             onDeleteModel = { viewModel.deleteModelAndRestartDownload() },
-            modifier = modifier
-        )
-        return
-    }
-    if (gameState == GameState.ModelStarting) {
-        GemmaStartingScreen(
-            statusMessage = statusMessage,
             modifier = modifier
         )
         return
@@ -423,7 +415,6 @@ fun BottomHUDEngine(
                     GameState.ModelDownloadRequired -> "НУЖНА ЗАГРУЗКА"
                     GameState.ModelDownloading -> "СКАЧИВАНИЕ МОДЕЛИ..."
                     GameState.ModelPreparing -> "ПОДГОТОВКА GEMMA..."
-                    GameState.ModelStarting -> "ЗАПУСК GEMMA..."
                     GameState.ModelError -> "ОШИБКА GEMMA RUNTIME"
                     GameState.Idle -> "ЖДЁМ СТАРТА"
                     GameState.StartingDelay -> "СТАРТ ЧЕРЕЗ ${startDelayRemainingSeconds}s"
@@ -592,27 +583,12 @@ fun BottomHUDEngine(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        if (gameState == GameState.ModelStarting) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                color = DarkPrimary,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "Запуск",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        } else {
-                            Text(
-                                text = "ОЖИДАНИЕ",
-                                color = Color.White.copy(alpha = 0.8f),
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+                        Text(
+                            text = "ОЖИДАНИЕ",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
             }

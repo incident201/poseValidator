@@ -40,7 +40,6 @@ object LocalGemmaVisionValidator {
     private const val PREPARE_STARTED_AT_KEY = "prepare_started_at"
     private const val NATIVE_CRASH_RECOVERY_COUNT_KEY = "native_crash_recovery_count"
     private const val LAST_SUCCESSFUL_APP_VERSION_CODE_KEY = "last_successful_app_version_code"
-    private var processCacheResetDone = false
 
     private fun getInitialPreparationKey(context: Context): String {
         val modelFile = GemmaModelManager.getModelFile(context)
@@ -68,7 +67,6 @@ object LocalGemmaVisionValidator {
             clearInitialPreparation = false,
             clearAppVersionMarker = false
         )
-        processCacheResetDone = true
     }
 
     fun hasCompletedInitialRuntimePreparation(context: Context): Boolean {
@@ -123,10 +121,13 @@ object LocalGemmaVisionValidator {
         if (!modelFile.exists()) return false
 
         val prefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
-        if (!prefs.contains(LAST_SUCCESSFUL_APP_VERSION_CODE_KEY)) return false
+        val currentVersion = getCurrentAppVersionCode(context)
+
+        if (!prefs.contains(LAST_SUCCESSFUL_APP_VERSION_CODE_KEY)) {
+            return hasCompletedInitialRuntimePreparation(context)
+        }
 
         val lastSuccessfulVersion = prefs.getLong(LAST_SUCCESSFUL_APP_VERSION_CODE_KEY, -1L)
-        val currentVersion = getCurrentAppVersionCode(context)
         return lastSuccessfulVersion != currentVersion
     }
 
@@ -162,7 +163,6 @@ object LocalGemmaVisionValidator {
         editor.apply()
 
         File(context.filesDir, "${GemmaModelManager.MODEL_FILENAME}.tmp").takeIf { it.exists() }?.delete()
-        processCacheResetDone = false
     }
 
     private fun clearInitialRuntimePreparationMarker(context: Context) {
@@ -172,13 +172,6 @@ object LocalGemmaVisionValidator {
             .apply()
     }
 
-    @Synchronized
-    private fun resetRuntimeCacheOncePerProcess(context: Context) {
-        if (processCacheResetDone) return
-        close()
-        deleteRecursivelySafe(File(context.filesDir, ENGINE_CACHE_ROOT_DIR))
-        processCacheResetDone = true
-    }
 
     private suspend fun runVisionWarmup(context: Context, localEngine: Engine): String {
         var warmupBitmap: Bitmap? = null
@@ -291,7 +284,6 @@ object LocalGemmaVisionValidator {
         if (!modelFile.exists()) {
             throw IllegalStateException("Local Gemma model file is not downloaded! Checked: ${modelFile.absolutePath}")
         }
-        resetRuntimeCacheOncePerProcess(context)
 
         Log.i(TAG, "Initializing local LiteRT-LM Engine using ${modelFile.name}")
         val cacheDir = getEngineCacheDir(context, modelFile)
