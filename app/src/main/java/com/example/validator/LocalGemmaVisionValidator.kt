@@ -108,10 +108,13 @@ Use only true or false.
                 Content.Text(prompt)
             )
 
-            val messageOutput = localEngine.createConversation().use { conversation ->
-                conversation.sendMessage(contentsPacket)
+            val rawOutput = localEngine.createConversation().use { conversation ->
+                val messageOutput = conversation.sendMessage(contentsPacket)
+
+                messageOutput.contents.contents
+                    .filterIsInstance<Content.Text>()
+                    .joinToString(separator = "\n") { it.text }
             }
-            val rawOutput = messageOutput.contents.contents.filterIsInstance<Content.Text>().firstOrNull()?.text ?: ""
             
             Log.i(TAG, "Raw feedback string from LiteRT-LM: $rawOutput")
             val cleanJson = extractJson(rawOutput)

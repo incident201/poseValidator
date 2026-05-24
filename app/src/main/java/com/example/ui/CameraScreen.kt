@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -67,6 +68,7 @@ fun CameraScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val view = LocalView.current
     VoiceAnnouncer(viewModel = viewModel)
 
     val gameState by viewModel.gameState.collectAsState()
@@ -79,6 +81,19 @@ fun CameraScreen(
 
     val downloadProgress by viewModel.downloadProgress.collectAsState()
     val downloadBytesInfo by viewModel.downloadBytesInfo.collectAsState()
+
+    val keepScreenOn = gameState == GameState.StartingDelay ||
+        gameState == GameState.HoldingPose ||
+        gameState == GameState.CheckingFinalPose ||
+        isGemmaChecking
+
+    DisposableEffect(keepScreenOn, view) {
+        val previous = view.keepScreenOn
+        view.keepScreenOn = keepScreenOn
+        onDispose {
+            view.keepScreenOn = previous
+        }
+    }
 
     if (gameState == GameState.ModelDownloadRequired || gameState == GameState.ModelDownloading) {
         GemmaDownloadScreen(

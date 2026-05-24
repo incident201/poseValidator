@@ -257,9 +257,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         activeGemmaCheckJob = viewModelScope.launch {
             setGemmaChecking(true, checkName)
             try {
+                Log.i(TAG, "$checkName: validatePose started")
                 val result = GemmaPoseValidator.validatePose(getApplication(), snapshot)
+                Log.i(TAG, "$checkName: validatePose returned, passed=${result.isPassed}, rawJson=${result.rawJson}")
                 setGemmaChecking(false, checkName)
-                Log.i(TAG, "$checkName rawJson=${result.rawJson}")
 
                 if (!result.isPassed) {
                     triggerDefeat(buildGemmaFailReason(result, checkName))
