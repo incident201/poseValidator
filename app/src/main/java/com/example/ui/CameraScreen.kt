@@ -106,6 +106,18 @@ fun CameraScreen(
         )
         return
     }
+    if (gameState == GameState.ModelPreparing) {
+        GemmaPreparingScreen(statusMessage = statusMessage, modifier = modifier)
+        return
+    }
+    if (gameState == GameState.ModelError) {
+        GemmaRuntimeErrorScreen(
+            statusMessage = statusMessage,
+            onRebuildCache = { viewModel.retryGemmaPreparation() },
+            modifier = modifier
+        )
+        return
+    }
 
     // Camera Permissions State
     var hasCameraPermission by remember {
@@ -259,7 +271,8 @@ fun CameraScreen(
             isGemmaChecking = isGemmaChecking,
             onDurationChanged = { viewModel.updateSelectedDurationMinutes(it) },
             onStart = { viewModel.startSession() },
-            onStop = { viewModel.stopSession() }
+            onStop = { viewModel.stopSession() },
+            onRetryGemma = { viewModel.retryGemmaPreparation() }
         )
     }
 }
@@ -370,7 +383,8 @@ fun BottomHUDEngine(
     isGemmaChecking: Boolean,
     onDurationChanged: (Int) -> Unit,
     onStart: () -> Unit,
-    onStop: () -> Unit
+    onStop: () -> Unit,
+    onRetryGemma: () -> Unit
 ) {
     val canStart = (gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success) &&
         !isGemmaChecking
@@ -392,6 +406,8 @@ fun BottomHUDEngine(
                 val stateHeadline = when (gameState) {
                     GameState.ModelDownloadRequired -> "НУЖНА ЗАГРУЗКА"
                     GameState.ModelDownloading -> "СКАЧИВАНИЕ МОДЕЛИ..."
+                    GameState.ModelPreparing -> "ПОДГОТОВКА GEMMA..."
+                    GameState.ModelError -> "ОШИБКА GEMMA RUNTIME"
                     GameState.Idle -> "ЖДЁМ СТАРТА"
                     GameState.StartingDelay -> "СТАРТ ЧЕРЕЗ ${startDelayRemainingSeconds}s"
                     GameState.CheckingStartPose -> "АНАЛИЗИРУЕМ С Gemma VLM..."
@@ -550,6 +566,40 @@ fun BottomHUDEngine(
                 }
             }
 
+        }
+    }
+}
+
+@Composable
+fun GemmaPreparingScreen(statusMessage: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier.fillMaxSize().background(DarkBg),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(color = DarkPrimary)
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(text = statusMessage, color = Color.White, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp))
+        }
+    }
+}
+
+@Composable
+fun GemmaRuntimeErrorScreen(
+    statusMessage: String,
+    onRebuildCache: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier.fillMaxSize().background(DarkBg),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+            Text(text = statusMessage, color = Color.White, textAlign = TextAlign.Center)
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(onClick = onRebuildCache) {
+                Text("ПЕРЕСОБРАТЬ КЭШ GEMMA")
+            }
         }
     }
 }

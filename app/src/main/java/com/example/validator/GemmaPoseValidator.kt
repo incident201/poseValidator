@@ -9,11 +9,19 @@ data class PoseValidationResult(
     val facingAway: Boolean,
     val nude: Boolean,
     val isPassed: Boolean,
-    val rawJson: String? = null
+    val rawJson: String? = null,
+    val technicalError: String? = null
 )
 
 object GemmaPoseValidator {
-    
+    suspend fun prepare(context: Context): Boolean {
+        return LocalGemmaVisionValidator.prepare(context)
+    }
+
+    suspend fun rebuildRuntimeCache(context: Context): Boolean {
+        return LocalGemmaVisionValidator.rebuildRuntimeCache(context)
+    }
+
     // Explicit 2-argument vision-only validation
     suspend fun validatePose(
         context: Context,

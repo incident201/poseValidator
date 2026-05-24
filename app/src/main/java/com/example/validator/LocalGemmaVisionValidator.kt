@@ -29,6 +29,50 @@ object LocalGemmaVisionValidator {
     private var engine: Engine? = null
     private const val GEMMA_IMAGE_MAX_LONG_SIDE = 640
     private const val GEMMA_IMAGE_JPEG_QUALITY = 72
+    private const val LITERT_LM_VERSION = "0.12.0"
+    private const val ENGINE_CACHE_SCHEMA_VERSION = 1
+    private const val ENGINE_CACHE_ROOT_DIR = "gemma_engine_cache"
+
+    private fun getEngineCacheDir(context: Context, modelFile: File): File {
+        val rootDir = File(context.filesDir, ENGINE_CACHE_ROOT_DIR)
+        val cacheSubDirName = "litertlm_${LITERT_LM_VERSION}_schema_${ENGINE_CACHE_SCHEMA_VERSION}_${modelFile.nameWithoutExtension}_${modelFile.length()}_${modelFile.lastModified()}"
+        return File(rootDir, cacheSubDirName)
+    }
+
+    private fun deleteRecursivelySafe(target: File) {
+        if (!target.exists()) return
+        target.walkBottomUp().forEach { file ->
+            if (!file.delete()) {
+                Log.w(TAG, "Unable to delete file/dir during cache cleanup: ${file.absolutePath}")
+            }
+        }
+    }
+
+    suspend fun prepare(context: Context): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val localEngine = getOrInitializeEngine(context)
+            val warmupOutput = localEngine.createConversation().use { conversation ->
+                val output = conversation.sendMessage(
+                    Contents.of(Content.Text("Warm-up. Reply exactly: OK"))
+                )
+                output.contents.contents
+                    .filterIsInstance<Content.Text>()
+                    .joinToString(separator = "\n") { it.text }
+            }
+            Log.i(TAG, "LiteRT-LM warm-up completed: $warmupOutput")
+            true
+        } catch (t: Throwable) {
+            Log.e(TAG, "LiteRT-LM prepare failed: ${t.message}", t)
+            false
+        }
+    }
+
+    suspend fun rebuildRuntimeCache(context: Context): Boolean = withContext(Dispatchers.IO) {
+        close()
+        val cacheRoot = File(context.filesDir, ENGINE_CACHE_ROOT_DIR)
+        deleteRecursivelySafe(cacheRoot)
+        prepare(context)
+    }
 
     @Synchronized
     private fun getOrInitializeEngine(context: Context): Engine {
@@ -43,18 +87,52 @@ object LocalGemmaVisionValidator {
         }
 
         Log.i(TAG, "Initializing local LiteRT-LM Engine using ${modelFile.name}")
-        
-        val config = EngineConfig(
-            modelPath = modelFile.absolutePath,
-            backend = Backend.GPU(),
-            visionBackend = Backend.GPU(),
-            cacheDir = context.cacheDir.absolutePath
-        )
-        val newEngine = Engine(config)
-        newEngine.initialize()
-        engine = newEngine
-        Log.i(TAG, "Successfully initialized LiteRT-LM Engine on GPU backend")
-        return newEngine
+        val cacheDir = getEngineCacheDir(context, modelFile)
+
+        fun createEngine(): Engine {
+            cacheDir.mkdirs()
+            return Engine(
+                EngineConfig(
+                    modelPath = modelFile.absolutePath,
+                    backend = Backend.GPU(),
+                    visionBackend = Backend.GPU(),
+                    cacheDir = cacheDir.absolutePath
+                )
+            )
+        }
+
+        var newEngine: Engine? = null
+        try {
+            newEngine = createEngine()
+            newEngine.initialize()
+            engine = newEngine
+            Log.i(TAG, "Successfully initialized LiteRT-LM Engine on GPU backend")
+            return newEngine
+        } catch (firstError: Throwable) {
+            Log.e(TAG, "Engine.initialize failed (attempt 1), rebuilding runtime cache", firstError)
+            try {
+                newEngine?.close()
+            } catch (_: Throwable) {
+            }
+            engine = null
+            deleteRecursivelySafe(cacheDir)
+            cacheDir.mkdirs()
+
+            val retryEngine = createEngine()
+            try {
+                retryEngine.initialize()
+                engine = retryEngine
+                Log.i(TAG, "Engine.initialize succeeded on retry after cache rebuild")
+                return retryEngine
+            } catch (secondError: Throwable) {
+                try {
+                    retryEngine.close()
+                } catch (_: Throwable) {
+                }
+                engine = null
+                throw secondError
+            }
+        }
     }
 
     private fun getResizedBitmap(image: Bitmap, maxSize: Int): Bitmap {
@@ -162,7 +240,8 @@ Use only true or false.
                 facingAway = false,
                 nude = false,
                 isPassed = false,
-                rawJson = "{\"error\": \"Local Gemma validation failed: ${t.message}\"}"
+                rawJson = "{\"error\": \"Local Gemma validation failed: ${t.message}\"}",
+                technicalError = t.message ?: "Unknown LiteRT-LM runtime error"
             )
         }
     }
