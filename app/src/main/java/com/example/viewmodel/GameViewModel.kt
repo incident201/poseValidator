@@ -26,7 +26,6 @@ enum class GameState {
     ModelDownloadRequired,
     ModelDownloading,
     ModelPreparing,
-    ModelStarting,
     ModelError,
     Idle,
     StartingDelay,
