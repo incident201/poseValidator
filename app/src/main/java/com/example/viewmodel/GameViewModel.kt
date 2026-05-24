@@ -89,6 +89,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private var startDelayJob: Job? = null
     private var timerJob: Job? = null
     private var activeGemmaCheckJob: Job? = null
+    private var movementViolationCount: Int = 0
+    private var lastMovementPenaltyAtMs: Long = 0L
+    private val movementPenaltyCooldownMs: Long = 3000L
+    private var gemmaCheckGeneration: Int = 0
 
     private fun setGemmaChecking(value: Boolean, checkName: String) {
         _isGemmaChecking.value = value
@@ -148,9 +152,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         movementTracker.previousPose?.let { _motionScore.value = calculateSingleDisplacement(pose, it) }
 
         when (violation) {
-            is MovementTracker.Violation.DriftLimitExceeded -> triggerDefeat("Пользователь сильно сдвинулся")
-            is MovementTracker.Violation.MotionLimitExceeded -> triggerDefeat("Пользователь резко двинулся")
-            is MovementTracker.Violation.PersonDisappeared -> triggerDefeat("Человек пропал из кадра")
+            is MovementTracker.Violation.DriftLimitExceeded,
+            is MovementTracker.Violation.MotionLimitExceeded,
+            is MovementTracker.Violation.PersonDisappeared -> handleMovementViolation(violation, pose)
             else -> {}
         }
     }
@@ -165,10 +169,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _isGemmaChecking.value = false
         _startDelayRemainingSeconds.value = 0
         movementTracker.reset()
+        movementViolationCount = 0
+        lastMovementPenaltyAtMs = 0L
 
         startDelayJob?.cancel()
         timerJob?.cancel()
         activeGemmaCheckJob?.cancel()
+        gemmaCheckGeneration += 1
 
         startDelayJob = viewModelScope.launch {
             _gameState.value = GameState.StartingDelay
@@ -195,11 +202,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
             _timerSeconds.value = _selectedDurationSeconds.value.coerceAtLeast(minimumDurationSeconds)
             movementTracker.reset()
+            movementViolationCount = 0
+            lastMovementPenaltyAtMs = 0L
             movementTracker.startTracking(initialPose)
             _gameState.value = GameState.HoldingPose
             _statusMessage.value = "Таймер запущен. Проверяю стартовую позу..."
             startTimerLoop()
-            speak("Время пошло")
+            speak("Время пошло. Идет проверка")
 
             launchGemmaCheck(
                 checkName = "Стартовая проверка",
@@ -232,22 +241,29 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             triggerDefeat("$checkName: камера не предоставила кадр")
             return
         }
-        if (activeGemmaCheckJob?.isActive == true) {
-            Log.i(TAG, "$checkName пропущена: предыдущая Gemma-проверка ещё выполняется")
-            return
-        }
+        activeGemmaCheckJob?.cancel()
+        val currentGeneration = ++gemmaCheckGeneration
 
         activeGemmaCheckJob = viewModelScope.launch {
             setGemmaChecking(true, checkName)
             try {
                 Log.i(TAG, "$checkName: validatePose started")
                 val result = GemmaPoseValidator.validatePose(getApplication(), snapshot)
+                if (currentGeneration != gemmaCheckGeneration) {
+                    Log.i(TAG, "$checkName: устаревший результат Gemma проигнорирован")
+                    return@launch
+                }
                 Log.i(TAG, "$checkName: validatePose returned, passed=${result.isPassed}, rawJson=${result.rawJson}")
                 setGemmaChecking(false, checkName)
 
                 if (!result.isPassed) {
-                    triggerDefeat(buildGemmaFailReason(result, checkName))
+                    val failMessage = buildGemmaFailureVoiceMessage(result)
+                    triggerDefeat(buildGemmaFailReason(result, checkName), failMessage)
                     return@launch
+                }
+
+                if (!isFinal) {
+                    speak("Поза подтверждена. Удерживайте позицию")
                 }
 
                 if (isFinal) {
@@ -257,12 +273,77 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                     _statusMessage.value = "$checkName пройдена"
                 }
             } catch (e: Throwable) {
+                if (currentGeneration != gemmaCheckGeneration) return@launch
                 Log.e(TAG, "$checkName failed", e)
                 triggerDefeat("$checkName: ошибка Gemma: ${e.message}")
             } finally {
-                setGemmaChecking(false, checkName)
-                activeGemmaCheckJob = null
+                if (currentGeneration == gemmaCheckGeneration) {
+                    setGemmaChecking(false, checkName)
+                    activeGemmaCheckJob = null
+                }
             }
+        }
+    }
+
+
+    private fun handleMovementViolation(violation: MovementTracker.Violation, pose: PoseLandmarks) {
+        val now = System.currentTimeMillis()
+        if (lastMovementPenaltyAtMs > 0L && now - lastMovementPenaltyAtMs < movementPenaltyCooldownMs) {
+            if (_gameState.value == GameState.HoldingPose) {
+                movementTracker.startTracking(pose)
+            }
+            return
+        }
+
+        movementViolationCount += 1
+        when (movementViolationCount) {
+            1 -> {
+                _timerSeconds.value += 60
+                speak("Вы двинулись. Плюс 1 минута к таймеру")
+                _statusMessage.value = "Зафиксировано движение: +1 минута"
+                lastMovementPenaltyAtMs = now
+            }
+
+            2 -> {
+                _timerSeconds.value += 180
+                speak("Вы снова двинулись. Плюс 3 минуты к таймеру")
+                _statusMessage.value = "Зафиксировано повторное движение: +3 минуты"
+                lastMovementPenaltyAtMs = now
+            }
+
+            else -> {
+                _timerSeconds.value += 180
+                speak("Вы снова двинулись. Плюс 3 минуты к таймеру")
+                _statusMessage.value = "Зафиксировано повторное движение: +3 минуты"
+                lastMovementPenaltyAtMs = now
+            }
+        }
+
+        if (_gameState.value == GameState.HoldingPose) {
+            movementTracker.startTracking(pose)
+            viewModelScope.launch {
+                delay(movementPenaltyCooldownMs)
+                if (_gameState.value != GameState.HoldingPose) return@launch
+                val snapshot = latestBitmap ?: run {
+                    triggerDefeat("Повторная проверка позы: камера не предоставила кадр")
+                    return@launch
+                }
+                speak("Выполняется проверка позы")
+                launchGemmaCheck(
+                    checkName = "Повторная проверка позы после движения",
+                    snapshot = snapshot,
+                    isFinal = false
+                )
+            }
+        }
+    }
+
+    private fun buildGemmaFailureVoiceMessage(result: PoseValidationResult): String {
+        return when {
+            !result.personPresent -> "Проверка позы не пройдена. Вас не видно"
+            !result.facingAway -> "Проверка позы не пройдена. Встаньте лицом к стене"
+            !result.nude -> "Проверка позы не пройдена. Снимите одежду"
+            else -> "Проверка позы не пройдена"
         }
     }
 
@@ -278,7 +359,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun triggerDefeat(reason: String) {
+    fun triggerDefeat(reason: String, voiceMessage: String = "Вы не справились. Попробуйте снова") {
         val alreadyFailed = _gameState.value == GameState.Failed
         startDelayJob?.cancel()
         timerJob?.cancel()
@@ -289,7 +370,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _defeatReason.value = reason
         _statusMessage.value = "Проверка не пройдена"
         if (!alreadyFailed) {
-            speak("Вы не справились.")
+            speak(voiceMessage)
         }
     }
 
@@ -310,6 +391,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _motionScore.value = 0f
         _timerSeconds.value = _selectedDurationSeconds.value
         movementTracker.reset()
+        movementViolationCount = 0
+        lastMovementPenaltyAtMs = 0L
     }
 
     private fun calculateSingleDisplacement(p1: PoseLandmarks, p2: PoseLandmarks): Float {
