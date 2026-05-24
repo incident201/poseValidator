@@ -10,6 +10,7 @@ import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -49,11 +50,22 @@ object LocalGemmaVisionValidator {
     }
 
     suspend fun prepare(context: Context): Boolean = withContext(Dispatchers.IO) {
+        var warmupBitmap: Bitmap? = null
+        val tempWarmupImage = File(context.cacheDir, "gemma_warmup_${System.nanoTime()}.jpg")
         try {
             val localEngine = getOrInitializeEngine(context)
+            warmupBitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
+                eraseColor(android.graphics.Color.GRAY)
+            }
+            FileOutputStream(tempWarmupImage).use { out ->
+                warmupBitmap.compress(Bitmap.CompressFormat.JPEG, GEMMA_IMAGE_JPEG_QUALITY, out)
+            }
             val warmupOutput = localEngine.createConversation().use { conversation ->
                 val output = conversation.sendMessage(
-                    Contents.of(Content.Text("Warm-up. Reply exactly: OK"))
+                    Contents.of(
+                        Content.ImageFile(tempWarmupImage.absolutePath),
+                        Content.Text("Warm-up vision request. Reply exactly: OK")
+                    )
                 )
                 output.contents.contents
                     .filterIsInstance<Content.Text>()
@@ -61,9 +73,16 @@ object LocalGemmaVisionValidator {
             }
             Log.i(TAG, "LiteRT-LM warm-up completed: $warmupOutput")
             true
+        } catch (e: CancellationException) {
+            throw e
         } catch (t: Throwable) {
             Log.e(TAG, "LiteRT-LM prepare failed: ${t.message}", t)
             false
+        } finally {
+            if (tempWarmupImage.exists()) {
+                tempWarmupImage.delete()
+            }
+            warmupBitmap?.recycle()
         }
     }
 
@@ -150,16 +169,13 @@ object LocalGemmaVisionValidator {
     }
 
     suspend fun validatePose(context: Context, bitmap: Bitmap): PoseValidationResult = withContext(Dispatchers.IO) {
+        val tempImgFile = File(context.cacheDir, "gemma_vision_frame_${System.nanoTime()}.jpg")
         try {
             val localEngine = getOrInitializeEngine(context)
             
             // Re-create a light isolated conversation scope to ensure past images/history do not leak or pollute this check
 
             // Resize and write bitmap to temporary cached file for SDK input support
-            val tempImgFile = File(context.cacheDir, "gemma_vision_frame.jpg")
-            if (tempImgFile.exists()) {
-                tempImgFile.delete()
-            }
             FileOutputStream(tempImgFile).use { out ->
                 val resized = getResizedBitmap(bitmap, GEMMA_IMAGE_MAX_LONG_SIDE)
                 resized.compress(Bitmap.CompressFormat.JPEG, GEMMA_IMAGE_JPEG_QUALITY, out)
@@ -219,13 +235,6 @@ Use only true or false.
                 cleanJson.contains("\"nude\"\\s*:\\s*true".toRegex(RegexOption.IGNORE_CASE))
             )
 
-            // Cleanup the temporary image file
-            try {
-                if (tempImgFile.exists()) tempImgFile.delete()
-            } catch (t: Throwable) {
-                // Ignore
-            }
-
             return@withContext PoseValidationResult(
                 personPresent = personPresent,
                 facingAway = facingAway,
@@ -233,6 +242,8 @@ Use only true or false.
                 isPassed = personPresent && facingAway && nude,
                 rawJson = cleanJson
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (t: Throwable) {
             Log.e(TAG, "Error performing on-device local model validation: ${t.message}", t)
             return@withContext PoseValidationResult(
@@ -243,6 +254,11 @@ Use only true or false.
                 rawJson = "{\"error\": \"Local Gemma validation failed: ${t.message}\"}",
                 technicalError = t.message ?: "Unknown LiteRT-LM runtime error"
             )
+        } finally {
+            try {
+                if (tempImgFile.exists()) tempImgFile.delete()
+            } catch (_: Throwable) {
+            }
         }
     }
 

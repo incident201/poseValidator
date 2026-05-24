@@ -83,6 +83,7 @@ fun CameraScreen(
     val downloadBytesInfo by viewModel.downloadBytesInfo.collectAsState()
 
     val keepScreenOn = gameState == GameState.ModelDownloading ||
+        gameState == GameState.ModelPreparing ||
         gameState == GameState.StartingDelay ||
         gameState == GameState.HoldingPose ||
         gameState == GameState.CheckingFinalPose ||
@@ -271,8 +272,7 @@ fun CameraScreen(
             isGemmaChecking = isGemmaChecking,
             onDurationChanged = { viewModel.updateSelectedDurationMinutes(it) },
             onStart = { viewModel.startSession() },
-            onStop = { viewModel.stopSession() },
-            onRetryGemma = { viewModel.retryGemmaPreparation() }
+            onStop = { viewModel.stopSession() }
         )
     }
 }
@@ -383,8 +383,7 @@ fun BottomHUDEngine(
     isGemmaChecking: Boolean,
     onDurationChanged: (Int) -> Unit,
     onStart: () -> Unit,
-    onStop: () -> Unit,
-    onRetryGemma: () -> Unit
+    onStop: () -> Unit
 ) {
     val canStart = (gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success) &&
         !isGemmaChecking

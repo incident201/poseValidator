@@ -11,6 +11,7 @@ import com.example.tracker.PoseLandmarks
 import com.example.validator.GemmaModelManager
 import com.example.validator.GemmaPoseValidator
 import com.example.validator.PoseValidationResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -301,10 +302,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 } else if (_gameState.value == GameState.HoldingPose) {
                     _statusMessage.value = "$checkName пройдена"
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Throwable) {
                 if (currentGeneration != gemmaCheckGeneration) return@launch
                 Log.e(TAG, "$checkName failed", e)
-                triggerDefeat("$checkName: ошибка Gemma: ${e.message}")
+                handleGemmaRuntimeError(checkName, e.message ?: "Unknown Gemma runtime error")
             } finally {
                 if (currentGeneration == gemmaCheckGeneration) {
                     setGemmaChecking(false, checkName)
