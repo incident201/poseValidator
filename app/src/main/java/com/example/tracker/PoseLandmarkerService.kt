@@ -32,7 +32,7 @@ class PoseLandmarkerService(
         try {
             Log.i(TAG, "Initializing MediaPipe Pose Landmarker from assets")
             val baseOptions = BaseOptions.builder()
-                .setModelAssetPath("pose_landmarker_full.task")
+                .setModelAssetPath("pose_landmarker_heavy.task")
                 .build()
 
             val options = PoseLandmarker.PoseLandmarkerOptions.builder()
