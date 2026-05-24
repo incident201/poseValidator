@@ -26,6 +26,7 @@ enum class GameState {
     ModelDownloadRequired,
     ModelDownloading,
     ModelPreparing,
+    ModelStarting,
     ModelError,
     Idle,
     StartingDelay,
@@ -104,7 +105,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         if (GemmaModelManager.isModelDownloaded(application)) {
-            prepareGemmaRuntime()
+            if (GemmaPoseValidator.isRuntimeCachePrepared(application)) {
+                startGemmaRuntimeFromPreparedCache()
+            } else {
+                prepareGemmaRuntime(forceRebuild = false)
+            }
         } else {
             _gameState.value = GameState.ModelDownloadRequired
             _statusMessage.value = "Требуется скачать локальную Gemma модель"
@@ -149,6 +154,21 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 GemmaPoseValidator.prepare(getApplication())
             }
+            if (prepared) {
+                _gameState.value = GameState.Idle
+                _statusMessage.value = "Gemma готова. Камера активна."
+            } else {
+                _gameState.value = GameState.ModelError
+                _statusMessage.value = "Не удалось подготовить Gemma runtime. Нажмите \"Пересобрать кэш\"."
+            }
+        }
+    }
+
+    private fun startGemmaRuntimeFromPreparedCache() {
+        _gameState.value = GameState.ModelStarting
+        _statusMessage.value = "Запуск Gemma runtime..."
+        viewModelScope.launch {
+            val prepared = GemmaPoseValidator.prepare(getApplication())
             if (prepared) {
                 _gameState.value = GameState.Idle
                 _statusMessage.value = "Gemma готова. Камера активна."
