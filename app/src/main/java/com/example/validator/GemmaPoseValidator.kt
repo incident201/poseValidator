@@ -26,6 +26,14 @@ object GemmaPoseValidator {
         return LocalGemmaVisionValidator.rebuildRuntimeCache(context)
     }
 
+    fun wasPreviousPrepareInterrupted(context: Context): Boolean {
+        return LocalGemmaVisionValidator.wasPreviousPrepareInterrupted(context)
+    }
+
+    suspend fun hardResetRuntimeStatePreservingModel(context: Context): Boolean {
+        return LocalGemmaVisionValidator.hardResetRuntimeStatePreservingModel(context)
+    }
+
     // Explicit 2-argument vision-only validation
     suspend fun validatePose(
         context: Context,

@@ -105,7 +105,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         if (GemmaModelManager.isModelDownloaded(application)) {
-            if (GemmaPoseValidator.hasCompletedInitialRuntimePreparation(application)) {
+            if (GemmaPoseValidator.wasPreviousPrepareInterrupted(application)) {
+                recoverGemmaAfterInterruptedPrepare()
+            } else if (GemmaPoseValidator.hasCompletedInitialRuntimePreparation(application)) {
                 startGemmaRuntimeFromPreparedCache()
             } else {
                 prepareGemmaRuntime(forceRebuild = false)
@@ -160,7 +162,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 _statusMessage.value = "Gemma готова. Камера активна."
             } else {
                 _gameState.value = GameState.ModelError
-                _statusMessage.value = "Не удалось подготовить Gemma runtime. Нажмите \"Пересобрать кэш\"."
+                _statusMessage.value = "Не удалось подготовить Gemma runtime. Можно пересобрать runtime или скачать модель заново."
             }
         }
     }
@@ -176,15 +178,62 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 _statusMessage.value = "Gemma готова. Камера активна."
             } else {
                 _gameState.value = GameState.ModelError
-                _statusMessage.value = "Не удалось подготовить Gemma runtime. Нажмите \"Пересобрать кэш\"."
+                _statusMessage.value = "Не удалось подготовить Gemma runtime. Можно пересобрать runtime или скачать модель заново."
             }
         }
     }
 
     fun retryGemmaPreparation() {
-        prepareGemmaRuntime(forceRebuild = true)
+        hardResetGemmaRuntimePreservingModel()
     }
 
+
+    private fun recoverGemmaAfterInterruptedPrepare() {
+        _defeatReason.value = ""
+        _gameState.value = GameState.ModelPreparing
+        _statusMessage.value = "Обнаружен сбой предыдущего запуска Gemma. Восстанавливаем runtime без повторного скачивания модели..."
+        viewModelScope.launch {
+            val recovered = GemmaPoseValidator.hardResetRuntimeStatePreservingModel(getApplication())
+            if (recovered) {
+                _gameState.value = GameState.Idle
+                _statusMessage.value = "Gemma восстановлена. Камера активна."
+            } else {
+                _gameState.value = GameState.ModelError
+                _statusMessage.value = "Не удалось восстановить Gemma runtime. Можно пересобрать runtime или скачать модель заново."
+            }
+        }
+    }
+
+    private fun hardResetGemmaRuntimePreservingModel() {
+        _defeatReason.value = ""
+        _gameState.value = GameState.ModelPreparing
+        _statusMessage.value = "Пересборка Gemma runtime без удаления модели..."
+        viewModelScope.launch {
+            val recovered = GemmaPoseValidator.hardResetRuntimeStatePreservingModel(getApplication())
+            if (recovered) {
+                _gameState.value = GameState.Idle
+                _statusMessage.value = "Gemma готова. Камера активна."
+            } else {
+                _gameState.value = GameState.ModelError
+                _statusMessage.value = "Не удалось восстановить Gemma runtime. Можно пересобрать runtime или скачать модель заново."
+            }
+        }
+    }
+
+    fun deleteModelAndRestartDownload() {
+        _defeatReason.value = ""
+        _gameState.value = GameState.ModelPreparing
+        _statusMessage.value = "Удаляем модель и runtime..."
+        viewModelScope.launch {
+            GemmaPoseValidator.close()
+            GemmaPoseValidator.rebuildRuntimeCache(getApplication())
+            GemmaModelManager.deleteModel(getApplication())
+            _downloadProgress.value = 0f
+            _downloadBytesInfo.value = "0 / 0 MB"
+            _gameState.value = GameState.ModelDownloadRequired
+            _statusMessage.value = "Модель удалена. Скачайте её заново."
+        }
+    }
     fun processMediaPipeResults(pose: PoseLandmarks, timestamp: Long) {
         latestLandmarks = pose
         val state = _gameState.value
@@ -448,7 +497,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _isGemmaChecking.value = false
         _startDelayRemainingSeconds.value = 0
         _gameState.value = GameState.ModelError
-        _statusMessage.value = "Не удалось подготовить Gemma runtime. Нажмите \"Пересобрать кэш\"."
+        _statusMessage.value = "Не удалось подготовить Gemma runtime. Можно пересобрать runtime или скачать модель заново."
         _defeatReason.value = "$checkName: техническая ошибка Gemma runtime: $error"
     }
 

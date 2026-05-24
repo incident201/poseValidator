@@ -116,6 +116,7 @@ fun CameraScreen(
         GemmaRuntimeErrorScreen(
             statusMessage = statusMessage,
             onRebuildCache = { viewModel.retryGemmaPreparation() },
+            onDeleteModel = { viewModel.deleteModelAndRestartDownload() },
             modifier = modifier
         )
         return
@@ -683,6 +684,7 @@ fun GemmaStartingScreen(
 fun GemmaRuntimeErrorScreen(
     statusMessage: String,
     onRebuildCache: () -> Unit,
+    onDeleteModel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -693,7 +695,11 @@ fun GemmaRuntimeErrorScreen(
             Text(text = statusMessage, color = Color.White, textAlign = TextAlign.Center)
             Spacer(modifier = Modifier.height(16.dp))
             Button(onClick = onRebuildCache) {
-                Text("ПЕРЕСОБРАТЬ КЭШ GEMMA")
+                Text("ПЕРЕСОБРАТЬ GEMMA RUNTIME")
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(onClick = onDeleteModel) {
+                Text("УДАЛИТЬ МОДЕЛЬ И СКАЧАТЬ ЗАНОВО")
             }
         }
     }
