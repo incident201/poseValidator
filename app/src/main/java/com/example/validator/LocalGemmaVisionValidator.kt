@@ -10,6 +10,7 @@ import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -29,6 +30,91 @@ object LocalGemmaVisionValidator {
     private var engine: Engine? = null
     private const val GEMMA_IMAGE_MAX_LONG_SIDE = 640
     private const val GEMMA_IMAGE_JPEG_QUALITY = 72
+    private const val LITERT_LM_VERSION = "0.12.0"
+    private const val ENGINE_CACHE_SCHEMA_VERSION = 1
+    private const val ENGINE_CACHE_ROOT_DIR = "gemma_engine_cache"
+
+    private fun getEngineCacheDir(context: Context, modelFile: File): File {
+        val rootDir = File(context.filesDir, ENGINE_CACHE_ROOT_DIR)
+        val cacheSubDirName = "litertlm_${LITERT_LM_VERSION}_schema_${ENGINE_CACHE_SCHEMA_VERSION}_${modelFile.nameWithoutExtension}_${modelFile.length()}_${modelFile.lastModified()}"
+        return File(rootDir, cacheSubDirName)
+    }
+
+    private fun deleteRecursivelySafe(target: File) {
+        if (!target.exists()) return
+        target.walkBottomUp().forEach { file ->
+            if (!file.delete()) {
+                Log.w(TAG, "Unable to delete file/dir during cache cleanup: ${file.absolutePath}")
+            }
+        }
+    }
+
+    private fun deleteRuntimeCacheRoot(context: Context) {
+        deleteRecursivelySafe(File(context.filesDir, ENGINE_CACHE_ROOT_DIR))
+    }
+
+    private suspend fun runVisionWarmup(context: Context, localEngine: Engine): String {
+        var warmupBitmap: Bitmap? = null
+        val tempWarmupImage = File(context.cacheDir, "gemma_warmup_${System.nanoTime()}.jpg")
+        try {
+            warmupBitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
+                eraseColor(android.graphics.Color.GRAY)
+            }
+            FileOutputStream(tempWarmupImage).use { out ->
+                warmupBitmap.compress(Bitmap.CompressFormat.JPEG, GEMMA_IMAGE_JPEG_QUALITY, out)
+            }
+            return localEngine.createConversation().use { conversation ->
+                val output = conversation.sendMessage(
+                    Contents.of(
+                        Content.ImageFile(tempWarmupImage.absolutePath),
+                        Content.Text("Warm-up vision request. Reply exactly: OK")
+                    )
+                )
+                output.contents.contents
+                    .filterIsInstance<Content.Text>()
+                    .joinToString(separator = "\n") { it.text }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } finally {
+            if (tempWarmupImage.exists()) {
+                tempWarmupImage.delete()
+            }
+            warmupBitmap?.recycle()
+        }
+    }
+
+    suspend fun prepare(context: Context): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val localEngine = getOrInitializeEngine(context)
+            val warmupOutput = runVisionWarmup(context, localEngine)
+            Log.i(TAG, "LiteRT-LM warm-up completed: $warmupOutput")
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (firstError: Throwable) {
+            Log.e(TAG, "LiteRT-LM prepare failed on attempt 1, rebuilding runtime cache", firstError)
+            close()
+            deleteRuntimeCacheRoot(context)
+            try {
+                val retryEngine = getOrInitializeEngine(context)
+                val warmupOutput = runVisionWarmup(context, retryEngine)
+                Log.i(TAG, "LiteRT-LM warm-up completed after runtime cache rebuild: $warmupOutput")
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (secondError: Throwable) {
+                Log.e(TAG, "LiteRT-LM prepare failed after runtime cache rebuild", secondError)
+                false
+            }
+        }
+    }
+
+    suspend fun rebuildRuntimeCache(context: Context): Boolean = withContext(Dispatchers.IO) {
+        close()
+        deleteRuntimeCacheRoot(context)
+        prepare(context)
+    }
 
     @Synchronized
     private fun getOrInitializeEngine(context: Context): Engine {
@@ -43,18 +129,52 @@ object LocalGemmaVisionValidator {
         }
 
         Log.i(TAG, "Initializing local LiteRT-LM Engine using ${modelFile.name}")
-        
-        val config = EngineConfig(
-            modelPath = modelFile.absolutePath,
-            backend = Backend.GPU(),
-            visionBackend = Backend.GPU(),
-            cacheDir = context.cacheDir.absolutePath
-        )
-        val newEngine = Engine(config)
-        newEngine.initialize()
-        engine = newEngine
-        Log.i(TAG, "Successfully initialized LiteRT-LM Engine on GPU backend")
-        return newEngine
+        val cacheDir = getEngineCacheDir(context, modelFile)
+
+        fun createEngine(): Engine {
+            cacheDir.mkdirs()
+            return Engine(
+                EngineConfig(
+                    modelPath = modelFile.absolutePath,
+                    backend = Backend.GPU(),
+                    visionBackend = Backend.GPU(),
+                    cacheDir = cacheDir.absolutePath
+                )
+            )
+        }
+
+        var newEngine: Engine? = null
+        try {
+            newEngine = createEngine()
+            newEngine.initialize()
+            engine = newEngine
+            Log.i(TAG, "Successfully initialized LiteRT-LM Engine on GPU backend")
+            return newEngine
+        } catch (firstError: Throwable) {
+            Log.e(TAG, "Engine.initialize failed (attempt 1), rebuilding runtime cache", firstError)
+            try {
+                newEngine?.close()
+            } catch (_: Throwable) {
+            }
+            engine = null
+            deleteRecursivelySafe(cacheDir)
+            cacheDir.mkdirs()
+
+            val retryEngine = createEngine()
+            try {
+                retryEngine.initialize()
+                engine = retryEngine
+                Log.i(TAG, "Engine.initialize succeeded on retry after cache rebuild")
+                return retryEngine
+            } catch (secondError: Throwable) {
+                try {
+                    retryEngine.close()
+                } catch (_: Throwable) {
+                }
+                engine = null
+                throw secondError
+            }
+        }
     }
 
     private fun getResizedBitmap(image: Bitmap, maxSize: Int): Bitmap {
@@ -72,16 +192,13 @@ object LocalGemmaVisionValidator {
     }
 
     suspend fun validatePose(context: Context, bitmap: Bitmap): PoseValidationResult = withContext(Dispatchers.IO) {
+        val tempImgFile = File(context.cacheDir, "gemma_vision_frame_${System.nanoTime()}.jpg")
         try {
             val localEngine = getOrInitializeEngine(context)
             
             // Re-create a light isolated conversation scope to ensure past images/history do not leak or pollute this check
 
             // Resize and write bitmap to temporary cached file for SDK input support
-            val tempImgFile = File(context.cacheDir, "gemma_vision_frame.jpg")
-            if (tempImgFile.exists()) {
-                tempImgFile.delete()
-            }
             FileOutputStream(tempImgFile).use { out ->
                 val resized = getResizedBitmap(bitmap, GEMMA_IMAGE_MAX_LONG_SIDE)
                 resized.compress(Bitmap.CompressFormat.JPEG, GEMMA_IMAGE_JPEG_QUALITY, out)
@@ -141,13 +258,6 @@ Use only true or false.
                 cleanJson.contains("\"nude\"\\s*:\\s*true".toRegex(RegexOption.IGNORE_CASE))
             )
 
-            // Cleanup the temporary image file
-            try {
-                if (tempImgFile.exists()) tempImgFile.delete()
-            } catch (t: Throwable) {
-                // Ignore
-            }
-
             return@withContext PoseValidationResult(
                 personPresent = personPresent,
                 facingAway = facingAway,
@@ -155,6 +265,8 @@ Use only true or false.
                 isPassed = personPresent && facingAway && nude,
                 rawJson = cleanJson
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (t: Throwable) {
             Log.e(TAG, "Error performing on-device local model validation: ${t.message}", t)
             return@withContext PoseValidationResult(
@@ -162,8 +274,14 @@ Use only true or false.
                 facingAway = false,
                 nude = false,
                 isPassed = false,
-                rawJson = "{\"error\": \"Local Gemma validation failed: ${t.message}\"}"
+                rawJson = "{\"error\": \"Local Gemma validation failed: ${t.message}\"}",
+                technicalError = t.message ?: "Unknown LiteRT-LM runtime error"
             )
+        } finally {
+            try {
+                if (tempImgFile.exists()) tempImgFile.delete()
+            } catch (_: Throwable) {
+            }
         }
     }
 

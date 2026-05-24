@@ -11,6 +11,7 @@ import com.example.tracker.PoseLandmarks
 import com.example.validator.GemmaModelManager
 import com.example.validator.GemmaPoseValidator
 import com.example.validator.PoseValidationResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -24,6 +25,8 @@ import kotlinx.coroutines.launch
 enum class GameState {
     ModelDownloadRequired,
     ModelDownloading,
+    ModelPreparing,
+    ModelError,
     Idle,
     StartingDelay,
     CheckingStartPose,
@@ -39,7 +42,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val minimumDurationSeconds = 180
     private val startDelaySeconds = 10
 
-    private val _gameState = MutableStateFlow(GameState.Idle)
+    private val _gameState = MutableStateFlow(GameState.ModelPreparing)
     val gameState: StateFlow<GameState> = _gameState.asStateFlow()
 
     private val _timerSeconds = MutableStateFlow(minimumDurationSeconds)
@@ -101,7 +104,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         if (GemmaModelManager.isModelDownloaded(application)) {
-            _gameState.value = GameState.Idle
+            prepareGemmaRuntime()
         } else {
             _gameState.value = GameState.ModelDownloadRequired
             _statusMessage.value = "Требуется скачать локальную Gemma модель"
@@ -127,8 +130,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 _downloadBytesInfo.value = String.format("%.1f MB / %.1f MB (%.0f%%)", downloaded, total, progress * 100)
             }
             if (success) {
-                _gameState.value = GameState.Idle
-                _statusMessage.value = "Модель успешно загружена! Камера активна."
+                prepareGemmaRuntime(forceRebuild = true)
             } else {
                 _gameState.value = GameState.ModelDownloadRequired
                 _statusMessage.value = "Ошибка скачивания. Пожалуйста, попробуйте снова."
@@ -137,6 +139,29 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setLatestBitmap(bitmap: Bitmap) { latestBitmap = bitmap }
+
+    private fun prepareGemmaRuntime(forceRebuild: Boolean = false) {
+        _gameState.value = GameState.ModelPreparing
+        _statusMessage.value = "Подготовка локальной Gemma модели... Первый запуск после установки или обновления может занять некоторое время."
+        viewModelScope.launch {
+            val prepared = if (forceRebuild) {
+                GemmaPoseValidator.rebuildRuntimeCache(getApplication())
+            } else {
+                GemmaPoseValidator.prepare(getApplication())
+            }
+            if (prepared) {
+                _gameState.value = GameState.Idle
+                _statusMessage.value = "Gemma готова. Камера активна."
+            } else {
+                _gameState.value = GameState.ModelError
+                _statusMessage.value = "Не удалось подготовить Gemma runtime. Нажмите \"Пересобрать кэш\"."
+            }
+        }
+    }
+
+    fun retryGemmaPreparation() {
+        prepareGemmaRuntime(forceRebuild = true)
+    }
 
     fun processMediaPipeResults(pose: PoseLandmarks, timestamp: Long) {
         latestLandmarks = pose
@@ -256,6 +281,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 Log.i(TAG, "$checkName: validatePose returned, passed=${result.isPassed}, rawJson=${result.rawJson}")
                 setGemmaChecking(false, checkName)
 
+                if (result.technicalError != null) {
+                    handleGemmaRuntimeError(checkName, result.technicalError)
+                    return@launch
+                }
+
                 if (!result.isPassed) {
                     val failMessage = buildGemmaFailureVoiceMessage(result)
                     triggerDefeat(buildGemmaFailReason(result, checkName), failMessage)
@@ -272,10 +302,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 } else if (_gameState.value == GameState.HoldingPose) {
                     _statusMessage.value = "$checkName пройдена"
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Throwable) {
                 if (currentGeneration != gemmaCheckGeneration) return@launch
                 Log.e(TAG, "$checkName failed", e)
-                triggerDefeat("$checkName: ошибка Gemma: ${e.message}")
+                handleGemmaRuntimeError(checkName, e.message ?: "Unknown Gemma runtime error")
             } finally {
                 if (currentGeneration == gemmaCheckGeneration) {
                     setGemmaChecking(false, checkName)
@@ -385,6 +417,17 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         if (!alreadyFailed) {
             speak(voiceMessage)
         }
+    }
+
+    private fun handleGemmaRuntimeError(checkName: String, error: String) {
+        startDelayJob?.cancel()
+        timerJob?.cancel()
+        activeGemmaCheckJob?.cancel()
+        _isGemmaChecking.value = false
+        _startDelayRemainingSeconds.value = 0
+        _gameState.value = GameState.ModelError
+        _statusMessage.value = "Не удалось подготовить Gemma runtime. Нажмите \"Пересобрать кэш\"."
+        _defeatReason.value = "$checkName: техническая ошибка Gemma runtime: $error"
     }
 
     private fun speak(text: String) {
