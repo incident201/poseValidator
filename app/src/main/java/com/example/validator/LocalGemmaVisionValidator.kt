@@ -34,9 +34,10 @@ object LocalGemmaVisionValidator {
     private const val ENGINE_CACHE_SCHEMA_VERSION = 1
     private const val ENGINE_CACHE_ROOT_DIR = "gemma_engine_cache"
     private const val RUNTIME_PREFS_NAME = "gemma_runtime_state"
-    private const val RUNTIME_READY_KEY = "runtime_ready_key"
+    private const val INITIAL_PREPARATION_KEY = "initial_preparation_key"
+    private var processCacheResetDone = false
 
-    private fun getRuntimeReadyKey(context: Context): String {
+    private fun getInitialPreparationKey(context: Context): String {
         val modelFile = GemmaModelManager.getModelFile(context)
         return "litertlm_${LITERT_LM_VERSION}_schema_${ENGINE_CACHE_SCHEMA_VERSION}_${modelFile.nameWithoutExtension}_${modelFile.length()}_${modelFile.lastModified()}"
     }
@@ -57,30 +58,39 @@ object LocalGemmaVisionValidator {
     }
 
     private fun deleteRuntimeCacheRoot(context: Context) {
+        close()
         deleteRecursivelySafe(File(context.filesDir, ENGINE_CACHE_ROOT_DIR))
-        clearRuntimeCachePreparedMarker(context)
+        processCacheResetDone = true
     }
 
-    fun isRuntimeCachePrepared(context: Context): Boolean {
+    fun hasCompletedInitialRuntimePreparation(context: Context): Boolean {
         val modelFile = GemmaModelManager.getModelFile(context)
         if (!modelFile.exists()) return false
         val prefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
-        val savedMarker = prefs.getString(RUNTIME_READY_KEY, null) ?: return false
-        return savedMarker == getRuntimeReadyKey(context)
+        val savedMarker = prefs.getString(INITIAL_PREPARATION_KEY, null) ?: return false
+        return savedMarker == getInitialPreparationKey(context)
     }
 
-    private fun markRuntimeCachePrepared(context: Context) {
+    private fun markInitialRuntimePreparationCompleted(context: Context) {
         context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
-            .putString(RUNTIME_READY_KEY, getRuntimeReadyKey(context))
+            .putString(INITIAL_PREPARATION_KEY, getInitialPreparationKey(context))
             .apply()
     }
 
-    private fun clearRuntimeCachePreparedMarker(context: Context) {
+    private fun clearInitialRuntimePreparationMarker(context: Context) {
         context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
-            .remove(RUNTIME_READY_KEY)
+            .remove(INITIAL_PREPARATION_KEY)
             .apply()
+    }
+
+    @Synchronized
+    private fun resetRuntimeCacheOncePerProcess(context: Context) {
+        if (processCacheResetDone) return
+        close()
+        deleteRecursivelySafe(File(context.filesDir, ENGINE_CACHE_ROOT_DIR))
+        processCacheResetDone = true
     }
 
     private suspend fun runVisionWarmup(context: Context, localEngine: Engine): String {
@@ -119,7 +129,7 @@ object LocalGemmaVisionValidator {
             val localEngine = getOrInitializeEngine(context)
             val warmupOutput = runVisionWarmup(context, localEngine)
             Log.i(TAG, "LiteRT-LM warm-up completed: $warmupOutput")
-            markRuntimeCachePrepared(context)
+            markInitialRuntimePreparationCompleted(context)
             true
         } catch (e: CancellationException) {
             throw e
@@ -131,20 +141,20 @@ object LocalGemmaVisionValidator {
                 val retryEngine = getOrInitializeEngine(context)
                 val warmupOutput = runVisionWarmup(context, retryEngine)
                 Log.i(TAG, "LiteRT-LM warm-up completed after runtime cache rebuild: $warmupOutput")
-                markRuntimeCachePrepared(context)
+                markInitialRuntimePreparationCompleted(context)
                 true
             } catch (e: CancellationException) {
                 throw e
             } catch (secondError: Throwable) {
                 Log.e(TAG, "LiteRT-LM prepare failed after runtime cache rebuild", secondError)
-                clearRuntimeCachePreparedMarker(context)
+                clearInitialRuntimePreparationMarker(context)
                 false
             }
         }
     }
 
     suspend fun rebuildRuntimeCache(context: Context): Boolean = withContext(Dispatchers.IO) {
-        close()
+        clearInitialRuntimePreparationMarker(context)
         deleteRuntimeCacheRoot(context)
         prepare(context)
     }
@@ -160,6 +170,7 @@ object LocalGemmaVisionValidator {
         if (!modelFile.exists()) {
             throw IllegalStateException("Local Gemma model file is not downloaded! Checked: ${modelFile.absolutePath}")
         }
+        resetRuntimeCacheOncePerProcess(context)
 
         Log.i(TAG, "Initializing local LiteRT-LM Engine using ${modelFile.name}")
         val cacheDir = getEngineCacheDir(context, modelFile)
