@@ -146,6 +146,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     fun setLatestBitmap(bitmap: Bitmap) { latestBitmap = bitmap }
 
     private fun prepareGemmaRuntime(forceRebuild: Boolean = false) {
+        _defeatReason.value = ""
         _gameState.value = GameState.ModelPreparing
         _statusMessage.value = "Подготовка локальной Gemma модели... Первый запуск после установки или обновления может занять некоторое время."
         viewModelScope.launch {
@@ -165,6 +166,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun startGemmaRuntimeFromPreparedCache() {
+        _defeatReason.value = ""
         _gameState.value = GameState.ModelStarting
         _statusMessage.value = "Запуск Gemma runtime..."
         viewModelScope.launch {
