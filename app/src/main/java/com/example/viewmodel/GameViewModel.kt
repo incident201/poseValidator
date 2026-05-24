@@ -104,18 +104,19 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
-        if (GemmaModelManager.isModelDownloaded(application)) {
-            if (GemmaPoseValidator.wasPreviousPrepareInterrupted(application)) {
-                recoverGemmaAfterInterruptedPrepare()
-            } else if (GemmaPoseValidator.hasCompletedInitialRuntimePreparation(application)) {
-                startGemmaRuntimeFromPreparedCache()
-            } else {
-                prepareGemmaRuntime(forceRebuild = false)
-            }
-        } else {
+        if (!GemmaModelManager.isModelDownloaded(application)) {
             _gameState.value = GameState.ModelDownloadRequired
             _statusMessage.value = "Требуется скачать локальную Gemma модель"
+        } else if (GemmaPoseValidator.wasPreviousPrepareInterrupted(application)) {
+            recoverGemmaAfterInterruptedPrepare()
+        } else if (GemmaPoseValidator.requiresRuntimeResetAfterAppUpdate(application)) {
+            recoverGemmaAfterAppUpdate()
+        } else if (GemmaPoseValidator.hasCompletedInitialRuntimePreparation(application)) {
+            startGemmaRuntimeFromPreparedCache()
+        } else {
+            prepareGemmaRuntime(forceRebuild = false)
         }
+
         _isAIVersionAvailable.value = true
     }
 
@@ -204,6 +205,23 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+
+    private fun recoverGemmaAfterAppUpdate() {
+        _defeatReason.value = ""
+        _gameState.value = GameState.ModelPreparing
+        _statusMessage.value = "Обнаружено обновление приложения. Пересобираем Gemma runtime без повторного скачивания модели..."
+        viewModelScope.launch {
+            val recovered = GemmaPoseValidator.hardResetRuntimeStatePreservingModel(getApplication())
+            if (recovered) {
+                _gameState.value = GameState.Idle
+                _statusMessage.value = "Gemma готова. Камера активна."
+            } else {
+                _gameState.value = GameState.ModelError
+                _statusMessage.value = "Не удалось восстановить Gemma runtime после обновления. Можно пересобрать runtime или скачать модель заново."
+            }
+        }
+    }
+
     private fun hardResetGemmaRuntimePreservingModel() {
         _defeatReason.value = ""
         _gameState.value = GameState.ModelPreparing
@@ -225,8 +243,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _gameState.value = GameState.ModelPreparing
         _statusMessage.value = "Удаляем модель и runtime..."
         viewModelScope.launch {
-            GemmaPoseValidator.close()
-            GemmaPoseValidator.rebuildRuntimeCache(getApplication())
+            GemmaPoseValidator.clearRuntimeStateOnly(getApplication())
             GemmaModelManager.deleteModel(getApplication())
             _downloadProgress.value = 0f
             _downloadBytesInfo.value = "0 / 0 MB"

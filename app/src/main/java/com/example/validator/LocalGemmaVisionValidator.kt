@@ -2,6 +2,7 @@ package com.example.validator
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.Build
 import android.util.Log
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
@@ -38,6 +39,7 @@ object LocalGemmaVisionValidator {
     private const val PREPARE_IN_PROGRESS_KEY = "prepare_in_progress"
     private const val PREPARE_STARTED_AT_KEY = "prepare_started_at"
     private const val NATIVE_CRASH_RECOVERY_COUNT_KEY = "native_crash_recovery_count"
+    private const val LAST_SUCCESSFUL_APP_VERSION_CODE_KEY = "last_successful_app_version_code"
     private var processCacheResetDone = false
 
     private fun getInitialPreparationKey(context: Context): String {
@@ -61,8 +63,11 @@ object LocalGemmaVisionValidator {
     }
 
     private fun deleteRuntimeCacheRoot(context: Context) {
-        close()
-        deleteRecursivelySafe(File(context.filesDir, ENGINE_CACHE_ROOT_DIR))
+        clearRuntimeStateFilesAndMarkers(
+            context = context,
+            clearInitialPreparation = false,
+            clearAppVersionMarker = false
+        )
         processCacheResetDone = true
     }
 
@@ -100,6 +105,64 @@ object LocalGemmaVisionValidator {
             .remove(PREPARE_IN_PROGRESS_KEY)
             .remove(PREPARE_STARTED_AT_KEY)
             .apply()
+    }
+
+
+    private fun getCurrentAppVersionCode(context: Context): Long {
+        val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.versionCode.toLong()
+        }
+    }
+
+    fun requiresRuntimeResetAfterAppUpdate(context: Context): Boolean {
+        val modelFile = GemmaModelManager.getModelFile(context)
+        if (!modelFile.exists()) return false
+
+        val prefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
+        if (!prefs.contains(LAST_SUCCESSFUL_APP_VERSION_CODE_KEY)) return false
+
+        val lastSuccessfulVersion = prefs.getLong(LAST_SUCCESSFUL_APP_VERSION_CODE_KEY, -1L)
+        val currentVersion = getCurrentAppVersionCode(context)
+        return lastSuccessfulVersion != currentVersion
+    }
+
+    private fun markRuntimePreparedForCurrentAppVersion(context: Context) {
+        context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putLong(LAST_SUCCESSFUL_APP_VERSION_CODE_KEY, getCurrentAppVersionCode(context))
+            .apply()
+    }
+
+    private fun clearRuntimeStateFilesAndMarkers(
+        context: Context,
+        clearInitialPreparation: Boolean,
+        clearAppVersionMarker: Boolean
+    ) {
+        close()
+        deleteRecursivelySafe(File(context.filesDir, ENGINE_CACHE_ROOT_DIR))
+
+        context.cacheDir.listFiles()?.forEach { file ->
+            val name = file.name.lowercase()
+            if (name.startsWith("gemma_") || name.startsWith("litert") || name.startsWith("mediapipe") || name.startsWith("tensorflow") || name.startsWith("tflite")) {
+                deleteRecursivelySafe(file)
+            }
+        }
+
+        context.codeCacheDir?.let { deleteRecursivelySafe(it) }
+
+        val prefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
+        val editor = prefs.edit()
+            .remove(PREPARE_IN_PROGRESS_KEY)
+            .remove(PREPARE_STARTED_AT_KEY)
+        if (clearInitialPreparation) editor.remove(INITIAL_PREPARATION_KEY)
+        if (clearAppVersionMarker) editor.remove(LAST_SUCCESSFUL_APP_VERSION_CODE_KEY)
+        editor.apply()
+
+        File(context.filesDir, "${GemmaModelManager.MODEL_FILENAME}.tmp").takeIf { it.exists() }?.delete()
+        processCacheResetDone = false
     }
 
     private fun clearInitialRuntimePreparationMarker(context: Context) {
@@ -155,6 +218,7 @@ object LocalGemmaVisionValidator {
             val warmupOutput = runVisionWarmup(context, localEngine)
             Log.i(TAG, "LiteRT-LM warm-up completed: $warmupOutput")
             markInitialRuntimePreparationCompleted(context)
+            markRuntimePreparedForCurrentAppVersion(context)
             markPrepareFinished(context)
             true
         } catch (e: CancellationException) {
@@ -169,6 +233,7 @@ object LocalGemmaVisionValidator {
                 val warmupOutput = runVisionWarmup(context, retryEngine)
                 Log.i(TAG, "LiteRT-LM warm-up completed after runtime cache rebuild: $warmupOutput")
                 markInitialRuntimePreparationCompleted(context)
+                markRuntimePreparedForCurrentAppVersion(context)
                 markPrepareFinished(context)
                 true
             } catch (e: CancellationException) {
@@ -184,34 +249,29 @@ object LocalGemmaVisionValidator {
     }
 
     suspend fun hardResetRuntimeStatePreservingModel(context: Context): Boolean = withContext(Dispatchers.IO) {
-        close()
+        val prefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
+        val recoveries = prefs.getInt(NATIVE_CRASH_RECOVERY_COUNT_KEY, 0) + 1
+
         val modelFile = GemmaModelManager.getModelFile(context)
         if (!modelFile.exists()) return@withContext false
 
-        deleteRecursivelySafe(File(context.filesDir, ENGINE_CACHE_ROOT_DIR))
+        clearRuntimeStateFilesAndMarkers(
+            context = context,
+            clearInitialPreparation = true,
+            clearAppVersionMarker = false
+        )
 
-        context.cacheDir.listFiles()?.forEach { file ->
-            val name = file.name.lowercase()
-            if (name.startsWith("gemma_") || name.startsWith("litert") || name.startsWith("mediapipe") || name.startsWith("tensorflow") || name.startsWith("tflite")) {
-                deleteRecursivelySafe(file)
-            }
-        }
+        prefs.edit().putInt(NATIVE_CRASH_RECOVERY_COUNT_KEY, recoveries).apply()
 
-        context.codeCacheDir?.let { deleteRecursivelySafe(it) }
-
-        val prefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
-        val recoveries = prefs.getInt(NATIVE_CRASH_RECOVERY_COUNT_KEY, 0) + 1
-        prefs.edit()
-            .remove(INITIAL_PREPARATION_KEY)
-            .remove(PREPARE_IN_PROGRESS_KEY)
-            .remove(PREPARE_STARTED_AT_KEY)
-            .putInt(NATIVE_CRASH_RECOVERY_COUNT_KEY, recoveries)
-            .apply()
-
-        File(context.filesDir, "${GemmaModelManager.MODEL_FILENAME}.tmp").takeIf { it.exists() }?.delete()
-
-        processCacheResetDone = false
         prepare(context)
+    }
+
+    suspend fun clearRuntimeStateOnly(context: Context) = withContext(Dispatchers.IO) {
+        clearRuntimeStateFilesAndMarkers(
+            context = context,
+            clearInitialPreparation = true,
+            clearAppVersionMarker = true
+        )
     }
 
     suspend fun rebuildRuntimeCache(context: Context): Boolean = withContext(Dispatchers.IO) {

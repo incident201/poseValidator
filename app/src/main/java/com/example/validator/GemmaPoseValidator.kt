@@ -30,8 +30,16 @@ object GemmaPoseValidator {
         return LocalGemmaVisionValidator.wasPreviousPrepareInterrupted(context)
     }
 
+    fun requiresRuntimeResetAfterAppUpdate(context: Context): Boolean {
+        return LocalGemmaVisionValidator.requiresRuntimeResetAfterAppUpdate(context)
+    }
+
     suspend fun hardResetRuntimeStatePreservingModel(context: Context): Boolean {
         return LocalGemmaVisionValidator.hardResetRuntimeStatePreservingModel(context)
+    }
+
+    suspend fun clearRuntimeStateOnly(context: Context) {
+        LocalGemmaVisionValidator.clearRuntimeStateOnly(context)
     }
 
     // Explicit 2-argument vision-only validation
