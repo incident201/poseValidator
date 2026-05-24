@@ -49,18 +49,21 @@ object LocalGemmaVisionValidator {
         }
     }
 
-    suspend fun prepare(context: Context): Boolean = withContext(Dispatchers.IO) {
+    private fun deleteRuntimeCacheRoot(context: Context) {
+        deleteRecursivelySafe(File(context.filesDir, ENGINE_CACHE_ROOT_DIR))
+    }
+
+    private suspend fun runVisionWarmup(context: Context, localEngine: Engine): String {
         var warmupBitmap: Bitmap? = null
         val tempWarmupImage = File(context.cacheDir, "gemma_warmup_${System.nanoTime()}.jpg")
         try {
-            val localEngine = getOrInitializeEngine(context)
             warmupBitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
                 eraseColor(android.graphics.Color.GRAY)
             }
             FileOutputStream(tempWarmupImage).use { out ->
                 warmupBitmap.compress(Bitmap.CompressFormat.JPEG, GEMMA_IMAGE_JPEG_QUALITY, out)
             }
-            val warmupOutput = localEngine.createConversation().use { conversation ->
+            return localEngine.createConversation().use { conversation ->
                 val output = conversation.sendMessage(
                     Contents.of(
                         Content.ImageFile(tempWarmupImage.absolutePath),
@@ -71,13 +74,8 @@ object LocalGemmaVisionValidator {
                     .filterIsInstance<Content.Text>()
                     .joinToString(separator = "\n") { it.text }
             }
-            Log.i(TAG, "LiteRT-LM warm-up completed: $warmupOutput")
-            true
         } catch (e: CancellationException) {
             throw e
-        } catch (t: Throwable) {
-            Log.e(TAG, "LiteRT-LM prepare failed: ${t.message}", t)
-            false
         } finally {
             if (tempWarmupImage.exists()) {
                 tempWarmupImage.delete()
@@ -86,10 +84,35 @@ object LocalGemmaVisionValidator {
         }
     }
 
+    suspend fun prepare(context: Context): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val localEngine = getOrInitializeEngine(context)
+            val warmupOutput = runVisionWarmup(context, localEngine)
+            Log.i(TAG, "LiteRT-LM warm-up completed: $warmupOutput")
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (firstError: Throwable) {
+            Log.e(TAG, "LiteRT-LM prepare failed on attempt 1, rebuilding runtime cache", firstError)
+            close()
+            deleteRuntimeCacheRoot(context)
+            try {
+                val retryEngine = getOrInitializeEngine(context)
+                val warmupOutput = runVisionWarmup(context, retryEngine)
+                Log.i(TAG, "LiteRT-LM warm-up completed after runtime cache rebuild: $warmupOutput")
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (secondError: Throwable) {
+                Log.e(TAG, "LiteRT-LM prepare failed after runtime cache rebuild", secondError)
+                false
+            }
+        }
+    }
+
     suspend fun rebuildRuntimeCache(context: Context): Boolean = withContext(Dispatchers.IO) {
         close()
-        val cacheRoot = File(context.filesDir, ENGINE_CACHE_ROOT_DIR)
-        deleteRecursivelySafe(cacheRoot)
+        deleteRuntimeCacheRoot(context)
         prepare(context)
     }
 
