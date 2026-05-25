@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.speech.tts.TextToSpeech
+import android.os.SystemClock
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -212,7 +213,7 @@ fun CameraScreen(
                                         bitmap
                                     }
 
-                                    val timestampMs = System.currentTimeMillis()
+                                    val timestampMs = SystemClock.elapsedRealtimeNanos() / 1_000_000L
                                     val analysisBitmap = resizeBitmapLongSide(finalBitmap, 1280)
                                     Log.d("CameraScreen", "analysisBitmap=${analysisBitmap.width}x${analysisBitmap.height}")
                                     viewModel.registerCameraFrame(analysisBitmap, timestampMs)

@@ -2,6 +2,7 @@ package com.example.viewmodel
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -103,6 +104,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val movementPenaltyCooldownMs: Long = 3000L
     private var gemmaCheckGeneration: Int = 0
 
+    private fun getFreshAnalyzedFrame(maxAgeMs: Long = 1000L): AnalyzedPoseFrame? {
+        val now = SystemClock.elapsedRealtimeNanos() / 1_000_000L
+        return synchronized(frameLock) {
+            latestAnalyzedFrame?.takeIf { now - it.timestampMs <= maxAgeMs }
+        }
+    }
+
     private fun setGemmaChecking(value: Boolean, checkName: String) {
         _isGemmaChecking.value = value
         Log.i(TAG, "$checkName: isGemmaChecking=$value")
@@ -164,9 +172,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     fun processMediaPipeResults(pose: PoseLandmarks, timestamp: Long, imageWidth: Int, imageHeight: Int) {
         latestLandmarks = pose
         Log.v(TAG, "MediaPipe frame ts=$timestamp size=${imageWidth}x$imageHeight landmarks=${pose.allLandmarks.size}")
-        val matchedBitmap = synchronized(frameLock) { pendingFrames.remove(timestamp) }
-        if (matchedBitmap != null) {
-            latestAnalyzedFrame = AnalyzedPoseFrame(matchedBitmap, pose, timestamp)
+        synchronized(frameLock) {
+            val matchedBitmap = pendingFrames.remove(timestamp)
+            if (matchedBitmap != null) {
+                latestAnalyzedFrame = AnalyzedPoseFrame(matchedBitmap, pose, timestamp)
+            }
         }
         val state = _gameState.value
         val scale = pose.getBodyScale()
@@ -215,11 +225,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
             _startDelayRemainingSeconds.value = 0
 
-            val analyzedFrame = latestAnalyzedFrame
+            val analyzedFrame = getFreshAnalyzedFrame()
             val initialPose = analyzedFrame?.pose
 
             if (analyzedFrame == null) {
-                triggerDefeat("Камера не предоставила синхронизированный кадр")
+                triggerDefeat("Камера не предоставила свежий синхронизированный кадр")
                 return@launch
             }
 
@@ -365,8 +375,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             viewModelScope.launch {
                 delay(movementPenaltyCooldownMs)
                 if (_gameState.value != GameState.HoldingPose) return@launch
-                val analyzedFrame = latestAnalyzedFrame ?: run {
-                    triggerDefeat("Повторная проверка позы: камера не предоставила синхронизированный кадр")
+                val analyzedFrame = getFreshAnalyzedFrame() ?: run {
+                    triggerDefeat("Повторная проверка позы: камера не предоставила свежий синхронизированный кадр")
                     return@launch
                 }
                 val snapshot = PoseFrameCropper.cropAroundPose(
