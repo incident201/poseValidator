@@ -63,11 +63,15 @@ object LocalGemmaVisionValidator {
         }
     }
 
-    private fun deleteRuntimeCacheRoot(context: Context) {
+    private fun deleteRuntimeCacheRoot(
+        context: Context,
+        clearPrepareMarkers: Boolean = true
+    ) {
         clearRuntimeStateFilesAndMarkers(
             context = context,
             clearInitialPreparation = false,
-            clearAppVersionMarker = false
+            clearAppVersionMarker = false,
+            clearPrepareMarkers = clearPrepareMarkers
         )
     }
 
@@ -200,7 +204,8 @@ object LocalGemmaVisionValidator {
     private fun clearRuntimeStateFilesAndMarkers(
         context: Context,
         clearInitialPreparation: Boolean,
-        clearAppVersionMarker: Boolean
+        clearAppVersionMarker: Boolean,
+        clearPrepareMarkers: Boolean
     ) {
         close()
         deleteRecursivelySafe(File(context.filesDir, ENGINE_CACHE_ROOT_DIR))
@@ -216,8 +221,11 @@ object LocalGemmaVisionValidator {
 
         val prefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
         val editor = prefs.edit()
-            .remove(PREPARE_IN_PROGRESS_KEY)
-            .remove(PREPARE_STARTED_AT_KEY)
+        if (clearPrepareMarkers) {
+            editor
+                .remove(PREPARE_IN_PROGRESS_KEY)
+                .remove(PREPARE_STARTED_AT_KEY)
+        }
         if (clearInitialPreparation) editor.remove(INITIAL_PREPARATION_KEY)
         if (clearAppVersionMarker) editor.remove(LAST_SUCCESSFUL_APP_VERSION_CODE_KEY)
         editor.apply()
@@ -281,7 +289,7 @@ object LocalGemmaVisionValidator {
         } catch (firstError: Throwable) {
             Log.e(TAG, "LiteRT-LM prepare failed on attempt 1, rebuilding runtime cache", firstError)
             close()
-            deleteRuntimeCacheRoot(context)
+            deleteRuntimeCacheRoot(context, clearPrepareMarkers = false)
             try {
                 val retryEngine = getOrInitializeEngine(context)
                 val warmupOutput = runVisionWarmup(context, retryEngine)
@@ -313,7 +321,8 @@ object LocalGemmaVisionValidator {
         clearRuntimeStateFilesAndMarkers(
             context = context,
             clearInitialPreparation = true,
-            clearAppVersionMarker = false
+            clearAppVersionMarker = false,
+            clearPrepareMarkers = true
         )
 
         prefs.edit().putInt(NATIVE_CRASH_RECOVERY_COUNT_KEY, recoveries).apply()
@@ -328,6 +337,7 @@ object LocalGemmaVisionValidator {
 
         deepCleanAppDataPreservingModel(context)
         GemmaModelManager.refreshModelMetadata(context)
+        incrementDeepRecoveryAttemptCount(context)
         prepare(context)
     }
 
@@ -335,7 +345,8 @@ object LocalGemmaVisionValidator {
         clearRuntimeStateFilesAndMarkers(
             context = context,
             clearInitialPreparation = true,
-            clearAppVersionMarker = true
+            clearAppVersionMarker = true,
+            clearPrepareMarkers = true
         )
     }
 

@@ -173,7 +173,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun retryGemmaPreparation() {
-        hardResetGemmaRuntimePreservingModel()
+        deepResetGemmaRuntimePreservingModel()
     }
 
 
@@ -182,7 +182,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _gameState.value = GameState.ModelPreparing
         _statusMessage.value = "Обнаружен сбой предыдущего запуска Gemma. Выполняем глубокое восстановление без повторного скачивания модели..."
         viewModelScope.launch {
-            GemmaPoseValidator.incrementDeepRecoveryAttemptCount(getApplication())
             val recovered = GemmaPoseValidator.deepResetAppDataPreservingModel(getApplication())
             if (recovered) {
                 _gameState.value = GameState.Idle
@@ -200,7 +199,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _gameState.value = GameState.ModelPreparing
         _statusMessage.value = "Обнаружено обновление приложения. Полностью пересобираем Gemma runtime без повторного скачивания модели..."
         viewModelScope.launch {
-            GemmaPoseValidator.incrementDeepRecoveryAttemptCount(getApplication())
             val recovered = GemmaPoseValidator.deepResetAppDataPreservingModel(getApplication())
             if (recovered) {
                 _gameState.value = GameState.Idle
@@ -212,12 +210,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun hardResetGemmaRuntimePreservingModel() {
+    private fun deepResetGemmaRuntimePreservingModel() {
         _defeatReason.value = ""
         _gameState.value = GameState.ModelPreparing
-        _statusMessage.value = "Пересборка Gemma runtime без удаления модели..."
+        _statusMessage.value = "Глубокая пересборка Gemma runtime без удаления модели..."
         viewModelScope.launch {
-            val recovered = GemmaPoseValidator.hardResetRuntimeStatePreservingModel(getApplication())
+            val recovered = GemmaPoseValidator.deepResetAppDataPreservingModel(getApplication())
             if (recovered) {
                 _gameState.value = GameState.Idle
                 _statusMessage.value = "Gemma готова. Камера активна."

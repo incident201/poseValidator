@@ -38,10 +38,6 @@ object GemmaPoseValidator {
         return LocalGemmaVisionValidator.getDeepRecoveryAttemptCount(context)
     }
 
-    fun incrementDeepRecoveryAttemptCount(context: Context) {
-        LocalGemmaVisionValidator.incrementDeepRecoveryAttemptCount(context)
-    }
-
     suspend fun hardResetRuntimeStatePreservingModel(context: Context): Boolean {
         return LocalGemmaVisionValidator.hardResetRuntimeStatePreservingModel(context)
     }
