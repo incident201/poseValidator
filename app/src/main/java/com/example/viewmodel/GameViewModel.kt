@@ -26,7 +26,6 @@ enum class GameState {
     ModelDownloadRequired,
     ModelDownloading,
     ModelPreparing,
-    ModelStarting,
     ModelError,
     Idle,
     StartingDelay,
@@ -105,11 +104,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         if (GemmaModelManager.isModelDownloaded(application)) {
-            if (GemmaPoseValidator.isRuntimeCachePrepared(application)) {
-                startGemmaRuntimeFromPreparedCache()
-            } else {
-                prepareGemmaRuntime(forceRebuild = false)
-            }
+            prepareGemmaRuntime()
         } else {
             _gameState.value = GameState.ModelDownloadRequired
             _statusMessage.value = "Требуется скачать локальную Gemma модель"
@@ -146,7 +141,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     fun setLatestBitmap(bitmap: Bitmap) { latestBitmap = bitmap }
 
     private fun prepareGemmaRuntime(forceRebuild: Boolean = false) {
-        _defeatReason.value = ""
         _gameState.value = GameState.ModelPreparing
         _statusMessage.value = "Подготовка локальной Gemma модели... Первый запуск после установки или обновления может занять некоторое время."
         viewModelScope.launch {
@@ -155,22 +149,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 GemmaPoseValidator.prepare(getApplication())
             }
-            if (prepared) {
-                _gameState.value = GameState.Idle
-                _statusMessage.value = "Gemma готова. Камера активна."
-            } else {
-                _gameState.value = GameState.ModelError
-                _statusMessage.value = "Не удалось подготовить Gemma runtime. Нажмите \"Пересобрать кэш\"."
-            }
-        }
-    }
-
-    private fun startGemmaRuntimeFromPreparedCache() {
-        _defeatReason.value = ""
-        _gameState.value = GameState.ModelStarting
-        _statusMessage.value = "Запуск Gemma runtime..."
-        viewModelScope.launch {
-            val prepared = GemmaPoseValidator.prepare(getApplication())
             if (prepared) {
                 _gameState.value = GameState.Idle
                 _statusMessage.value = "Gemma готова. Камера активна."
