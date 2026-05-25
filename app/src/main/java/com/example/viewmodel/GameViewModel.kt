@@ -36,6 +36,20 @@ enum class GameState {
     Failed
 }
 
+data class PoseOverlayState(
+    val imageWidth: Int = 0,
+    val imageHeight: Int = 0,
+    val landmarks: List<Point3D> = emptyList(),
+    val cropRect: PoseOverlayRect? = null
+)
+
+data class PoseOverlayRect(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float
+)
+
 class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val TAG = "GameViewModel"
     private val minimumDurationSeconds = 180
@@ -82,6 +96,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isAIVersionAvailable = MutableStateFlow(false)
     val isAIVersionAvailable: StateFlow<Boolean> = _isAIVersionAvailable.asStateFlow()
+    private val _poseOverlayState = MutableStateFlow(PoseOverlayState())
+    val poseOverlayState: StateFlow<PoseOverlayState> = _poseOverlayState.asStateFlow()
     private val _voiceEvents = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val voiceEvents: SharedFlow<String> = _voiceEvents.asSharedFlow()
 
@@ -172,12 +188,33 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     fun processMediaPipeResults(pose: PoseLandmarks, timestamp: Long, imageWidth: Int, imageHeight: Int) {
         latestLandmarks = pose
         Log.v(TAG, "MediaPipe frame ts=$timestamp size=${imageWidth}x$imageHeight landmarks=${pose.allLandmarks.size}")
+        var nextOverlayState = PoseOverlayState()
         synchronized(frameLock) {
             val matchedBitmap = pendingFrames.remove(timestamp)
             if (matchedBitmap != null) {
                 latestAnalyzedFrame = AnalyzedPoseFrame(matchedBitmap, pose, timestamp)
+                val cropRect = PoseFrameCropper.calculateCropRect(
+                    bitmapWidth = matchedBitmap.width,
+                    bitmapHeight = matchedBitmap.height,
+                    pose = pose
+                )
+                val normalizedRect = cropRect?.let {
+                    PoseOverlayRect(
+                        left = it.left.toFloat() / matchedBitmap.width.toFloat(),
+                        top = it.top.toFloat() / matchedBitmap.height.toFloat(),
+                        right = it.right.toFloat() / matchedBitmap.width.toFloat(),
+                        bottom = it.bottom.toFloat() / matchedBitmap.height.toFloat()
+                    )
+                }
+                nextOverlayState = PoseOverlayState(
+                    imageWidth = matchedBitmap.width,
+                    imageHeight = matchedBitmap.height,
+                    landmarks = pose.allLandmarks,
+                    cropRect = normalizedRect
+                )
             }
         }
+        _poseOverlayState.value = nextOverlayState
         val state = _gameState.value
         val scale = pose.getBodyScale()
         _driftThreshold.value = movementTracker.driftThresholdFactor * scale
