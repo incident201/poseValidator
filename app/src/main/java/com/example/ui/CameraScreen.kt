@@ -84,7 +84,6 @@ fun CameraScreen(
 
     val keepScreenOn = gameState == GameState.ModelDownloading ||
         gameState == GameState.ModelPreparing ||
-        gameState == GameState.ModelStarting ||
         gameState == GameState.StartingDelay ||
         gameState == GameState.HoldingPose ||
         gameState == GameState.CheckingFinalPose ||
@@ -388,14 +387,6 @@ fun BottomHUDEngine(
 ) {
     val canStart = (gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success) &&
         !isGemmaChecking
-    val canStop = (
-        gameState == GameState.StartingDelay ||
-            gameState == GameState.HoldingPose ||
-            gameState == GameState.CheckingStartPose ||
-            gameState == GameState.CheckingControlPose ||
-            gameState == GameState.CheckingFinalPose ||
-            isGemmaChecking
-        )
 
     Card(
         modifier = Modifier
@@ -415,7 +406,6 @@ fun BottomHUDEngine(
                     GameState.ModelDownloadRequired -> "НУЖНА ЗАГРУЗКА"
                     GameState.ModelDownloading -> "СКАЧИВАНИЕ МОДЕЛИ..."
                     GameState.ModelPreparing -> "ПОДГОТОВКА GEMMA..."
-                    GameState.ModelStarting -> "ЗАПУСК GEMMA..."
                     GameState.ModelError -> "ОШИБКА GEMMA RUNTIME"
                     GameState.Idle -> "ЖДЁМ СТАРТА"
                     GameState.StartingDelay -> "СТАРТ ЧЕРЕЗ ${startDelayRemainingSeconds}s"
@@ -549,7 +539,7 @@ fun BottomHUDEngine(
                             fontWeight = FontWeight.Bold
                         )
                     }
-                } else if (canStop) {
+                } else {
                     Button(
                         onClick = onStop,
                         modifier = Modifier
@@ -571,40 +561,6 @@ fun BottomHUDEngine(
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         )
-                    }
-                } else {
-                    Row(
-                        modifier = Modifier
-                            .height(80.dp)
-                            .weight(1.2f)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(DarkSecondary.copy(alpha = 0.35f))
-                            .border(1.dp, DarkSecondary, RoundedCornerShape(24.dp))
-                            .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        if (gameState == GameState.ModelStarting) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                color = DarkPrimary,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "Запуск",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        } else {
-                            Text(
-                                text = "ОЖИДАНИЕ",
-                                color = Color.White.copy(alpha = 0.8f),
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
                     }
                 }
             }
