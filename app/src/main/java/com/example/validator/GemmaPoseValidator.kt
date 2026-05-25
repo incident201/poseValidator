@@ -34,8 +34,20 @@ object GemmaPoseValidator {
         return LocalGemmaVisionValidator.requiresRuntimeResetAfterAppUpdate(context)
     }
 
+    fun getDeepRecoveryAttemptCount(context: Context): Int {
+        return LocalGemmaVisionValidator.getDeepRecoveryAttemptCount(context)
+    }
+
+    fun incrementDeepRecoveryAttemptCount(context: Context) {
+        LocalGemmaVisionValidator.incrementDeepRecoveryAttemptCount(context)
+    }
+
     suspend fun hardResetRuntimeStatePreservingModel(context: Context): Boolean {
         return LocalGemmaVisionValidator.hardResetRuntimeStatePreservingModel(context)
+    }
+
+    suspend fun deepResetAppDataPreservingModel(context: Context): Boolean {
+        return LocalGemmaVisionValidator.deepResetAppDataPreservingModel(context)
     }
 
     suspend fun clearRuntimeStateOnly(context: Context) {

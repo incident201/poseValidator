@@ -40,8 +40,10 @@ object LocalGemmaVisionValidator {
     private const val PREPARE_STARTED_AT_KEY = "prepare_started_at"
     private const val NATIVE_CRASH_RECOVERY_COUNT_KEY = "native_crash_recovery_count"
     private const val LAST_SUCCESSFUL_APP_VERSION_CODE_KEY = "last_successful_app_version_code"
+    private const val DEEP_RECOVERY_ATTEMPT_COUNT_KEY = "deep_recovery_attempt_count"
 
     private fun getInitialPreparationKey(context: Context): String {
+        GemmaModelManager.migrateLegacyModelLocationIfNeeded(context)
         val modelFile = GemmaModelManager.getModelFile(context)
         return "litertlm_${LITERT_LM_VERSION}_schema_${ENGINE_CACHE_SCHEMA_VERSION}_${modelFile.nameWithoutExtension}_${modelFile.length()}_${modelFile.lastModified()}"
     }
@@ -105,6 +107,64 @@ object LocalGemmaVisionValidator {
             .apply()
     }
 
+
+
+    fun getDeepRecoveryAttemptCount(context: Context): Int {
+        val prefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getInt(DEEP_RECOVERY_ATTEMPT_COUNT_KEY, 0)
+    }
+
+    fun incrementDeepRecoveryAttemptCount(context: Context) {
+        val prefs = context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE)
+        val next = prefs.getInt(DEEP_RECOVERY_ATTEMPT_COUNT_KEY, 0) + 1
+        prefs.edit().putInt(DEEP_RECOVERY_ATTEMPT_COUNT_KEY, next).apply()
+    }
+
+    private fun clearDeepRecoveryAttemptCount(context: Context) {
+        context.getSharedPreferences(RUNTIME_PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .remove(DEEP_RECOVERY_ATTEMPT_COUNT_KEY)
+            .apply()
+    }
+
+    private fun deepCleanAppDataPreservingModel(context: Context) {
+        close()
+        val modelFile = GemmaModelManager.getModelFile(context)
+        val protectedModelPath = modelFile.canonicalPath
+        val protectedModelDirPath = modelFile.parentFile!!.canonicalPath
+
+        fun deleteSafely(file: File) {
+            if (!file.exists()) return
+            val cp = runCatching { file.canonicalPath }.getOrNull() ?: return
+            if (cp == protectedModelPath || cp == protectedModelDirPath) return
+            deleteRecursivelySafe(file)
+        }
+
+        val dataDir = context.applicationInfo.dataDir?.let { File(it) }
+        deleteSafely(context.cacheDir)
+        context.codeCacheDir?.let { deleteSafely(it) }
+        deleteSafely(context.noBackupFilesDir)
+        dataDir?.let {
+            deleteSafely(File(it, "shared_prefs"))
+            deleteSafely(File(it, "databases"))
+            it.listFiles()?.forEach { child ->
+                if (child.name.startsWith("app_")) deleteSafely(child)
+            }
+        }
+
+        context.filesDir.listFiles()?.forEach { child ->
+            val cp = runCatching { child.canonicalPath }.getOrNull()
+            if (cp == protectedModelDirPath) return@forEach
+            deleteSafely(child)
+        }
+
+        deleteSafely(File(context.filesDir, GemmaModelManager.MODEL_FILENAME))
+        deleteSafely(File(modelFile.parentFile, "${GemmaModelManager.MODEL_FILENAME}.tmp"))
+
+        context.filesDir.mkdirs()
+        context.cacheDir.mkdirs()
+        context.codeCacheDir?.mkdirs()
+        modelFile.parentFile?.mkdirs()
+    }
 
     private fun getCurrentAppVersionCode(context: Context): Long {
         val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
@@ -212,6 +272,7 @@ object LocalGemmaVisionValidator {
             Log.i(TAG, "LiteRT-LM warm-up completed: $warmupOutput")
             markInitialRuntimePreparationCompleted(context)
             markRuntimePreparedForCurrentAppVersion(context)
+            clearDeepRecoveryAttemptCount(context)
             markPrepareFinished(context)
             true
         } catch (e: CancellationException) {
@@ -227,6 +288,7 @@ object LocalGemmaVisionValidator {
                 Log.i(TAG, "LiteRT-LM warm-up completed after runtime cache rebuild: $warmupOutput")
                 markInitialRuntimePreparationCompleted(context)
                 markRuntimePreparedForCurrentAppVersion(context)
+                clearDeepRecoveryAttemptCount(context)
                 markPrepareFinished(context)
                 true
             } catch (e: CancellationException) {
@@ -256,6 +318,16 @@ object LocalGemmaVisionValidator {
 
         prefs.edit().putInt(NATIVE_CRASH_RECOVERY_COUNT_KEY, recoveries).apply()
 
+        prepare(context)
+    }
+
+    suspend fun deepResetAppDataPreservingModel(context: Context): Boolean = withContext(Dispatchers.IO) {
+        GemmaModelManager.migrateLegacyModelLocationIfNeeded(context)
+        val modelFile = GemmaModelManager.getModelFile(context)
+        if (!modelFile.exists()) return@withContext false
+
+        deepCleanAppDataPreservingModel(context)
+        GemmaModelManager.refreshModelMetadata(context)
         prepare(context)
     }
 

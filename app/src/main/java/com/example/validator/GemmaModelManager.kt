@@ -21,6 +21,7 @@ object GemmaModelManager {
     private const val MODEL_SIZE_KEY = "model_size"
     private const val MODEL_LAST_MODIFIED_KEY = "model_last_modified"
     private const val DOWNLOAD_COMPLETED_KEY = "download_completed"
+    private const val MODEL_STORE_DIR = "gemma_model_store"
 
     private const val MIN_MODEL_SIZE_BYTES = 3L * 1024 * 1024 * 1024
 
@@ -30,7 +31,31 @@ object GemmaModelManager {
     private val _downloadBytesInfo = MutableStateFlow("0 / 0 MB")
     val downloadBytesInfo: StateFlow<String> = _downloadBytesInfo
 
-    fun getModelFile(context: Context): File = File(context.filesDir, MODEL_FILENAME)
+    fun getModelFile(context: Context): File {
+        val dir = File(context.filesDir, MODEL_STORE_DIR).apply { mkdirs() }
+        return File(dir, MODEL_FILENAME)
+    }
+
+    fun migrateLegacyModelLocationIfNeeded(context: Context) {
+        val oldFile = File(context.filesDir, MODEL_FILENAME)
+        val newFile = getModelFile(context)
+        if (newFile.exists()) return
+        if (!oldFile.exists() || oldFile.length() <= MIN_MODEL_SIZE_BYTES) return
+
+        newFile.parentFile?.mkdirs()
+        val moved = oldFile.renameTo(newFile)
+        if (!moved) {
+            oldFile.inputStream().use { input ->
+                newFile.outputStream().use { output -> input.copyTo(output) }
+            }
+            if (newFile.length() != oldFile.length()) {
+                newFile.delete()
+                return
+            }
+            oldFile.delete()
+        }
+        writeModelMetadata(context, newFile)
+    }
 
     private fun writeModelMetadata(context: Context, file: File) {
         context.getSharedPreferences(MODEL_PREFS_NAME, Context.MODE_PRIVATE).edit()
@@ -45,7 +70,17 @@ object GemmaModelManager {
         context.getSharedPreferences(MODEL_PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
     }
 
+
+    fun refreshModelMetadata(context: Context) {
+        migrateLegacyModelLocationIfNeeded(context)
+        val file = getModelFile(context)
+        if (file.exists()) {
+            writeModelMetadata(context, file)
+        }
+    }
+
     fun isModelDownloaded(context: Context): Boolean {
+        migrateLegacyModelLocationIfNeeded(context)
         val file = getModelFile(context)
         if (!file.exists() || file.length() <= MIN_MODEL_SIZE_BYTES) return false
 
@@ -65,16 +100,19 @@ object GemmaModelManager {
     }
 
     suspend fun deleteModel(context: Context): Boolean = withContext(Dispatchers.IO) {
+        migrateLegacyModelLocationIfNeeded(context)
         val file = getModelFile(context)
-        val tmpFile = File(context.filesDir, "$MODEL_FILENAME.tmp")
+        val tmpFile = File(file.parentFile ?: context.filesDir, "$MODEL_FILENAME.tmp")
         if (tmpFile.exists()) tmpFile.delete()
         clearModelMetadata(context)
         if (file.exists()) file.delete() else false
     }
 
     suspend fun downloadModel(context: Context, onProgress: (progress: Float, downloadedMB: Float, totalMB: Float) -> Unit): Boolean = withContext(Dispatchers.IO) {
+        migrateLegacyModelLocationIfNeeded(context)
         val targetFile = getModelFile(context)
-        val tempFile = File(context.filesDir, "$MODEL_FILENAME.tmp")
+        targetFile.parentFile?.mkdirs()
+        val tempFile = File(targetFile.parentFile ?: context.filesDir, "$MODEL_FILENAME.tmp")
         var connection: HttpURLConnection? = null
         var inputStream: InputStream? = null
         var outputStream: FileOutputStream? = null

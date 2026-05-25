@@ -106,6 +106,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         if (!GemmaModelManager.isModelDownloaded(application)) {
             _gameState.value = GameState.ModelDownloadRequired
             _statusMessage.value = "Требуется скачать локальную Gemma модель"
+        } else if (GemmaPoseValidator.getDeepRecoveryAttemptCount(application) >= 2) {
+            _gameState.value = GameState.ModelError
+            _statusMessage.value = "Gemma runtime не удалось восстановить автоматически. Попробуйте удалить модель и скачать заново."
         } else if (GemmaPoseValidator.wasPreviousPrepareInterrupted(application)) {
             recoverGemmaAfterInterruptedPrepare()
         } else if (GemmaPoseValidator.requiresRuntimeResetAfterAppUpdate(application)) {
@@ -177,9 +180,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private fun recoverGemmaAfterInterruptedPrepare() {
         _defeatReason.value = ""
         _gameState.value = GameState.ModelPreparing
-        _statusMessage.value = "Обнаружен сбой предыдущего запуска Gemma. Восстанавливаем runtime без повторного скачивания модели..."
+        _statusMessage.value = "Обнаружен сбой предыдущего запуска Gemma. Выполняем глубокое восстановление без повторного скачивания модели..."
         viewModelScope.launch {
-            val recovered = GemmaPoseValidator.hardResetRuntimeStatePreservingModel(getApplication())
+            GemmaPoseValidator.incrementDeepRecoveryAttemptCount(getApplication())
+            val recovered = GemmaPoseValidator.deepResetAppDataPreservingModel(getApplication())
             if (recovered) {
                 _gameState.value = GameState.Idle
                 _statusMessage.value = "Gemma восстановлена. Камера активна."
@@ -194,9 +198,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private fun recoverGemmaAfterAppUpdate() {
         _defeatReason.value = ""
         _gameState.value = GameState.ModelPreparing
-        _statusMessage.value = "Обнаружено обновление приложения. Пересобираем Gemma runtime без повторного скачивания модели..."
+        _statusMessage.value = "Обнаружено обновление приложения. Полностью пересобираем Gemma runtime без повторного скачивания модели..."
         viewModelScope.launch {
-            val recovered = GemmaPoseValidator.hardResetRuntimeStatePreservingModel(getApplication())
+            GemmaPoseValidator.incrementDeepRecoveryAttemptCount(getApplication())
+            val recovered = GemmaPoseValidator.deepResetAppDataPreservingModel(getApplication())
             if (recovered) {
                 _gameState.value = GameState.Idle
                 _statusMessage.value = "Gemma готова. Камера активна."
