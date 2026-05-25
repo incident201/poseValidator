@@ -105,7 +105,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         if (GemmaModelManager.isModelDownloaded(application)) {
-            if (GemmaPoseValidator.hasCompletedInitialRuntimePreparation(application)) {
+            if (GemmaPoseValidator.isRuntimeCachePrepared(application)) {
                 startGemmaRuntimeFromPreparedCache()
             } else {
                 prepareGemmaRuntime(forceRebuild = false)

@@ -14,8 +14,8 @@ data class PoseValidationResult(
 )
 
 object GemmaPoseValidator {
-    fun hasCompletedInitialRuntimePreparation(context: Context): Boolean {
-        return LocalGemmaVisionValidator.hasCompletedInitialRuntimePreparation(context)
+    fun isRuntimeCachePrepared(context: Context): Boolean {
+        return LocalGemmaVisionValidator.isRuntimeCachePrepared(context)
     }
 
     suspend fun prepare(context: Context): Boolean {
