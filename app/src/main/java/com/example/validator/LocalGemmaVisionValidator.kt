@@ -27,8 +27,8 @@ object LocalGemmaVisionValidator {
     private val jsonAdapter = moshi.adapter(LocalGemmaJsonOutput::class.java).lenient()
 
     private var engine: Engine? = null
-    private const val GEMMA_IMAGE_MAX_LONG_SIDE = 640
-    private const val GEMMA_IMAGE_JPEG_QUALITY = 72
+    private const val GEMMA_IMAGE_MAX_LONG_SIDE = 896
+    private const val GEMMA_IMAGE_JPEG_QUALITY = 85
 
     @Synchronized
     private fun getOrInitializeEngine(context: Context): Engine {
@@ -58,17 +58,14 @@ object LocalGemmaVisionValidator {
     }
 
     private fun getResizedBitmap(image: Bitmap, maxSize: Int): Bitmap {
-        var width = image.width
-        var height = image.height
-        val ratio = width.toFloat() / height.toFloat()
-        if (ratio > 1) {
-            width = maxSize
-            height = (width / ratio).toInt()
-        } else {
-            height = maxSize
-            width = (height * ratio).toInt()
-        }
-        return Bitmap.createScaledBitmap(image, width, height, true)
+        val width = image.width
+        val height = image.height
+        val longSide = maxOf(width, height)
+        if (longSide <= maxSize) return image
+        val scale = maxSize.toFloat() / longSide.toFloat()
+        val newWidth = (width * scale).toInt().coerceAtLeast(1)
+        val newHeight = (height * scale).toInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(image, newWidth, newHeight, true)
     }
 
     suspend fun validatePose(context: Context, bitmap: Bitmap): PoseValidationResult = withContext(Dispatchers.IO) {
@@ -84,6 +81,7 @@ object LocalGemmaVisionValidator {
             }
             FileOutputStream(tempImgFile).use { out ->
                 val resized = getResizedBitmap(bitmap, GEMMA_IMAGE_MAX_LONG_SIDE)
+                Log.d(TAG, "Gemma image size before JPEG=${resized.width}x${resized.height}")
                 resized.compress(Bitmap.CompressFormat.JPEG, GEMMA_IMAGE_JPEG_QUALITY, out)
             }
 

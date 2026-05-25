@@ -7,6 +7,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.tracker.MovementTracker
 import com.example.tracker.Point3D
+import com.example.tracker.PoseFrameCropper
 import com.example.tracker.PoseLandmarks
 import com.example.validator.GemmaModelManager
 import com.example.validator.GemmaPoseValidator
@@ -83,7 +84,15 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val _voiceEvents = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val voiceEvents: SharedFlow<String> = _voiceEvents.asSharedFlow()
 
-    private var latestBitmap: Bitmap? = null
+    private data class AnalyzedPoseFrame(
+        val bitmap: Bitmap,
+        val pose: PoseLandmarks,
+        val timestampMs: Long
+    )
+
+    private val frameLock = Any()
+    private val pendingFrames = LinkedHashMap<Long, Bitmap>()
+    private var latestAnalyzedFrame: AnalyzedPoseFrame? = null
     private var latestLandmarks: PoseLandmarks? = null
     private val movementTracker = MovementTracker()
     private var startDelayJob: Job? = null
@@ -136,10 +145,29 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setLatestBitmap(bitmap: Bitmap) { latestBitmap = bitmap }
+    fun registerCameraFrame(bitmap: Bitmap, timestampMs: Long) {
+        synchronized(frameLock) {
+            pendingFrames[timestampMs] = bitmap
+            while (pendingFrames.size > 20) {
+                val firstKey = pendingFrames.keys.firstOrNull() ?: break
+                pendingFrames.remove(firstKey)
+            }
+            val minTimestampToKeep = timestampMs - 3000
+            val iterator = pendingFrames.keys.iterator()
+            while (iterator.hasNext()) {
+                val key = iterator.next()
+                if (key < minTimestampToKeep) iterator.remove()
+            }
+        }
+    }
 
-    fun processMediaPipeResults(pose: PoseLandmarks, timestamp: Long) {
+    fun processMediaPipeResults(pose: PoseLandmarks, timestamp: Long, imageWidth: Int, imageHeight: Int) {
         latestLandmarks = pose
+        Log.v(TAG, "MediaPipe frame ts=$timestamp size=${imageWidth}x$imageHeight landmarks=${pose.allLandmarks.size}")
+        val matchedBitmap = synchronized(frameLock) { pendingFrames.remove(timestamp) }
+        if (matchedBitmap != null) {
+            latestAnalyzedFrame = AnalyzedPoseFrame(matchedBitmap, pose, timestamp)
+        }
         val state = _gameState.value
         val scale = pose.getBodyScale()
         _driftThreshold.value = movementTracker.driftThresholdFactor * scale
@@ -187,11 +215,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
             _startDelayRemainingSeconds.value = 0
 
-            val snapshot = latestBitmap
-            val initialPose = latestLandmarks
+            val analyzedFrame = latestAnalyzedFrame
+            val initialPose = analyzedFrame?.pose
 
-            if (snapshot == null) {
-                triggerDefeat("Камера не предоставила кадр")
+            if (analyzedFrame == null) {
+                triggerDefeat("Камера не предоставила синхронизированный кадр")
                 return@launch
             }
 
@@ -200,6 +228,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
 
+            val snapshot = PoseFrameCropper.cropAroundPose(
+                bitmap = analyzedFrame.bitmap,
+                pose = analyzedFrame.pose
+            )
             _timerSeconds.value = _selectedDurationSeconds.value.coerceAtLeast(minimumDurationSeconds)
             movementTracker.reset()
             movementViolationCount = 0
@@ -236,11 +268,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun launchGemmaCheck(checkName: String, snapshot: Bitmap?, isFinal: Boolean) {
-        if (snapshot == null) {
-            triggerDefeat("$checkName: камера не предоставила кадр")
-            return
-        }
+    private fun launchGemmaCheck(checkName: String, snapshot: Bitmap, isFinal: Boolean) {
         activeGemmaCheckJob?.cancel()
         val currentGeneration = ++gemmaCheckGeneration
 
@@ -337,10 +365,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             viewModelScope.launch {
                 delay(movementPenaltyCooldownMs)
                 if (_gameState.value != GameState.HoldingPose) return@launch
-                val snapshot = latestBitmap ?: run {
-                    triggerDefeat("Повторная проверка позы: камера не предоставила кадр")
+                val analyzedFrame = latestAnalyzedFrame ?: run {
+                    triggerDefeat("Повторная проверка позы: камера не предоставила синхронизированный кадр")
                     return@launch
                 }
+                val snapshot = PoseFrameCropper.cropAroundPose(
+                    bitmap = analyzedFrame.bitmap,
+                    pose = analyzedFrame.pose
+                )
                 speak("Выполняется проверка позы")
                 launchGemmaCheck(
                     checkName = "Повторная проверка позы после движения",

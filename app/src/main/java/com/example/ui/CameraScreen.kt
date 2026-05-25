@@ -141,9 +141,8 @@ fun CameraScreen(
                 Log.e("CameraScreen", "MediaPipe Error: $error")
             }
 
-            override fun onResults(result: com.example.tracker.PoseLandmarks, imageWidth: Int, imageHeight: Int) {
-                // Pass landmarks to view model
-                viewModel.processMediaPipeResults(result, System.currentTimeMillis())
+            override fun onResults(result: com.example.tracker.PoseLandmarks, imageWidth: Int, imageHeight: Int, timestampMs: Long) {
+                viewModel.processMediaPipeResults(result, timestampMs, imageWidth, imageHeight)
             }
         })
     }
@@ -194,7 +193,7 @@ fun CameraScreen(
                                     ResolutionSelector.Builder()
                                         .setResolutionStrategy(
                                             ResolutionStrategy(
-                                                Size(640, 480),
+                                                Size(1280, 720),
                                                 ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
                                             )
                                         )
@@ -213,12 +212,13 @@ fun CameraScreen(
                                         bitmap
                                     }
 
-                                    val analysisBitmap = resizeBitmapLongSide(finalBitmap, 640)
-                                    // Pipe to ViewModel current frame bitmap
-                                    viewModel.setLatestBitmap(analysisBitmap)
+                                    val timestampMs = System.currentTimeMillis()
+                                    val analysisBitmap = resizeBitmapLongSide(finalBitmap, 1280)
+                                    Log.d("CameraScreen", "analysisBitmap=${analysisBitmap.width}x${analysisBitmap.height}")
+                                    viewModel.registerCameraFrame(analysisBitmap, timestampMs)
                                     landmarkerService?.detectLiveStreamFrame(
                                         analysisBitmap,
-                                        System.currentTimeMillis()
+                                        timestampMs
                                     )
                                 } catch (e: Exception) {
                                     Log.e("CameraScreen", "Frame analysis failed", e)

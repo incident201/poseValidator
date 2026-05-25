@@ -21,6 +21,7 @@ data class PoseLandmarks(
     val rightHip: Point3D? = null,
     val leftKnee: Point3D? = null,
     val rightKnee: Point3D? = null,
+    val allLandmarks: List<Point3D> = emptyList(),
 ) {
     fun hasEnoughKeypoints(): Boolean {
         return leftShoulder != null &&
