@@ -20,7 +20,7 @@ object PoseFrameCropper {
         bitmapWidth: Int,
         bitmapHeight: Int,
         pose: PoseLandmarks,
-        paddingFactor: Float = 0.30f,
+        paddingFactor: Float = 0.15f,
         minPaddingPx: Int = 32
     ): PoseCropRect? {
         val points = pose.allLandmarks.mapNotNull { point ->
@@ -57,7 +57,7 @@ object PoseFrameCropper {
     fun cropAroundPose(
         bitmap: Bitmap,
         pose: PoseLandmarks,
-        paddingFactor: Float = 0.30f,
+        paddingFactor: Float = 0.15f,
         minPaddingPx: Int = 32
     ): Bitmap {
         val rect = calculateCropRect(
