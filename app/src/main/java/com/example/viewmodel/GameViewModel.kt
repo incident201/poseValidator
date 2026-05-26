@@ -26,6 +26,7 @@ import kotlinx.coroutines.launch
 enum class GameState {
     ModelDownloadRequired,
     ModelDownloading,
+    InitializingAiRuntime,
     Idle,
     StartingDelay,
     CheckingStartPose,
@@ -134,7 +135,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         if (GemmaModelManager.isModelDownloaded(application)) {
-            _gameState.value = GameState.Idle
+            _gameState.value = GameState.InitializingAiRuntime
+            _statusMessage.value = "Инициализация локального AI..."
+            viewModelScope.launch {
+                try {
+                    GemmaPoseValidator.warmUp(application)
+                    _gameState.value = GameState.Idle
+                    _statusMessage.value = "Поставь телефон и встань в позу"
+                } catch (t: Throwable) {
+                    Log.e(TAG, "LiteRT-LM warmUp failed", t)
+                    _gameState.value = GameState.Failed
+                    _defeatReason.value = "Ошибка инициализации локального AI: ${t.message}"
+                    _statusMessage.value = "Ошибка инициализации локального AI"
+                }
+            }
         } else {
             _gameState.value = GameState.ModelDownloadRequired
             _statusMessage.value = "Требуется скачать локальную Gemma модель"
@@ -160,8 +174,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 _downloadBytesInfo.value = String.format("%.1f MB / %.1f MB (%.0f%%)", downloaded, total, progress * 100)
             }
             if (success) {
-                _gameState.value = GameState.Idle
-                _statusMessage.value = "Модель успешно загружена! Камера активна."
+                _gameState.value = GameState.InitializingAiRuntime
+                _statusMessage.value = "Инициализация локального AI..."
+                try {
+                    GemmaPoseValidator.warmUp(application)
+                    _gameState.value = GameState.Idle
+                    _statusMessage.value = "Модель успешно загружена! Камера активна."
+                } catch (t: Throwable) {
+                    Log.e(TAG, "LiteRT-LM warmUp failed", t)
+                    _gameState.value = GameState.Failed
+                    _defeatReason.value = "Ошибка инициализации локального AI: ${t.message}"
+                    _statusMessage.value = "Ошибка инициализации локального AI"
+                }
             } else {
                 _gameState.value = GameState.ModelDownloadRequired
                 _statusMessage.value = "Ошибка скачивания. Пожалуйста, попробуйте снова."

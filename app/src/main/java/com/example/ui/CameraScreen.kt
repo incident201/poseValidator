@@ -116,6 +116,24 @@ fun CameraScreen(
         return
     }
 
+
+    if (gameState == GameState.InitializingAiRuntime) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(DarkBg),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "Инициализация локального AI...",
+                color = Color.White,
+                fontSize = 20.sp,
+                textAlign = TextAlign.Center
+            )
+        }
+        return
+    }
+
     // Camera Permissions State
     var hasCameraPermission by remember {
         mutableStateOf(

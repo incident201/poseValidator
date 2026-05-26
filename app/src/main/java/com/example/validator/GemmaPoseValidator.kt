@@ -32,6 +32,10 @@ object GemmaPoseValidator {
         return LocalGemmaVisionValidator.validatePose(context, bitmap)
     }
 
+    suspend fun warmUp(context: Context) {
+        LocalGemmaVisionValidator.warmUp(context)
+    }
+
     fun close() {
         LocalGemmaVisionValidator.close()
     }

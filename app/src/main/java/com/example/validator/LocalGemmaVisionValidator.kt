@@ -37,6 +37,8 @@ object LocalGemmaVisionValidator {
             return current
         }
 
+        MlRuntimeStateResetter.resetIfApkUpdated(context.applicationContext)
+
         val modelFile = GemmaModelManager.getModelFile(context)
         if (!modelFile.exists()) {
             throw IllegalStateException("Local Gemma model file is not downloaded! Checked: ${modelFile.absolutePath}")
@@ -44,11 +46,13 @@ object LocalGemmaVisionValidator {
 
         Log.i(TAG, "Initializing local LiteRT-LM Engine using ${modelFile.name}")
         
+        val liteRtCacheDir = File(context.codeCacheDir, "litertlm_cache").apply { mkdirs() }
+
         val config = EngineConfig(
             modelPath = modelFile.absolutePath,
             backend = Backend.GPU(),
             visionBackend = Backend.GPU(),
-            cacheDir = context.cacheDir.absolutePath
+            cacheDir = liteRtCacheDir.absolutePath
         )
         val newEngine = Engine(config)
         newEngine.initialize()
@@ -66,6 +70,10 @@ object LocalGemmaVisionValidator {
         val newWidth = (width * scale).toInt().coerceAtLeast(1)
         val newHeight = (height * scale).toInt().coerceAtLeast(1)
         return Bitmap.createScaledBitmap(image, newWidth, newHeight, true)
+    }
+
+    suspend fun warmUp(context: Context) = withContext(Dispatchers.IO) {
+        getOrInitializeEngine(context.applicationContext)
     }
 
     suspend fun validatePose(context: Context, bitmap: Bitmap): PoseValidationResult = withContext(Dispatchers.IO) {
