@@ -139,7 +139,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             _statusMessage.value = "Инициализация локального AI..."
             viewModelScope.launch {
                 try {
-                    GemmaPoseValidator.warmUp(app)
+                    GemmaPoseValidator.warmUp(application)
                     _gameState.value = GameState.Idle
                     _statusMessage.value = "Поставь телефон и встань в позу"
                 } catch (t: Throwable) {
