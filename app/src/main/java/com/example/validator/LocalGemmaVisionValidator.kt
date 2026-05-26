@@ -56,6 +56,7 @@ object LocalGemmaVisionValidator {
         )
         val newEngine = Engine(config)
         newEngine.initialize()
+        MlRuntimeStateResetter.markCurrentApkUpdateHandled(context.applicationContext)
         engine = newEngine
         Log.i(TAG, "Successfully initialized LiteRT-LM Engine on GPU backend")
         return newEngine

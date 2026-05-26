@@ -11,13 +11,7 @@ object MlRuntimeStateResetter {
 
     fun resetIfApkUpdated(context: Context) {
         val appContext = context.applicationContext
-        val lastUpdateTime = appContext.packageManager
-            .getPackageInfo(appContext.packageName, 0)
-            .lastUpdateTime
-
-        val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val savedLastUpdateTime = prefs.getLong(KEY_LAST_APK_UPDATE_TIME, -1L)
-        if (savedLastUpdateTime == lastUpdateTime) return
+        if (isCurrentApkUpdateHandled(appContext)) return
 
         Log.i(TAG, "APK update detected; resetting ML runtime state")
 
@@ -26,27 +20,78 @@ object MlRuntimeStateResetter {
         logDirectoryState("before codeCacheDir", appContext.codeCacheDir)
         logDirectoryState("before noBackupFilesDir", appContext.noBackupFilesDir)
 
+        var isResetSuccessful = true
+
         appContext.filesDir.listFiles().orEmpty().forEach { file ->
             if (file.name == GemmaModelManager.MODEL_FILENAME) return@forEach
-            file.deleteRecursively()
+            if (!deleteRecursivelyLogged(file)) {
+                isResetSuccessful = false
+            }
         }
 
-        clearDirectoryContents(appContext.cacheDir)
-        clearDirectoryContents(appContext.codeCacheDir)
-        clearDirectoryContents(appContext.noBackupFilesDir)
+        if (!clearDirectoryContents(appContext.cacheDir)) {
+            isResetSuccessful = false
+        }
+        if (!clearDirectoryContents(appContext.codeCacheDir)) {
+            isResetSuccessful = false
+        }
+        if (!clearDirectoryContents(appContext.noBackupFilesDir)) {
+            isResetSuccessful = false
+        }
 
         logDirectoryState("after filesDir", appContext.filesDir)
         logDirectoryState("after cacheDir", appContext.cacheDir)
         logDirectoryState("after codeCacheDir", appContext.codeCacheDir)
         logDirectoryState("after noBackupFilesDir", appContext.noBackupFilesDir)
 
-        prefs.edit().putLong(KEY_LAST_APK_UPDATE_TIME, lastUpdateTime).apply()
+        if (!isResetSuccessful) {
+            throw IllegalStateException("Failed to fully reset ML runtime state after APK update")
+        }
     }
 
-    private fun clearDirectoryContents(dir: File) {
-        dir.listFiles().orEmpty().forEach { file ->
-            file.deleteRecursively()
+    fun markCurrentApkUpdateHandled(context: Context) {
+        val appContext = context.applicationContext
+        val lastUpdateTime = appContext.packageManager
+            .getPackageInfo(appContext.packageName, 0)
+            .lastUpdateTime
+        val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val committed = prefs.edit()
+            .putLong(KEY_LAST_APK_UPDATE_TIME, lastUpdateTime)
+            .commit()
+        if (!committed) {
+            Log.w(TAG, "Failed to persist handled APK update timestamp")
         }
+    }
+
+    fun isCurrentApkUpdateHandled(context: Context): Boolean {
+        val appContext = context.applicationContext
+        val currentLastUpdateTime = appContext.packageManager
+            .getPackageInfo(appContext.packageName, 0)
+            .lastUpdateTime
+        val savedLastUpdateTime = appContext
+            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getLong(KEY_LAST_APK_UPDATE_TIME, -1L)
+        return savedLastUpdateTime == currentLastUpdateTime
+    }
+
+    private fun clearDirectoryContents(dir: File): Boolean {
+        var success = true
+        dir.listFiles().orEmpty().forEach { file ->
+            if (!deleteRecursivelyLogged(file)) {
+                success = false
+            }
+        }
+        return success
+    }
+
+    private fun deleteRecursivelyLogged(file: File): Boolean {
+        if (!file.exists()) return true
+        file.deleteRecursively()
+        if (file.exists()) {
+            Log.e(TAG, "Failed to delete path=${file.absolutePath}")
+            return false
+        }
+        return true
     }
 
     private fun logDirectoryState(label: String, dir: File) {
