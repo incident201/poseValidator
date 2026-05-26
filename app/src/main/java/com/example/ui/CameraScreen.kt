@@ -483,6 +483,7 @@ fun BottomHUDEngine(
                 val stateHeadline = when (gameState) {
                     GameState.ModelDownloadRequired -> "НУЖНА ЗАГРУЗКА"
                     GameState.ModelDownloading -> "СКАЧИВАНИЕ МОДЕЛИ..."
+                    GameState.InitializingAiRuntime -> "ИНИЦИАЛИЗАЦИЯ AI..."
                     GameState.Idle -> "ЖДЁМ СТАРТА"
                     GameState.StartingDelay -> "СТАРТ ЧЕРЕЗ ${startDelayRemainingSeconds}s"
                     GameState.CheckingStartPose -> "АНАЛИЗИРУЕМ С Gemma VLM..."
