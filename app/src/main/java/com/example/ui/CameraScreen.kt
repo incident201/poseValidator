@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.speech.tts.TextToSpeech
+import android.os.SystemClock
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,7 +36,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size as ComposeSize
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -52,6 +56,7 @@ import com.example.tracker.PoseLandmarkerService
 import com.example.ui.theme.*
 import com.example.viewmodel.GameState
 import com.example.viewmodel.GameViewModel
+import com.example.viewmodel.PoseOverlayState
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -60,6 +65,9 @@ import java.util.Locale
 import android.util.Size
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+
+private const val SHOW_POSE_DEBUG_OVERLAY = true
+private const val SHOW_POSE_DEBUG_POINTS = true
 
 @Composable
 fun CameraScreen(
@@ -81,6 +89,7 @@ fun CameraScreen(
 
     val downloadProgress by viewModel.downloadProgress.collectAsState()
     val downloadBytesInfo by viewModel.downloadBytesInfo.collectAsState()
+    val poseOverlayState by viewModel.poseOverlayState.collectAsState()
 
     val keepScreenOn = gameState == GameState.ModelDownloading ||
         gameState == GameState.StartingDelay ||
@@ -141,9 +150,8 @@ fun CameraScreen(
                 Log.e("CameraScreen", "MediaPipe Error: $error")
             }
 
-            override fun onResults(result: com.example.tracker.PoseLandmarks, imageWidth: Int, imageHeight: Int) {
-                // Pass landmarks to view model
-                viewModel.processMediaPipeResults(result, System.currentTimeMillis())
+            override fun onResults(result: com.example.tracker.PoseLandmarks, imageWidth: Int, imageHeight: Int, timestampMs: Long) {
+                viewModel.processMediaPipeResults(result, timestampMs, imageWidth, imageHeight)
             }
         })
     }
@@ -194,7 +202,7 @@ fun CameraScreen(
                                     ResolutionSelector.Builder()
                                         .setResolutionStrategy(
                                             ResolutionStrategy(
-                                                Size(640, 480),
+                                                Size(1280, 720),
                                                 ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
                                             )
                                         )
@@ -213,12 +221,13 @@ fun CameraScreen(
                                         bitmap
                                     }
 
-                                    val analysisBitmap = resizeBitmapLongSide(finalBitmap, 640)
-                                    // Pipe to ViewModel current frame bitmap
-                                    viewModel.setLatestBitmap(analysisBitmap)
+                                    val timestampMs = SystemClock.elapsedRealtimeNanos() / 1_000_000L
+                                    val analysisBitmap = resizeBitmapLongSide(finalBitmap, 1280)
+                                    Log.d("CameraScreen", "analysisBitmap=${analysisBitmap.width}x${analysisBitmap.height}")
+                                    viewModel.registerCameraFrame(analysisBitmap, timestampMs)
                                     landmarkerService?.detectLiveStreamFrame(
                                         analysisBitmap,
-                                        System.currentTimeMillis()
+                                        timestampMs
                                     )
                                 } catch (e: Exception) {
                                     Log.e("CameraScreen", "Frame analysis failed", e)
@@ -244,6 +253,12 @@ fun CameraScreen(
                         previewView
                     }
                 )
+                if (SHOW_POSE_DEBUG_OVERLAY) {
+                    PoseDebugOverlay(
+                        overlayState = poseOverlayState,
+                        modifier = Modifier.matchParentSize()
+                    )
+                }
             }
 
         }
@@ -260,6 +275,64 @@ fun CameraScreen(
             onDurationChanged = { viewModel.updateSelectedDurationMinutes(it) },
             onStart = { viewModel.startSession() },
             onStop = { viewModel.stopSession() }
+        )
+    }
+}
+
+@Composable
+private fun PoseDebugOverlay(
+    overlayState: PoseOverlayState,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        drawPoseDebugOverlay(overlayState)
+    }
+}
+
+private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
+    val imageWidth = overlayState.imageWidth
+    val imageHeight = overlayState.imageHeight
+    if (imageWidth <= 0 || imageHeight <= 0) return
+
+    val canvasWidth = size.width
+    val canvasHeight = size.height
+    val scale = maxOf(
+        canvasWidth / imageWidth.toFloat(),
+        canvasHeight / imageHeight.toFloat()
+    )
+    val offsetX = (canvasWidth - imageWidth * scale) / 2f
+    val offsetY = (canvasHeight - imageHeight * scale) / 2f
+
+    fun mapX(normalizedX: Float): Float =
+        offsetX + normalizedX.coerceIn(0f, 1f) * imageWidth * scale
+
+    fun mapY(normalizedY: Float): Float =
+        offsetY + normalizedY.coerceIn(0f, 1f) * imageHeight * scale
+
+    val rect = overlayState.cropRect
+    if (rect != null) {
+        val left = mapX(rect.left)
+        val top = mapY(rect.top)
+        val right = mapX(rect.right)
+        val bottom = mapY(rect.bottom)
+        if (right > left && bottom > top) {
+            drawRect(
+                color = Color.Yellow.copy(alpha = 0.95f),
+                topLeft = Offset(left, top),
+                size = ComposeSize(right - left, bottom - top),
+                style = Stroke(width = 4f)
+            )
+        }
+    }
+
+    if (!SHOW_POSE_DEBUG_POINTS || rect == null) return
+
+    overlayState.landmarks.forEach { point ->
+        if (!point.x.isFinite() || !point.y.isFinite()) return@forEach
+        drawCircle(
+            color = Color.Cyan.copy(alpha = 0.85f),
+            radius = 4f,
+            center = Offset(mapX(point.x), mapY(point.y))
         )
     }
 }

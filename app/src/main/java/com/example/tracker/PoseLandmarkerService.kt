@@ -17,7 +17,7 @@ class PoseLandmarkerService(
 
     interface LandmarkerListener {
         fun onError(error: String)
-        fun onResults(result: PoseLandmarks, imageWidth: Int, imageHeight: Int)
+        fun onResults(result: PoseLandmarks, imageWidth: Int, imageHeight: Int, timestampMs: Long)
     }
 
     init {
@@ -39,7 +39,7 @@ class PoseLandmarkerService(
                 .setBaseOptions(baseOptions)
                 .setRunningMode(RunningMode.LIVE_STREAM)
                 .setResultListener { result, image ->
-                    processResult(result, image.width, image.height)
+                    processResult(result, image.width, image.height, result.timestampMs())
                 }
                 .setErrorListener { error ->
                     Log.e(TAG, "MediaPipe error: ${error.message}")
@@ -67,18 +67,23 @@ class PoseLandmarkerService(
         }
     }
 
-    private fun processResult(result: PoseLandmarkerResult, width: Int, height: Int) {
+    private fun processResult(result: PoseLandmarkerResult, width: Int, height: Int, timestampMs: Long) {
         val landmarksList = result.landmarks()
         if (landmarksList.isNullOrEmpty()) {
-            listener.onResults(PoseLandmarks(), width, height)
+            listener.onResults(PoseLandmarks(), width, height, timestampMs)
             return
         }
 
         val firstLandmarks = landmarksList[0]
         if (firstLandmarks.size < 33) {
-            listener.onResults(PoseLandmarks(), width, height)
+            listener.onResults(PoseLandmarks(), width, height, timestampMs)
             return
         }
+
+        val allLandmarks = firstLandmarks.map { landmark ->
+            Point3D(landmark.x(), landmark.y(), landmark.z())
+        }
+        Log.d(TAG, "MediaPipe returned allLandmarks=${allLandmarks.size}")
 
         val pose = PoseLandmarks(
             leftShoulder = Point3D(firstLandmarks[11].x(), firstLandmarks[11].y(), firstLandmarks[11].z()),
@@ -88,10 +93,11 @@ class PoseLandmarkerService(
             leftHip = Point3D(firstLandmarks[23].x(), firstLandmarks[23].y(), firstLandmarks[23].z()),
             rightHip = Point3D(firstLandmarks[24].x(), firstLandmarks[24].y(), firstLandmarks[24].z()),
             leftKnee = Point3D(firstLandmarks[25].x(), firstLandmarks[25].y(), firstLandmarks[25].z()),
-            rightKnee = Point3D(firstLandmarks[26].x(), firstLandmarks[26].y(), firstLandmarks[26].z())
+            rightKnee = Point3D(firstLandmarks[26].x(), firstLandmarks[26].y(), firstLandmarks[26].z()),
+            allLandmarks = allLandmarks
         )
 
-        listener.onResults(pose, width, height)
+        listener.onResults(pose, width, height, timestampMs)
     }
 
     fun close() {
