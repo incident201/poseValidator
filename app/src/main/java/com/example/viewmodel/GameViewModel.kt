@@ -139,7 +139,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             _statusMessage.value = "Инициализация локального AI..."
             viewModelScope.launch {
                 try {
-                    GemmaPoseValidator.warmUp(application)
+                    GemmaPoseValidator.warmUp(app)
                     _gameState.value = GameState.Idle
                     _statusMessage.value = "Поставь телефон и встань в позу"
                 } catch (t: Throwable) {
@@ -169,7 +169,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _gameState.value = GameState.ModelDownloading
         _statusMessage.value = "Скачивание модели... Пожалуйста, не закрывайте экран."
         viewModelScope.launch {
-            val success = GemmaModelManager.downloadModel(getApplication()) { progress, downloaded, total ->
+            val app = getApplication<Application>()
+
+            val success = GemmaModelManager.downloadModel(app) { progress, downloaded, total ->
                 _downloadProgress.value = progress
                 _downloadBytesInfo.value = String.format("%.1f MB / %.1f MB (%.0f%%)", downloaded, total, progress * 100)
             }
@@ -177,7 +179,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 _gameState.value = GameState.InitializingAiRuntime
                 _statusMessage.value = "Инициализация локального AI..."
                 try {
-                    GemmaPoseValidator.warmUp(application)
+                    GemmaPoseValidator.warmUp(app)
                     _gameState.value = GameState.Idle
                     _statusMessage.value = "Модель успешно загружена! Камера активна."
                 } catch (t: Throwable) {
