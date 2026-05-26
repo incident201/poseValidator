@@ -107,6 +107,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val timestampMs: Long
     )
 
+    companion object {
+        private const val MAX_PENDING_FRAMES = 2
+        private const val MAX_PENDING_FRAME_AGE_MS = 3000L
+    }
+
     private val frameLock = Any()
     private val pendingFrames = LinkedHashMap<Long, Bitmap>()
     private var latestAnalyzedFrame: AnalyzedPoseFrame? = null
@@ -120,10 +125,28 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val movementPenaltyCooldownMs: Long = 3000L
     private var gemmaCheckGeneration: Int = 0
 
-    private fun getFreshAnalyzedFrame(maxAgeMs: Long = 1000L): AnalyzedPoseFrame? {
+    private data class FreshPoseSnapshot(
+        val bitmap: Bitmap,
+        val pose: PoseLandmarks,
+        val timestampMs: Long
+    )
+
+    private fun recycleBitmapSafely(bitmap: Bitmap?) {
+        if (bitmap == null) return
+        try {
+            if (!bitmap.isRecycled) bitmap.recycle()
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to recycle bitmap safely", t)
+        }
+    }
+
+    private fun getFreshPoseSnapshot(maxAgeMs: Long = 1000L): FreshPoseSnapshot? {
         val now = SystemClock.elapsedRealtimeNanos() / 1_000_000L
         return synchronized(frameLock) {
-            latestAnalyzedFrame?.takeIf { now - it.timestampMs <= maxAgeMs }
+            val frame = latestAnalyzedFrame?.takeIf { now - it.timestampMs <= maxAgeMs } ?: return null
+            val snapshot = PoseFrameCropper.cropAroundPose(frame.bitmap, frame.pose)
+            Log.i(TAG, "Fresh snapshot created: ${snapshot.width}x${snapshot.height}")
+            FreshPoseSnapshot(snapshot, frame.pose, frame.timestampMs)
         }
     }
 
@@ -170,18 +193,31 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun registerCameraFrame(bitmap: Bitmap, timestampMs: Long) {
+        val toRecycle = mutableListOf<Bitmap>()
         synchronized(frameLock) {
             pendingFrames[timestampMs] = bitmap
-            while (pendingFrames.size > 20) {
+            while (pendingFrames.size > MAX_PENDING_FRAMES) {
                 val firstKey = pendingFrames.keys.firstOrNull() ?: break
-                pendingFrames.remove(firstKey)
+                val removed = pendingFrames.remove(firstKey)
+                if (removed != null && removed !== latestAnalyzedFrame?.bitmap) {
+                    toRecycle += removed
+                }
             }
-            val minTimestampToKeep = timestampMs - 3000
-            val iterator = pendingFrames.keys.iterator()
+            val minTimestampToKeep = timestampMs - MAX_PENDING_FRAME_AGE_MS
+            val iterator = pendingFrames.entries.iterator()
             while (iterator.hasNext()) {
-                val key = iterator.next()
-                if (key < minTimestampToKeep) iterator.remove()
+                val entry = iterator.next()
+                if (entry.key < minTimestampToKeep) {
+                    iterator.remove()
+                    if (entry.value !== latestAnalyzedFrame?.bitmap) {
+                        toRecycle += entry.value
+                    }
+                }
             }
+        }
+        toRecycle.forEach { recycleBitmapSafely(it) }
+        if (toRecycle.isNotEmpty()) {
+            Log.d(TAG, "registerCameraFrame recycled ${toRecycle.size} stale pending frame(s)")
         }
     }
 
@@ -192,7 +228,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         synchronized(frameLock) {
             val matchedBitmap = pendingFrames.remove(timestamp)
             if (matchedBitmap != null) {
+                val oldFrame = latestAnalyzedFrame
                 latestAnalyzedFrame = AnalyzedPoseFrame(matchedBitmap, pose, timestamp)
+                if (oldFrame?.bitmap != null && oldFrame.bitmap !== matchedBitmap) {
+                    recycleBitmapSafely(oldFrame.bitmap)
+                }
                 val cropRect = PoseFrameCropper.calculateCropRect(
                     bitmapWidth = matchedBitmap.width,
                     bitmapHeight = matchedBitmap.height,
@@ -262,10 +302,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
             _startDelayRemainingSeconds.value = 0
 
-            val analyzedFrame = getFreshAnalyzedFrame()
-            val initialPose = analyzedFrame?.pose
+            val snapshot = getFreshPoseSnapshot()
+            val initialPose = snapshot?.pose
 
-            if (analyzedFrame == null) {
+            if (snapshot == null) {
                 triggerDefeat("Камера не предоставила свежий синхронизированный кадр")
                 return@launch
             }
@@ -275,10 +315,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
 
-            val snapshot = PoseFrameCropper.cropAroundPose(
-                bitmap = analyzedFrame.bitmap,
-                pose = analyzedFrame.pose
-            )
             _timerSeconds.value = _selectedDurationSeconds.value.coerceAtLeast(minimumDurationSeconds)
             movementTracker.reset()
             movementViolationCount = 0
@@ -291,7 +327,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
             launchGemmaCheck(
                 checkName = "Стартовая проверка",
-                snapshot = snapshot,
+                snapshot = snapshot.bitmap,
                 isFinal = false
             )
         }
@@ -352,6 +388,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 Log.e(TAG, "$checkName failed", e)
                 triggerDefeat("$checkName: ошибка Gemma: ${e.message}")
             } finally {
+                recycleBitmapSafely(snapshot)
                 if (currentGeneration == gemmaCheckGeneration) {
                     setGemmaChecking(false, checkName)
                     activeGemmaCheckJob = null
@@ -412,18 +449,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             viewModelScope.launch {
                 delay(movementPenaltyCooldownMs)
                 if (_gameState.value != GameState.HoldingPose) return@launch
-                val analyzedFrame = getFreshAnalyzedFrame() ?: run {
+                val snapshotData = getFreshPoseSnapshot() ?: run {
                     triggerDefeat("Повторная проверка позы: камера не предоставила свежий синхронизированный кадр")
                     return@launch
                 }
-                val snapshot = PoseFrameCropper.cropAroundPose(
-                    bitmap = analyzedFrame.bitmap,
-                    pose = analyzedFrame.pose
-                )
                 speak("Выполняется проверка позы")
                 launchGemmaCheck(
                     checkName = "Повторная проверка позы после движения",
-                    snapshot = snapshot,
+                    snapshot = snapshotData.bitmap,
                     isFinal = false
                 )
             }
@@ -496,5 +529,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun formatTime(seconds: Int): String = String.format("%02d:%02d", seconds / 60, seconds % 60)
 
-    override fun onCleared() { super.onCleared(); GemmaPoseValidator.close() }
+    private fun clearFrameBuffers() {
+        val bitmapsToRecycle = mutableListOf<Bitmap>()
+        synchronized(frameLock) {
+            pendingFrames.values.forEach { bitmapsToRecycle += it }
+            pendingFrames.clear()
+            latestAnalyzedFrame?.bitmap?.let { bitmapsToRecycle += it }
+            latestAnalyzedFrame = null
+        }
+        bitmapsToRecycle.distinctBy { System.identityHashCode(it) }.forEach { recycleBitmapSafely(it) }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        clearFrameBuffers()
+        GemmaPoseValidator.close()
+    }
 }

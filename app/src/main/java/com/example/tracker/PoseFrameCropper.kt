@@ -62,6 +62,10 @@ object PoseFrameCropper {
         verticalPaddingFactor: Float = 0.15f,
         minPaddingPx: Int = 32
     ): Bitmap {
+        if (bitmap.isRecycled) {
+            throw IllegalStateException("Cannot crop around pose: source bitmap is already recycled")
+        }
+
         val rect = calculateCropRect(
             bitmapWidth = bitmap.width,
             bitmapHeight = bitmap.height,
@@ -69,7 +73,7 @@ object PoseFrameCropper {
             horizontalPaddingFactor = horizontalPaddingFactor,
             verticalPaddingFactor = verticalPaddingFactor,
             minPaddingPx = minPaddingPx
-        ) ?: return bitmap
+        ) ?: return bitmap.copy(Bitmap.Config.ARGB_8888, false)
 
         Log.d(TAG, "crop rect: left=${rect.left} top=${rect.top} width=${rect.width} height=${rect.height}")
         return Bitmap.createBitmap(bitmap, rect.left, rect.top, rect.width, rect.height)

@@ -65,9 +65,17 @@ import java.util.Locale
 import android.util.Size
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 
 private const val SHOW_POSE_DEBUG_OVERLAY = true
 private const val SHOW_POSE_DEBUG_POINTS = true
+private const val ANALYSIS_INTERVAL_MS = 100L
+
+private fun safeRecycleBitmap(bitmap: Bitmap?) {
+    if (bitmap != null && !bitmap.isRecycled) {
+        bitmap.recycle()
+    }
+}
 
 @Composable
 fun CameraScreen(
@@ -143,6 +151,7 @@ fun CameraScreen(
     // MediaPipe Setup
     val cameraExecutor: ExecutorService = remember { Executors.newSingleThreadExecutor() }
     var landmarkerService by remember { mutableStateOf<PoseLandmarkerService?>(null) }
+    val lastAnalyzedAtMs = remember { AtomicLong(0L) }
 
     LaunchedEffect(context) {
         landmarkerService = PoseLandmarkerService(context, object : PoseLandmarkerService.LandmarkerListener {
@@ -211,25 +220,43 @@ fun CameraScreen(
                                 .build()
 
                             imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
+                                val nowMs = SystemClock.elapsedRealtime()
+                                val lastMs = lastAnalyzedAtMs.get()
+                                if (nowMs - lastMs < ANALYSIS_INTERVAL_MS) {
+                                    imageProxy.close()
+                                    return@setAnalyzer
+                                }
+                                lastAnalyzedAtMs.set(nowMs)
+
+                                var analysisBitmapForCleanup: Bitmap? = null
                                 try {
                                     val rotation = imageProxy.imageInfo.rotationDegrees
-                                    val bitmap = imageProxy.toBitmap()
-                                    // Make sure it is rotated corrected if required
-                                    val finalBitmap = if (rotation != 0) {
-                                        rotateBitmap(bitmap, rotation)
+                                    val sourceBitmap = imageProxy.toBitmap()
+                                    val rotatedBitmap = if (rotation != 0) {
+                                        rotateBitmap(sourceBitmap, rotation)
                                     } else {
-                                        bitmap
+                                        sourceBitmap
+                                    }
+                                    val analysisBitmap = resizeBitmapLongSide(rotatedBitmap, 1280)
+
+                                    if (rotatedBitmap !== sourceBitmap) {
+                                        safeRecycleBitmap(sourceBitmap)
+                                    }
+                                    if (analysisBitmap !== rotatedBitmap) {
+                                        safeRecycleBitmap(rotatedBitmap)
                                     }
 
+                                    analysisBitmapForCleanup = analysisBitmap
                                     val timestampMs = SystemClock.elapsedRealtimeNanos() / 1_000_000L
-                                    val analysisBitmap = resizeBitmapLongSide(finalBitmap, 1280)
                                     Log.d("CameraScreen", "analysisBitmap=${analysisBitmap.width}x${analysisBitmap.height}")
                                     viewModel.registerCameraFrame(analysisBitmap, timestampMs)
                                     landmarkerService?.detectLiveStreamFrame(
                                         analysisBitmap,
                                         timestampMs
                                     )
+                                    analysisBitmapForCleanup = null
                                 } catch (e: Exception) {
+                                    safeRecycleBitmap(analysisBitmapForCleanup)
                                     Log.e("CameraScreen", "Frame analysis failed", e)
                                 } finally {
                                     imageProxy.close()

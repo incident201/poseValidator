@@ -81,8 +81,14 @@ object LocalGemmaVisionValidator {
             }
             FileOutputStream(tempImgFile).use { out ->
                 val resized = getResizedBitmap(bitmap, GEMMA_IMAGE_MAX_LONG_SIDE)
-                Log.d(TAG, "Gemma image size before JPEG=${resized.width}x${resized.height}")
-                resized.compress(Bitmap.CompressFormat.JPEG, GEMMA_IMAGE_JPEG_QUALITY, out)
+                try {
+                    Log.d(TAG, "Gemma image size before JPEG=${resized.width}x${resized.height}")
+                    resized.compress(Bitmap.CompressFormat.JPEG, GEMMA_IMAGE_JPEG_QUALITY, out)
+                } finally {
+                    if (resized !== bitmap && !resized.isRecycled) {
+                        resized.recycle()
+                    }
+                }
             }
 
             val prompt = """
