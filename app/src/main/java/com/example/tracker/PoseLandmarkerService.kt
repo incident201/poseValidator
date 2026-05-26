@@ -14,6 +14,8 @@ class PoseLandmarkerService(
 ) {
     private val TAG = "PoseLandmarkerService"
     private var poseLandmarker: PoseLandmarker? = null
+    private val inFlightBitmaps = LinkedHashMap<Long, Bitmap>()
+    private val inFlightLock = Any()
 
     interface LandmarkerListener {
         fun onError(error: String)
@@ -39,7 +41,12 @@ class PoseLandmarkerService(
                 .setBaseOptions(baseOptions)
                 .setRunningMode(RunningMode.LIVE_STREAM)
                 .setResultListener { result, image ->
-                    processResult(result, image.width, image.height, result.timestampMs())
+                    val timestampMs = result.timestampMs()
+                    try {
+                        processResult(result, image.width, image.height, timestampMs)
+                    } finally {
+                        releaseInFlightBitmap(timestampMs)
+                    }
                 }
                 .setErrorListener { error ->
                     Log.e(TAG, "MediaPipe error: ${error.message}")
@@ -58,12 +65,44 @@ class PoseLandmarkerService(
     fun detectLiveStreamFrame(bitmap: Bitmap, timestamp: Long) {
         val landmarker = poseLandmarker ?: return
 
+        var mediaPipeBitmap: Bitmap? = null
         try {
-            val mpImage = com.google.mediapipe.framework.image.BitmapImageBuilder(bitmap).build()
+            mediaPipeBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+            registerInFlightBitmap(timestamp, mediaPipeBitmap)
+
+            val mpImage = com.google.mediapipe.framework.image.BitmapImageBuilder(mediaPipeBitmap).build()
             landmarker.detectAsync(mpImage, timestamp)
+            mediaPipeBitmap = null
         } catch (t: Throwable) {
+            mediaPipeBitmap?.let { recycleBitmapSafely(it) }
+            releaseInFlightBitmap(timestamp)
             Log.e(TAG, "Error in detectLiveStreamFrame", t)
             listener.onError(t.message ?: "MediaPipe detect error")
+        }
+    }
+
+
+    private fun registerInFlightBitmap(timestamp: Long, bitmap: Bitmap) {
+        synchronized(inFlightLock) {
+            inFlightBitmaps[timestamp] = bitmap
+        }
+    }
+
+    private fun releaseInFlightBitmap(timestamp: Long) {
+        val bitmap = synchronized(inFlightLock) {
+            inFlightBitmaps.remove(timestamp)
+        }
+        recycleBitmapSafely(bitmap)
+    }
+
+    private fun recycleBitmapSafely(bitmap: Bitmap?) {
+        if (bitmap == null) return
+        try {
+            if (!bitmap.isRecycled) {
+                bitmap.recycle()
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to recycle MediaPipe bitmap", t)
         }
     }
 
@@ -101,6 +140,13 @@ class PoseLandmarkerService(
     }
 
     fun close() {
+        val bitmapsToRecycle = synchronized(inFlightLock) {
+            val values = inFlightBitmaps.values.toList()
+            inFlightBitmaps.clear()
+            values
+        }
+        bitmapsToRecycle.forEach { recycleBitmapSafely(it) }
         poseLandmarker?.close()
+        poseLandmarker = null
     }
 }

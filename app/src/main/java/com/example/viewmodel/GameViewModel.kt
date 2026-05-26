@@ -311,6 +311,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             if (initialPose == null || !initialPose.hasEnoughKeypoints()) {
+                recycleBitmapSafely(snapshot.bitmap)
                 triggerDefeat("Камера не видит тело. Встань полностью в кадр.")
                 return@launch
             }
