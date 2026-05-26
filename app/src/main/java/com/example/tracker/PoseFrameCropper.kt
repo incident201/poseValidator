@@ -20,7 +20,8 @@ object PoseFrameCropper {
         bitmapWidth: Int,
         bitmapHeight: Int,
         pose: PoseLandmarks,
-        paddingFactor: Float = 0.15f,
+        horizontalPaddingFactor: Float = 0.30f,
+        verticalPaddingFactor: Float = 0.15f,
         minPaddingPx: Int = 32
     ): PoseCropRect? {
         val points = pose.allLandmarks.mapNotNull { point ->
@@ -40,8 +41,8 @@ object PoseFrameCropper {
         val bboxHeight = maxY - minY
         if (bboxWidth <= 1f || bboxHeight <= 1f) return null
 
-        val padX = max(minPaddingPx.toFloat(), bboxWidth * paddingFactor)
-        val padY = max(minPaddingPx.toFloat(), bboxHeight * paddingFactor)
+        val padX = max(minPaddingPx.toFloat(), bboxWidth * horizontalPaddingFactor)
+        val padY = max(minPaddingPx.toFloat(), bboxHeight * verticalPaddingFactor)
         val left = (minX - padX).toInt().coerceIn(0, bitmapWidth - 1)
         val top = (minY - padY).toInt().coerceIn(0, bitmapHeight - 1)
         val right = (maxX + padX).toInt().coerceIn(left + 1, bitmapWidth)
@@ -57,14 +58,16 @@ object PoseFrameCropper {
     fun cropAroundPose(
         bitmap: Bitmap,
         pose: PoseLandmarks,
-        paddingFactor: Float = 0.15f,
+        horizontalPaddingFactor: Float = 0.30f,
+        verticalPaddingFactor: Float = 0.15f,
         minPaddingPx: Int = 32
     ): Bitmap {
         val rect = calculateCropRect(
             bitmapWidth = bitmap.width,
             bitmapHeight = bitmap.height,
             pose = pose,
-            paddingFactor = paddingFactor,
+            horizontalPaddingFactor = horizontalPaddingFactor,
+            verticalPaddingFactor = verticalPaddingFactor,
             minPaddingPx = minPaddingPx
         ) ?: return bitmap
 
