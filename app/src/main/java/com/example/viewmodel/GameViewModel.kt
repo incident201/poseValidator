@@ -221,6 +221,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+
+    fun dropPendingCameraFrame(timestampMs: Long) {
+        val bitmapToRecycle = synchronized(frameLock) {
+            pendingFrames.remove(timestampMs)
+        }
+        recycleBitmapSafely(bitmapToRecycle)
+    }
+
     fun processMediaPipeResults(pose: PoseLandmarks, timestamp: Long, imageWidth: Int, imageHeight: Int) {
         latestLandmarks = pose
         Log.v(TAG, "MediaPipe frame ts=$timestamp size=${imageWidth}x$imageHeight landmarks=${pose.allLandmarks.size}")

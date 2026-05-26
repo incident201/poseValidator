@@ -12,6 +12,10 @@ class PoseLandmarkerService(
     private val context: Context,
     private val listener: LandmarkerListener
 ) {
+    private companion object {
+        private const val MAX_IN_FLIGHT_MEDIAPIPE_FRAMES = 2
+    }
+
     private val TAG = "PoseLandmarkerService"
     private var poseLandmarker: PoseLandmarker? = null
     private val inFlightBitmaps = LinkedHashMap<Long, Bitmap>()
@@ -62,29 +66,46 @@ class PoseLandmarkerService(
         }
     }
 
-    fun detectLiveStreamFrame(bitmap: Bitmap, timestamp: Long) {
-        val landmarker = poseLandmarker ?: return
+    fun detectLiveStreamFrame(bitmap: Bitmap, timestamp: Long): Boolean {
+        val landmarker = poseLandmarker ?: return false
+        if (!hasInFlightCapacity()) return false
 
         var mediaPipeBitmap: Bitmap? = null
+        var isRegistered = false
         try {
             mediaPipeBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
-            registerInFlightBitmap(timestamp, mediaPipeBitmap)
+            isRegistered = tryRegisterInFlightBitmap(timestamp, mediaPipeBitmap)
+            if (!isRegistered) {
+                recycleBitmapSafely(mediaPipeBitmap)
+                return false
+            }
 
             val mpImage = com.google.mediapipe.framework.image.BitmapImageBuilder(mediaPipeBitmap).build()
             landmarker.detectAsync(mpImage, timestamp)
             mediaPipeBitmap = null
+            return true
         } catch (t: Throwable) {
-            mediaPipeBitmap?.let { recycleBitmapSafely(it) }
-            releaseInFlightBitmap(timestamp)
+            if (isRegistered) {
+                releaseInFlightBitmap(timestamp)
+            } else {
+                recycleBitmapSafely(mediaPipeBitmap)
+            }
             Log.e(TAG, "Error in detectLiveStreamFrame", t)
             listener.onError(t.message ?: "MediaPipe detect error")
+            return false
         }
     }
 
-
-    private fun registerInFlightBitmap(timestamp: Long, bitmap: Bitmap) {
+    private fun hasInFlightCapacity(): Boolean =
         synchronized(inFlightLock) {
+            inFlightBitmaps.size < MAX_IN_FLIGHT_MEDIAPIPE_FRAMES
+        }
+
+    private fun tryRegisterInFlightBitmap(timestamp: Long, bitmap: Bitmap): Boolean {
+        synchronized(inFlightLock) {
+            if (inFlightBitmaps.size >= MAX_IN_FLIGHT_MEDIAPIPE_FRAMES) return false
             inFlightBitmaps[timestamp] = bitmap
+            return true
         }
     }
 
@@ -139,14 +160,23 @@ class PoseLandmarkerService(
         listener.onResults(pose, width, height, timestampMs)
     }
 
-    fun close() {
+    private fun clearInFlightBitmaps() {
         val bitmapsToRecycle = synchronized(inFlightLock) {
             val values = inFlightBitmaps.values.toList()
             inFlightBitmaps.clear()
             values
         }
         bitmapsToRecycle.forEach { recycleBitmapSafely(it) }
-        poseLandmarker?.close()
+    }
+
+    fun close() {
+        val landmarker = poseLandmarker
         poseLandmarker = null
+
+        try {
+            landmarker?.close()
+        } finally {
+            clearInFlightBitmaps()
+        }
     }
 }

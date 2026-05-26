@@ -250,11 +250,15 @@ fun CameraScreen(
                                     val timestampMs = SystemClock.elapsedRealtimeNanos() / 1_000_000L
                                     Log.d("CameraScreen", "analysisBitmap=${analysisBitmap.width}x${analysisBitmap.height}")
                                     viewModel.registerCameraFrame(analysisBitmap, timestampMs)
-                                    landmarkerService?.detectLiveStreamFrame(
+                                    analysisBitmapForCleanup = null
+
+                                    val acceptedByMediaPipe = landmarkerService?.detectLiveStreamFrame(
                                         analysisBitmap,
                                         timestampMs
-                                    )
-                                    analysisBitmapForCleanup = null
+                                    ) == true
+                                    if (!acceptedByMediaPipe) {
+                                        viewModel.dropPendingCameraFrame(timestampMs)
+                                    }
                                 } catch (e: Exception) {
                                     safeRecycleBitmap(analysisBitmapForCleanup)
                                     Log.e("CameraScreen", "Frame analysis failed", e)
