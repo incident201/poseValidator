@@ -6,6 +6,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.tracker.FaceDetectionStatus
 import com.example.tracker.FaceDetectorService
 import com.example.tracker.MovementTracker
 import com.example.tracker.Point3D
@@ -35,11 +36,18 @@ data class FaceOverlayPoint(
 )
 
 data class FaceOverlayState(
-    val isFacingCamera: Boolean = false,
+    val status: FaceDetectionStatus = FaceDetectionStatus.NotProcessed,
     val faceRect: PoseOverlayRect? = null,
     val keypoints: List<FaceOverlayPoint> = emptyList(),
     val score: Float = 0f
-)
+) {
+    val isFacingCamera: Boolean
+        get() = status == FaceDetectionStatus.FaceVisible
+
+    val hasProcessedFaceDetection: Boolean
+        get() = status == FaceDetectionStatus.FaceVisible ||
+            status == FaceDetectionStatus.FaceNotVisible
+}
 
 data class PoseOverlayState(
     val imageWidth: Int = 0,
@@ -170,19 +178,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             )
 
             val faceOverlayState = if (cropRect != null) {
-                val cropBitmap = Bitmap.createBitmap(
-                    bitmap,
-                    cropRect.left,
-                    cropRect.top,
-                    cropRect.width,
-                    cropRect.height
-                )
+                var cropBitmap: Bitmap? = null
                 try {
+                    cropBitmap = Bitmap.createBitmap(
+                        bitmap,
+                        cropRect.left,
+                        cropRect.top,
+                        cropRect.width,
+                        cropRect.height
+                    )
                     val faceResult = faceDetectorService.detectOnCrop(cropBitmap)
                     val faceBox = faceResult.boundingBox
-                    if (!faceResult.isFaceVisible || faceBox == null) {
-                        FaceOverlayState()
-                    } else {
+                    if (faceResult.status == FaceDetectionStatus.FaceVisible && faceBox != null) {
                         val leftNorm = ((cropRect.left + faceBox.leftPx) / bitmap.width).coerceIn(0f, 1f)
                         val topNorm = ((cropRect.top + faceBox.topPx) / bitmap.height).coerceIn(0f, 1f)
                         val rightNorm = ((cropRect.left + faceBox.rightPx) / bitmap.width).coerceIn(0f, 1f)
@@ -194,17 +201,22 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
                         FaceOverlayState(
-                            isFacingCamera = true,
+                            status = FaceDetectionStatus.FaceVisible,
                             faceRect = PoseOverlayRect(leftNorm, topNorm, rightNorm, bottomNorm),
                             keypoints = mappedKeypoints,
                             score = faceResult.score
                         )
+                    } else {
+                        FaceOverlayState(status = faceResult.status)
                     }
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Failed to prepare face crop", t)
+                    FaceOverlayState(status = FaceDetectionStatus.Error)
                 } finally {
-                    cropBitmap.recycle()
+                    cropBitmap?.recycle()
                 }
             } else {
-                FaceOverlayState()
+                FaceOverlayState(status = FaceDetectionStatus.NotProcessed)
             }
 
             val analyzedFrame = AnalyzedPoseFrame(bitmap, pose, timestamp, faceOverlayState)

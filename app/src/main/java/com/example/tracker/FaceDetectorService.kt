@@ -10,12 +10,22 @@ import com.google.mediapipe.tasks.vision.facedetector.FaceDetector
 
 private const val MIN_DETECTION_CONFIDENCE = 0.5f
 
+enum class FaceDetectionStatus {
+    NotProcessed,
+    FaceVisible,
+    FaceNotVisible,
+    Error
+}
+
 data class FaceDetectionOnCrop(
-    val isFaceVisible: Boolean,
+    val status: FaceDetectionStatus,
     val boundingBox: CropFaceRect? = null,
     val keypoints: List<CropFacePoint> = emptyList(),
     val score: Float = 0f
-)
+) {
+    val isFaceVisible: Boolean
+        get() = status == FaceDetectionStatus.FaceVisible
+}
 
 data class CropFaceRect(
     val leftPx: Float,
@@ -52,25 +62,28 @@ class FaceDetectorService(context: Context) {
 
     @Synchronized
     fun detectOnCrop(cropBitmap: Bitmap): FaceDetectionOnCrop {
-        val detector = faceDetector ?: return FaceDetectionOnCrop(false)
-        var argbBitmap: Bitmap? = null
-        var shouldRecycleArgb = false
+        val detector = faceDetector ?: return FaceDetectionOnCrop(FaceDetectionStatus.Error)
+        var copiedBitmap: Bitmap? = null
+
         return try {
-            argbBitmap = if (cropBitmap.config != Bitmap.Config.ARGB_8888) {
-                shouldRecycleArgb = true
-                cropBitmap.copy(Bitmap.Config.ARGB_8888, false)
-            } else {
-                cropBitmap
-            }
-            val mpImage = BitmapImageBuilder(argbBitmap).build()
+            val inputBitmap: Bitmap =
+                if (cropBitmap.config == Bitmap.Config.ARGB_8888) {
+                    cropBitmap
+                } else {
+                    val copy = cropBitmap.copy(Bitmap.Config.ARGB_8888, false)
+                    copiedBitmap = copy
+                    copy ?: return FaceDetectionOnCrop(FaceDetectionStatus.Error)
+                }
+
+            val mpImage = BitmapImageBuilder(inputBitmap).build()
             val detections = detector.detect(mpImage).detections()
             if (detections.isNullOrEmpty()) {
-                return FaceDetectionOnCrop(false)
+                return FaceDetectionOnCrop(FaceDetectionStatus.FaceNotVisible)
             }
 
             val bestDetection = detections.maxByOrNull { detection ->
                 detection.categories().firstOrNull()?.score() ?: 0f
-            } ?: return FaceDetectionOnCrop(false)
+            } ?: return FaceDetectionOnCrop(FaceDetectionStatus.FaceNotVisible)
 
             val score = bestDetection.categories().firstOrNull()?.score() ?: 0f
             val box = bestDetection.boundingBox()
@@ -90,20 +103,19 @@ class FaceDetectorService(context: Context) {
                 }
 
             FaceDetectionOnCrop(
-                isFaceVisible = true,
+                status = FaceDetectionStatus.FaceVisible,
                 boundingBox = faceRect,
                 keypoints = keypoints,
                 score = score
             )
         } catch (t: Throwable) {
             Log.e(tag, "Face detection on crop failed", t)
-            FaceDetectionOnCrop(false)
+            FaceDetectionOnCrop(FaceDetectionStatus.Error)
         } finally {
-            if (shouldRecycleArgb) {
-                argbBitmap?.recycle()
-            }
+            copiedBitmap?.recycle()
         }
     }
+
 
     @Synchronized
     fun close() {
