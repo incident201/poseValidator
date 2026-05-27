@@ -9,7 +9,7 @@ import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.facedetector.FaceDetector
 
-private const val FACE_DETECTOR_MODEL_ASSET = "blaze_face_full_range.tflite"
+private const val FACE_DETECTOR_MODEL_ASSET = "blaze_face_short_range.tflite"
 private const val MIN_DETECTION_CONFIDENCE = 0.5f
 
 enum class FaceDetectionStatus {
