@@ -127,7 +127,7 @@ class FaceDetectorService(context: Context) {
             )
             FaceDetectionOnCrop(
                 status = FaceDetectionStatus.Error,
-                errorMessage = "detect failed: $error"
+                errorMessage = error
             )
         } finally {
             copiedBitmap?.recycle()
