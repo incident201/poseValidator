@@ -425,16 +425,32 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
         FaceDetectionStatus.Error -> android.graphics.Color.RED
         FaceDetectionStatus.NotProcessed -> android.graphics.Color.LTGRAY
     }
-    drawContext.canvas.nativeCanvas.drawText(
-        debugText,
-        24f,
-        40f,
-        Paint().apply {
-            color = debugColor
-            textSize = 30f
-            isAntiAlias = true
+    val debugPaint = Paint().apply {
+        color = debugColor
+        textSize = 30f
+        isAntiAlias = true
+    }
+    val maxTextWidth = (size.width - 48f).coerceAtLeast(1f)
+    var lineY = 40f
+    var textStart = 0
+    while (textStart < debugText.length) {
+        val count = debugPaint.breakText(debugText, textStart, debugText.length, true, maxTextWidth, null)
+        if (count <= 0) break
+        val lineEnd = textStart + count
+        drawContext.canvas.nativeCanvas.drawText(
+            debugText,
+            textStart,
+            lineEnd,
+            24f,
+            lineY,
+            debugPaint
+        )
+        textStart = lineEnd
+        while (textStart < debugText.length && debugText[textStart].isWhitespace()) {
+            textStart += 1
         }
-    )
+        lineY += debugPaint.fontSpacing
+    }
 
     if (!SHOW_POSE_DEBUG_POINTS) return
 

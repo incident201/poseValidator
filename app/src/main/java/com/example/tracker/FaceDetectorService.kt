@@ -8,7 +8,6 @@ import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.facedetector.FaceDetector
-import kotlin.math.roundToInt
 
 private const val FACE_DETECTOR_MODEL_ASSET = "blaze_face_full_range.tflite"
 private const val MIN_DETECTION_CONFIDENCE = 0.5f
@@ -75,7 +74,6 @@ class FaceDetectorService(context: Context) {
             errorMessage = "init failed: $initializationError"
         )
         var copiedBitmap: Bitmap? = null
-        var scaledBitmap: Bitmap? = null
 
         return try {
             val inputBitmap: Bitmap =
@@ -86,22 +84,9 @@ class FaceDetectorService(context: Context) {
                     copiedBitmap = copy
                     copy ?: return FaceDetectionOnCrop(FaceDetectionStatus.Error)
                 }
-            val detectorInputBitmap =
-                if (inputBitmap.width < 256 || inputBitmap.height < 256) {
-                    val scale = 256f / minOf(inputBitmap.width, inputBitmap.height).toFloat()
-                    val scaledWidth = (inputBitmap.width * scale).roundToInt().coerceAtLeast(1)
-                    val scaledHeight = (inputBitmap.height * scale).roundToInt().coerceAtLeast(1)
-                    Bitmap.createScaledBitmap(inputBitmap, scaledWidth, scaledHeight, true).also {
-                        scaledBitmap = it
-                    }
-                } else {
-                    inputBitmap
-                }
-            val scaleX = detectorInputBitmap.width.toFloat() / inputBitmap.width.toFloat()
-            val scaleY = detectorInputBitmap.height.toFloat() / inputBitmap.height.toFloat()
-
-            val mpImage = BitmapImageBuilder(detectorInputBitmap).build()
-            val detections = detector.detect(mpImage).detections()
+            val mpImage = BitmapImageBuilder(inputBitmap).build()
+            val result = detector.detect(mpImage)
+            val detections = result.detections()
             if (detections.isNullOrEmpty()) {
                 return FaceDetectionOnCrop(FaceDetectionStatus.FaceNotVisible)
             }
@@ -113,10 +98,10 @@ class FaceDetectorService(context: Context) {
             val score = bestDetection.categories().firstOrNull()?.score() ?: 0f
             val box = bestDetection.boundingBox()
             val faceRect = CropFaceRect(
-                leftPx = box.left / scaleX,
-                topPx = box.top / scaleY,
-                rightPx = box.right / scaleX,
-                bottomPx = box.bottom / scaleY
+                leftPx = box.left,
+                topPx = box.top,
+                rightPx = box.right,
+                bottomPx = box.bottom
             )
             val keypoints = bestDetection.keypoints()
                 .orElse(emptyList())
@@ -145,7 +130,6 @@ class FaceDetectorService(context: Context) {
                 errorMessage = "detect failed: $error"
             )
         } finally {
-            scaledBitmap?.recycle()
             copiedBitmap?.recycle()
         }
     }
