@@ -92,6 +92,7 @@ fun CameraScreen(
     val poseOverlayState by viewModel.poseOverlayState.collectAsState()
 
     val keepScreenOn = gameState == GameState.ModelDownloading ||
+        gameState == GameState.ModelPreparing ||
         gameState == GameState.StartingDelay ||
         gameState == GameState.HoldingPose ||
         gameState == GameState.CheckingFinalPose ||

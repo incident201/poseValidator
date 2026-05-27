@@ -9,7 +9,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
@@ -139,23 +138,21 @@ object GemmaModelManager {
                 return@withContext ModelPrepareResult.Error("Failed to finalize model file")
             }
 
-            val props = Properties().apply {
-                setProperty("modelPath", finalFile.absolutePath)
-                setProperty("sha256", EXPECTED_MODEL_SHA256)
-                setProperty("size", finalFile.length().toString())
-                setProperty("apkLastUpdateTime", apkLastUpdateTime.toString())
-            }
-            FileOutputStream(propertiesFile).use { props.store(it, null) }
+            writeCurrentModelProperties(
+                propertiesFile = propertiesFile,
+                modelFile = finalFile,
+                sha256 = EXPECTED_MODEL_SHA256,
+                apkLastUpdateTime = apkLastUpdateTime
+            )
+            cleanupOldModelCopies(appContext, keepDir = freshDir)
 
             val prefsSaved = appContext.getSharedPreferences(MODEL_PREPARED_PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .putLong(KEY_PREPARED_APK_LAST_UPDATE_TIME, apkLastUpdateTime)
                 .commit()
             if (!prefsSaved) {
-                return@withContext ModelPrepareResult.Error("Failed to persist APK preparation state")
+                Log.w(TAG, "Failed to persist APK preparation state")
             }
-
-            cleanupOldModelCopies(appContext, keepDir = freshDir)
             ModelPrepareResult.Ready
         } catch (e: Exception) {
             Log.e(TAG, "prepareModelForCurrentApk failed", e)
@@ -164,8 +161,19 @@ object GemmaModelManager {
     }
 
     suspend fun deleteModel(context: Context): Boolean = withContext(Dispatchers.IO) {
-        val file = getModelFile(context)
-        if (file.exists()) file.delete() else false
+        val appContext = context.applicationContext
+        val modelRoot = File(appContext.filesDir, MODEL_ROOT_DIR_NAME)
+        val legacyFile = File(appContext.filesDir, MODEL_FILENAME)
+
+        val rootDeleted = !modelRoot.exists() || modelRoot.deleteRecursively()
+        val legacyDeleted = !legacyFile.exists() || legacyFile.delete()
+
+        appContext.getSharedPreferences(MODEL_PREPARED_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .clear()
+            .commit()
+
+        rootDeleted && legacyDeleted
     }
 
     suspend fun downloadModel(context: Context, onProgress: (progress: Float, downloadedMB: Float, totalMB: Float) -> Unit): Boolean = withContext(Dispatchers.IO) {
@@ -178,9 +186,13 @@ object GemmaModelManager {
         val finalFile = File(freshDir, MODEL_FILENAME)
         val propertiesFile = File(modelRoot, CURRENT_MODEL_PROPERTIES)
 
+        fun failDownload(message: String): Boolean {
+            Log.e(TAG, message)
+            freshDir.deleteRecursively()
+            return false
+        }
+
         var connection: HttpURLConnection? = null
-        var inputStream: InputStream? = null
-        var outputStream: FileOutputStream? = null
 
         try {
             Log.i(TAG, "Starting download from: $DOWNLOAD_URL")
@@ -190,66 +202,89 @@ object GemmaModelManager {
             connection.instanceFollowRedirects = true
             connection.connect()
 
-            if (connection.responseCode !in 200..299) return@withContext false
+            if (connection.responseCode !in 200..299) return@withContext failDownload("Server returned response code ${connection.responseCode}")
             val fileLength = connection.contentLengthLong
-            inputStream = connection.inputStream
-            outputStream = FileOutputStream(tempFile)
 
-            val data = ByteArray(1024 * 64)
-            var total = 0L
-            var count: Int
-            var lastUpdate = 0L
-            while (inputStream.read(data).also { count = it } != -1) {
-                total += count
-                outputStream.write(data, 0, count)
-                val now = System.currentTimeMillis()
-                if (now - lastUpdate > 100 || total == fileLength) {
-                    lastUpdate = now
-                    val progress = if (fileLength > 0) total.toFloat() / fileLength else 0f
-                    val downloadedMB = total.toFloat() / (1024 * 1024)
-                    val totalMB = fileLength.toFloat() / (1024 * 1024)
-                    _downloadProgress.value = progress
-                    _downloadBytesInfo.value = String.format("%.1f MB / %.1f MB (%.0f%%)", downloadedMB, totalMB, progress * 100)
-                    withContext(Dispatchers.Main) { onProgress(progress, downloadedMB, totalMB) }
+            connection.inputStream.use { inputStream ->
+                FileOutputStream(tempFile).use { outputStream ->
+                    val data = ByteArray(1024 * 64)
+                    var total = 0L
+                    var count: Int
+                    var lastUpdate = 0L
+                    while (inputStream.read(data).also { count = it } != -1) {
+                        total += count
+                        outputStream.write(data, 0, count)
+                        val now = System.currentTimeMillis()
+                        if (now - lastUpdate > 100 || total == fileLength) {
+                            lastUpdate = now
+                            val progress = if (fileLength > 0) total.toFloat() / fileLength else 0f
+                            val downloadedMB = total.toFloat() / (1024 * 1024)
+                            val totalMB = fileLength.toFloat() / (1024 * 1024)
+                            _downloadProgress.value = progress
+                            _downloadBytesInfo.value = String.format("%.1f MB / %.1f MB (%.0f%%)", downloadedMB, totalMB, progress * 100)
+                            withContext(Dispatchers.Main) { onProgress(progress, downloadedMB, totalMB) }
+                        }
+                    }
+                    outputStream.flush()
                 }
             }
-            outputStream.flush()
 
             if (tempFile.length() != EXPECTED_MODEL_SIZE_BYTES) {
-                freshDir.deleteRecursively()
-                return@withContext false
+                return@withContext failDownload("Downloaded model size mismatch")
             }
             val downloadedSha = calculateSha256(tempFile)
             if (!downloadedSha.equals(EXPECTED_MODEL_SHA256, ignoreCase = true)) {
-                freshDir.deleteRecursively()
-                return@withContext false
+                return@withContext failDownload("Downloaded model SHA-256 mismatch")
             }
             if (!tempFile.renameTo(finalFile)) {
-                freshDir.deleteRecursively()
-                return@withContext false
+                return@withContext failDownload("Failed to rename temp model file to final file")
             }
 
-            val props = Properties().apply {
-                setProperty("modelPath", finalFile.absolutePath)
-                setProperty("sha256", EXPECTED_MODEL_SHA256)
-                setProperty("size", finalFile.length().toString())
-                setProperty("apkLastUpdateTime", apkLastUpdateTime.toString())
+            try {
+                writeCurrentModelProperties(
+                    propertiesFile = propertiesFile,
+                    modelFile = finalFile,
+                    sha256 = EXPECTED_MODEL_SHA256,
+                    apkLastUpdateTime = apkLastUpdateTime
+                )
+            } catch (e: Exception) {
+                return@withContext failDownload("Failed to write current model properties: ${e.message}")
             }
-            FileOutputStream(propertiesFile).use { props.store(it, null) }
-            val prefSaved = appContext.getSharedPreferences(MODEL_PREPARED_PREFS, Context.MODE_PRIVATE)
-                .edit().putLong(KEY_PREPARED_APK_LAST_UPDATE_TIME, apkLastUpdateTime).commit()
-            if (!prefSaved) return@withContext false
 
             cleanupOldModelCopies(appContext, keepDir = freshDir)
+            val prefSaved = appContext.getSharedPreferences(MODEL_PREPARED_PREFS, Context.MODE_PRIVATE)
+                .edit().putLong(KEY_PREPARED_APK_LAST_UPDATE_TIME, apkLastUpdateTime).commit()
+            if (!prefSaved) {
+                Log.w(TAG, "Failed to persist APK preparation state after download")
+            }
+
             true
         } catch (e: Exception) {
-            Log.e(TAG, "Error downloading model", e)
-            freshDir.deleteRecursively()
-            false
+            failDownload("Error downloading model: ${e.message}")
         } finally {
-            runCatching { outputStream?.close() }
-            runCatching { inputStream?.close() }
             runCatching { connection?.disconnect() }
+        }
+    }
+
+    private fun writeCurrentModelProperties(
+        propertiesFile: File,
+        modelFile: File,
+        sha256: String,
+        apkLastUpdateTime: Long
+    ) {
+        val tempFile = File(propertiesFile.parentFile, "${propertiesFile.name}.tmp")
+        val props = Properties().apply {
+            setProperty("modelPath", modelFile.absolutePath)
+            setProperty("sha256", sha256)
+            setProperty("size", modelFile.length().toString())
+            setProperty("apkLastUpdateTime", apkLastUpdateTime.toString())
+        }
+        FileOutputStream(tempFile).use { props.store(it, null) }
+        if (propertiesFile.exists()) {
+            propertiesFile.delete()
+        }
+        if (!tempFile.renameTo(propertiesFile)) {
+            throw IllegalStateException("Failed to atomically write current model properties")
         }
     }
 
