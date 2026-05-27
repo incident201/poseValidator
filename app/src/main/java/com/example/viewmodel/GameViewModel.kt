@@ -234,9 +234,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                                 debugMessage = "face=FaceVisible input=${faceCropBitmap.width}x${faceCropBitmap.height} score=${faceResult.score}"
                             )
                         } else {
+                            val errorSuffix = faceResult.errorMessage
+                                .takeIf { it.isNotBlank() }
+                                ?.let { " $it" }
+                                ?: ""
                             val debugMessage = when (faceResult.status) {
                                 FaceDetectionStatus.FaceNotVisible -> "face=FaceNotVisible input=${faceCropBitmap.width}x${faceCropBitmap.height}"
-                                FaceDetectionStatus.Error -> "face=Error input=${faceCropBitmap.width}x${faceCropBitmap.height}"
+                                FaceDetectionStatus.Error -> "face=Error input=${faceCropBitmap.width}x${faceCropBitmap.height}$errorSuffix"
                                 FaceDetectionStatus.NotProcessed -> "face=NotProcessed input=${faceCropBitmap.width}x${faceCropBitmap.height}"
                                 FaceDetectionStatus.FaceVisible -> "face=FaceVisible input=${faceCropBitmap.width}x${faceCropBitmap.height} score=${faceResult.score}"
                             }
