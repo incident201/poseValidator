@@ -26,6 +26,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
@@ -97,6 +99,7 @@ fun CameraScreen(
     val poseOverlayState by viewModel.poseOverlayState.collectAsState()
     val gameSettings by viewModel.gameSettings.collectAsState()
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    val canOpenSettings = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
 
     val keepScreenOn = gameState == GameState.StartingDelay ||
         gameState == GameState.HoldingPose
@@ -165,6 +168,13 @@ fun CameraScreen(
         onDispose {
             cameraExecutor.shutdown()
             landmarkerService?.close()
+        }
+    }
+
+
+    LaunchedEffect(canOpenSettings) {
+        if (!canOpenSettings && showSettings) {
+            showSettings = false
         }
     }
 
@@ -326,7 +336,8 @@ fun CameraScreen(
 
 
             FilledTonalIconButton(
-                onClick = { showSettings = true },
+                onClick = { if (canOpenSettings) showSettings = true },
+                enabled = canOpenSettings,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(8.dp)
@@ -560,11 +571,16 @@ private fun SettingsScreen(
     onDriftChanged: (Float) -> Unit,
     onMotionChanged: (Float) -> Unit
 ) {
+    var faceConfidenceSlider by remember(settings.faceDetectionConfidence) {
+        mutableFloatStateOf(settings.faceDetectionConfidence)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(DarkBg)
             .windowInsetsPadding(WindowInsets.statusBars)
+            .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -590,8 +606,13 @@ private fun SettingsScreen(
         Spacer(Modifier.height(12.dp))
         Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
             Column(Modifier.padding(16.dp)) {
-                Text("Порог определения лица: ${"%.2f".format(settings.faceDetectionConfidence)}", color = Color.White)
-                Slider(value = settings.faceDetectionConfidence, onValueChange = onFaceConfidenceChanged, valueRange = 0.5f..0.95f)
+                Text("Порог определения лица: ${"%.2f".format(faceConfidenceSlider)}", color = Color.White)
+                Slider(
+                    value = faceConfidenceSlider,
+                    onValueChange = { faceConfidenceSlider = it.coerceIn(0.5f, 0.95f) },
+                    onValueChangeFinished = { onFaceConfidenceChanged(faceConfidenceSlider) },
+                    valueRange = 0.5f..0.95f
+                )
             }
         }
         Spacer(Modifier.height(12.dp))
