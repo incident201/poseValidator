@@ -26,9 +26,12 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -58,6 +61,8 @@ import androidx.core.content.ContextCompat
 import com.example.tracker.PoseLandmarkerService
 import com.example.tracker.FaceDetectionStatus
 import com.example.ui.theme.*
+import com.example.viewmodel.FaceCheckMode
+import com.example.viewmodel.GameSettings
 import com.example.viewmodel.GameState
 import com.example.viewmodel.GameViewModel
 import com.example.viewmodel.PoseOverlayState
@@ -92,6 +97,9 @@ fun CameraScreen(
     val selectedDurationSeconds by viewModel.selectedDurationSeconds.collectAsState()
     val startDelayRemainingSeconds by viewModel.startDelayRemainingSeconds.collectAsState()
     val poseOverlayState by viewModel.poseOverlayState.collectAsState()
+    val gameSettings by viewModel.gameSettings.collectAsState()
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    val canOpenSettings = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
 
     val keepScreenOn = gameState == GameState.StartingDelay ||
         gameState == GameState.HoldingPose
@@ -163,6 +171,13 @@ fun CameraScreen(
         }
     }
 
+
+    LaunchedEffect(canOpenSettings) {
+        if (!canOpenSettings && showSettings) {
+            showSettings = false
+        }
+    }
+
     LaunchedEffect(isDemoMode, demoBitmap, landmarkerService) {
         val bitmap = demoBitmap
         if (!isDemoMode || bitmap == null) return@LaunchedEffect
@@ -178,6 +193,18 @@ fun CameraScreen(
             }
             delay(250L)
         }
+    }
+
+    if (showSettings) {
+        SettingsScreen(
+            settings = gameSettings,
+            onClose = { showSettings = false },
+            onFaceModeChanged = viewModel::updateFaceCheckMode,
+            onFaceConfidenceChanged = viewModel::updateFaceDetectionConfidence,
+            onDriftChanged = viewModel::updateDriftThresholdFactor,
+            onMotionChanged = viewModel::updateMotionThresholdFactor
+        )
+        return
     }
 
     // Main layout
@@ -305,6 +332,18 @@ fun CameraScreen(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Text(if (isDemoMode) "CAM" else "DEMO")
+            }
+
+
+            FilledTonalIconButton(
+                onClick = { if (canOpenSettings) showSettings = true },
+                enabled = canOpenSettings,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .zIndex(1f)
+            ) {
+                Icon(Icons.Default.Settings, contentDescription = "Настройки")
             }
 
             if (SHOW_POSE_DEBUG_OVERLAY) {
@@ -521,6 +560,73 @@ private fun VoiceAnnouncer(viewModel: GameViewModel) {
     }
 }
 
+
+
+@Composable
+private fun SettingsScreen(
+    settings: GameSettings,
+    onClose: () -> Unit,
+    onFaceModeChanged: (FaceCheckMode) -> Unit,
+    onFaceConfidenceChanged: (Float) -> Unit,
+    onDriftChanged: (Float) -> Unit,
+    onMotionChanged: (Float) -> Unit
+) {
+    var faceConfidenceSlider by remember(settings.faceDetectionConfidence) {
+        mutableFloatStateOf(settings.faceDetectionConfidence)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DarkBg)
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onClose) { Text("Назад") }
+            Text("Настройки", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(12.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Определение лица", color = Color.White, fontWeight = FontWeight.SemiBold)
+                listOf(
+                    "Лицом в камеру" to FaceCheckMode.FaceToCamera,
+                    "Лицом от камеры" to FaceCheckMode.FaceAwayFromCamera,
+                    "Не проверять" to FaceCheckMode.Disabled
+                ).forEach { (label, mode) ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        RadioButton(selected = settings.faceCheckMode == mode, onClick = { onFaceModeChanged(mode) })
+                        Text(label, color = Color.White)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Порог определения лица: ${"%.2f".format(faceConfidenceSlider)}", color = Color.White)
+                Slider(
+                    value = faceConfidenceSlider,
+                    onValueChange = { faceConfidenceSlider = it.coerceIn(0.5f, 0.95f) },
+                    onValueChangeFinished = { onFaceConfidenceChanged(faceConfidenceSlider) },
+                    valueRange = 0.5f..0.95f
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Реакция на движение", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text("Порог смещения: ${"%.2f".format(settings.driftThresholdFactor)}", color = Color.White)
+                Slider(value = settings.driftThresholdFactor, onValueChange = onDriftChanged, valueRange = 0.1f..0.8f)
+                Text("Порог резкого движения: ${"%.2f".format(settings.motionThresholdFactor)}", color = Color.White)
+                Slider(value = settings.motionThresholdFactor, onValueChange = onMotionChanged, valueRange = 0.1f..0.8f)
+            }
+        }
+    }
+}
 
 @Composable
 fun DurationPicker(selectedMinutes: Int, onMinutesChanged: (Int) -> Unit) {
