@@ -15,21 +15,14 @@ import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -60,7 +53,6 @@ import com.example.viewmodel.PoseOverlayState
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
-import java.io.ByteArrayOutputStream
 import java.util.Locale
 import android.util.Size
 import java.util.concurrent.ExecutorService
@@ -85,17 +77,10 @@ fun CameraScreen(
     val defeatReason by viewModel.defeatReason.collectAsState()
     val selectedDurationSeconds by viewModel.selectedDurationSeconds.collectAsState()
     val startDelayRemainingSeconds by viewModel.startDelayRemainingSeconds.collectAsState()
-    val isGemmaChecking by viewModel.isGemmaChecking.collectAsState()
-
-    val downloadProgress by viewModel.downloadProgress.collectAsState()
-    val downloadBytesInfo by viewModel.downloadBytesInfo.collectAsState()
     val poseOverlayState by viewModel.poseOverlayState.collectAsState()
 
-    val keepScreenOn = gameState == GameState.ModelDownloading ||
-        gameState == GameState.StartingDelay ||
-        gameState == GameState.HoldingPose ||
-        gameState == GameState.CheckingFinalPose ||
-        isGemmaChecking
+    val keepScreenOn = gameState == GameState.StartingDelay ||
+        gameState == GameState.HoldingPose
 
     DisposableEffect(keepScreenOn, view) {
         val previous = view.keepScreenOn
@@ -104,18 +89,6 @@ fun CameraScreen(
             view.keepScreenOn = previous
         }
     }
-
-    if (gameState == GameState.ModelDownloadRequired || gameState == GameState.ModelDownloading) {
-        GemmaDownloadScreen(
-            gameState = gameState,
-            downloadProgress = downloadProgress,
-            downloadBytesInfo = downloadBytesInfo,
-            onStartDownload = { viewModel.startModelDownload() },
-            modifier = modifier
-        )
-        return
-    }
-
     // Camera Permissions State
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -271,7 +244,6 @@ fun CameraScreen(
             timerSeconds = timerSeconds,
             selectedDurationSeconds = selectedDurationSeconds,
             startDelayRemainingSeconds = startDelayRemainingSeconds,
-            isGemmaChecking = isGemmaChecking,
             onDurationChanged = { viewModel.updateSelectedDurationMinutes(it) },
             onStart = { viewModel.startSession() },
             onStop = { viewModel.stopSession() }
@@ -440,13 +412,11 @@ fun BottomHUDEngine(
     timerSeconds: Int,
     selectedDurationSeconds: Int,
     startDelayRemainingSeconds: Int,
-    isGemmaChecking: Boolean,
     onDurationChanged: (Int) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit
 ) {
-    val canStart = (gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success) &&
-        !isGemmaChecking
+    val canStart = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
 
     Card(
         modifier = Modifier
@@ -463,14 +433,9 @@ fun BottomHUDEngine(
             // Status/Instruction Box
             Column(modifier = Modifier.fillMaxWidth()) {
                 val stateHeadline = when (gameState) {
-                    GameState.ModelDownloadRequired -> "НУЖНА ЗАГРУЗКА"
-                    GameState.ModelDownloading -> "СКАЧИВАНИЕ МОДЕЛИ..."
                     GameState.Idle -> "ЖДЁМ СТАРТА"
                     GameState.StartingDelay -> "СТАРТ ЧЕРЕЗ ${startDelayRemainingSeconds}s"
-                    GameState.CheckingStartPose -> "АНАЛИЗИРУЕМ С Gemma VLM..."
                     GameState.HoldingPose -> "СТАБИЛИЗАЦИЯ ТЕЛА"
-                    GameState.CheckingControlPose -> "ПРОМЕЖУТОЧНАЯ Gemma ПРОВЕРКА..."
-                    GameState.CheckingFinalPose -> "ФИНАЛЬНАЯ ПРОВЕРКА Gemma..."
                     GameState.Success -> "ПОЗДРАВЛЯЕМ! ПОБЕДА"
                     GameState.Failed -> "ПОВАЛЕНО"
                 }
@@ -495,33 +460,6 @@ fun BottomHUDEngine(
                     fontWeight = FontWeight.Light,
                     lineHeight = 24.sp
                 )
-
-                if (isGemmaChecking) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(DarkPrimary.copy(alpha = 0.2f))
-                            .border(1.dp, DarkPrimary, RoundedCornerShape(12.dp))
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = DarkPrimary,
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = "Идёт проверка Gemma... Не двигайтесь",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-
                 if (defeatReason.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -646,143 +584,3 @@ private fun resizeBitmapLongSide(bitmap: Bitmap, maxLongSide: Int): Bitmap {
     return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
 }
 
-@Composable
-fun GemmaDownloadScreen(
-    gameState: GameState,
-    downloadProgress: Float,
-    downloadBytesInfo: String,
-    onStartDownload: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(DarkBg)
-            .windowInsetsPadding(WindowInsets.safeDrawing),
-        contentAlignment = Alignment.Center
-    ) {
-        androidx.compose.material3.Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-            colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = DarkSurface),
-            shape = RoundedCornerShape(32.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(28.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                // Info icon inside circle
-                Box(
-                    modifier = Modifier
-                        .size(72.dp)
-                        .clip(CircleShape)
-                        .background(DarkPrimary.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = "Download Info",
-                        tint = DarkPrimary,
-                        modifier = Modifier.size(36.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                Text(
-                    text = "Gemma-4-E4B-it",
-                    color = Color.White,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Text(
-                    text = "Для локальной проверки осанки и полной конфиденциальности требуется установить веса модели Gemma-4-E4B-it (LiteRT-LM) размером ~3.66 ГБ. Приложение работает без интернета, кадры не отправляются на сервер.",
-                    color = Color.White.copy(alpha = 0.7f),
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // Network Warning panel
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(AccentRed.copy(alpha = 0.1f))
-                        .border(1.dp, AccentRed.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = "Warning",
-                        tint = DarkPrimary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Text(
-                        text = "Внимание: Размер модели ~3.66 ГБ. Для скачивания настоятельно рекомендуется Wi-Fi соединение во избежание расходов мобильного трафика.",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                // Progress Bar or Download Button
-                if (gameState == GameState.ModelDownloading) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        androidx.compose.material3.LinearProgressIndicator(
-                            progress = { downloadProgress },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(8.dp)
-                                .clip(CircleShape),
-                            color = DarkPrimary,
-                            trackColor = DarkSecondary
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = downloadBytesInfo,
-                            color = DarkPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                } else {
-                    androidx.compose.material3.Button(
-                        onClick = onStartDownload,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .testTag("download_model_button"),
-                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = DarkPrimary),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Text(
-                            text = "СКАЧАТЬ МОДЕЛЬ",
-                            color = DarkOnPrimary,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
