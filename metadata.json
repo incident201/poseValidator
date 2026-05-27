@@ -1,6 +1,6 @@
 {
   "name": "Pose Guard",
-  "description": "Local posture stability and pose matching application controlled by Gemma and MediaPipe.",
+  "description": "Local posture stability application using MediaPipe Pose Landmarker.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }
