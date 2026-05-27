@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.tracker.FaceDetectionStatus
+import com.example.tracker.FaceCandidateCropper
 import com.example.tracker.FaceDetectorService
 import com.example.tracker.MovementTracker
 import com.example.tracker.Point3D
@@ -39,7 +40,11 @@ data class FaceOverlayState(
     val status: FaceDetectionStatus = FaceDetectionStatus.NotProcessed,
     val faceRect: PoseOverlayRect? = null,
     val keypoints: List<FaceOverlayPoint> = emptyList(),
-    val score: Float = 0f
+    val score: Float = 0f,
+    val detectorInputRect: PoseOverlayRect? = null,
+    val detectorInputWidth: Int = 0,
+    val detectorInputHeight: Int = 0,
+    val debugMessage: String = ""
 ) {
     val isFacingCamera: Boolean
         get() = status == FaceDetectionStatus.FaceVisible
@@ -178,45 +183,93 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             )
 
             val faceOverlayState = if (cropRect != null) {
-                var cropBitmap: Bitmap? = null
-                try {
-                    cropBitmap = Bitmap.createBitmap(
-                        bitmap,
-                        cropRect.left,
-                        cropRect.top,
-                        cropRect.width,
-                        cropRect.height
+                val faceCandidateRect = FaceCandidateCropper.calculateFaceCandidateRect(
+                    bitmapWidth = bitmap.width,
+                    bitmapHeight = bitmap.height,
+                    pose = pose,
+                    bodyCropRect = cropRect
+                )
+                if (faceCandidateRect == null) {
+                    FaceOverlayState(
+                        status = FaceDetectionStatus.NotProcessed,
+                        debugMessage = "face=NotProcessed no face candidate crop"
                     )
-                    val faceResult = faceDetectorService.detectOnCrop(cropBitmap)
-                    val faceBox = faceResult.boundingBox
-                    if (faceResult.status == FaceDetectionStatus.FaceVisible && faceBox != null) {
-                        val leftNorm = ((cropRect.left + faceBox.leftPx) / bitmap.width).coerceIn(0f, 1f)
-                        val topNorm = ((cropRect.top + faceBox.topPx) / bitmap.height).coerceIn(0f, 1f)
-                        val rightNorm = ((cropRect.left + faceBox.rightPx) / bitmap.width).coerceIn(0f, 1f)
-                        val bottomNorm = ((cropRect.top + faceBox.bottomPx) / bitmap.height).coerceIn(0f, 1f)
-                        val mappedKeypoints = faceResult.keypoints.map { keypoint ->
-                            FaceOverlayPoint(
-                                x = ((cropRect.left + keypoint.x * cropRect.width) / bitmap.width).coerceIn(0f, 1f),
-                                y = ((cropRect.top + keypoint.y * cropRect.height) / bitmap.height).coerceIn(0f, 1f)
+                } else {
+                    var faceCropBitmap: Bitmap? = null
+                    try {
+                        faceCropBitmap = Bitmap.createBitmap(
+                            bitmap,
+                            faceCandidateRect.left,
+                            faceCandidateRect.top,
+                            faceCandidateRect.width,
+                            faceCandidateRect.height
+                        )
+                        val faceResult = faceDetectorService.detectOnCrop(faceCropBitmap)
+                        val inputRect = PoseOverlayRect(
+                            left = faceCandidateRect.left / bitmap.width.toFloat(),
+                            top = faceCandidateRect.top / bitmap.height.toFloat(),
+                            right = faceCandidateRect.right / bitmap.width.toFloat(),
+                            bottom = faceCandidateRect.bottom / bitmap.height.toFloat()
+                        )
+                        val faceState = if (faceResult.status == FaceDetectionStatus.FaceVisible && faceResult.boundingBox != null) {
+                            val faceBox = faceResult.boundingBox
+                            val leftNorm = ((faceCandidateRect.left + faceBox.leftPx) / bitmap.width).coerceIn(0f, 1f)
+                            val topNorm = ((faceCandidateRect.top + faceBox.topPx) / bitmap.height).coerceIn(0f, 1f)
+                            val rightNorm = ((faceCandidateRect.left + faceBox.rightPx) / bitmap.width).coerceIn(0f, 1f)
+                            val bottomNorm = ((faceCandidateRect.top + faceBox.bottomPx) / bitmap.height).coerceIn(0f, 1f)
+                            val mappedKeypoints = faceResult.keypoints.map { keypoint ->
+                                FaceOverlayPoint(
+                                    x = ((faceCandidateRect.left + keypoint.x * faceCandidateRect.width) / bitmap.width).coerceIn(0f, 1f),
+                                    y = ((faceCandidateRect.top + keypoint.y * faceCandidateRect.height) / bitmap.height).coerceIn(0f, 1f)
+                                )
+                            }
+                            FaceOverlayState(
+                                status = FaceDetectionStatus.FaceVisible,
+                                faceRect = PoseOverlayRect(leftNorm, topNorm, rightNorm, bottomNorm),
+                                keypoints = mappedKeypoints,
+                                score = faceResult.score,
+                                detectorInputRect = inputRect,
+                                detectorInputWidth = faceCropBitmap.width,
+                                detectorInputHeight = faceCropBitmap.height,
+                                debugMessage = "face=FaceVisible input=${faceCropBitmap.width}x${faceCropBitmap.height} score=${faceResult.score}"
+                            )
+                        } else {
+                            val errorSuffix = faceResult.errorMessage
+                                .takeIf { it.isNotBlank() }
+                                ?.let { " $it" }
+                                ?: ""
+                            val debugMessage = when (faceResult.status) {
+                                FaceDetectionStatus.FaceNotVisible -> "face=FaceNotVisible input=${faceCropBitmap.width}x${faceCropBitmap.height}"
+                                FaceDetectionStatus.Error -> "face=Error input=${faceCropBitmap.width}x${faceCropBitmap.height}$errorSuffix"
+                                FaceDetectionStatus.NotProcessed -> "face=NotProcessed input=${faceCropBitmap.width}x${faceCropBitmap.height}"
+                                FaceDetectionStatus.FaceVisible -> "face=FaceVisible input=${faceCropBitmap.width}x${faceCropBitmap.height} score=${faceResult.score}"
+                            }
+                            FaceOverlayState(
+                                status = faceResult.status,
+                                score = faceResult.score,
+                                detectorInputRect = inputRect,
+                                detectorInputWidth = faceCropBitmap.width,
+                                detectorInputHeight = faceCropBitmap.height,
+                                debugMessage = debugMessage
                             )
                         }
+                        Log.d(TAG, "Face detection: ${faceState.debugMessage} candidate=$faceCandidateRect body=$cropRect faceRect=${faceState.faceRect}")
+                        faceState
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "Failed to prepare face crop", t)
                         FaceOverlayState(
-                            status = FaceDetectionStatus.FaceVisible,
-                            faceRect = PoseOverlayRect(leftNorm, topNorm, rightNorm, bottomNorm),
-                            keypoints = mappedKeypoints,
-                            score = faceResult.score
+                            status = FaceDetectionStatus.Error,
+                            debugMessage = "face=Error input=0x0"
                         )
-                    } else {
-                        FaceOverlayState(status = faceResult.status)
+                    } finally {
+                        faceCropBitmap?.recycle()
                     }
-                } catch (t: Throwable) {
-                    Log.e(TAG, "Failed to prepare face crop", t)
-                    FaceOverlayState(status = FaceDetectionStatus.Error)
-                } finally {
-                    cropBitmap?.recycle()
                 }
             } else {
-                FaceOverlayState(status = FaceDetectionStatus.NotProcessed)
+                FaceOverlayState(
+                    status = FaceDetectionStatus.NotProcessed,
+                    debugMessage = "face=NotProcessed no body crop"
+                )
             }
 
             val analyzedFrame = AnalyzedPoseFrame(bitmap, pose, timestamp, faceOverlayState)

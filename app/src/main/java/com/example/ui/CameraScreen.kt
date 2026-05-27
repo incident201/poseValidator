@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.speech.tts.TextToSpeech
 import android.os.SystemClock
+import android.graphics.Paint
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -38,6 +39,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size as ComposeSize
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
@@ -54,6 +56,7 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.tracker.PoseLandmarkerService
+import com.example.tracker.FaceDetectionStatus
 import com.example.ui.theme.*
 import com.example.viewmodel.GameState
 import com.example.viewmodel.GameViewModel
@@ -374,6 +377,22 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
     }
 
     val face = overlayState.face
+    val detectorInputRect = face.detectorInputRect
+    if (detectorInputRect != null) {
+        val left = mapX(detectorInputRect.left)
+        val top = mapY(detectorInputRect.top)
+        val right = mapX(detectorInputRect.right)
+        val bottom = mapY(detectorInputRect.bottom)
+        if (right > left && bottom > top) {
+            drawRect(
+                color = Color.Green.copy(alpha = 0.85f),
+                topLeft = Offset(left, top),
+                size = ComposeSize(right - left, bottom - top),
+                style = Stroke(width = 3f)
+            )
+        }
+    }
+
     val faceRect = face.faceRect
     if (faceRect != null) {
         val left = mapX(faceRect.left)
@@ -398,6 +417,24 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
             center = Offset(mapX(point.x), mapY(point.y))
         )
     }
+
+    val debugText = face.debugMessage.ifEmpty { "face=${face.status}" }
+    val debugColor = when (face.status) {
+        FaceDetectionStatus.FaceVisible -> android.graphics.Color.GREEN
+        FaceDetectionStatus.FaceNotVisible -> android.graphics.Color.YELLOW
+        FaceDetectionStatus.Error -> android.graphics.Color.RED
+        FaceDetectionStatus.NotProcessed -> android.graphics.Color.LTGRAY
+    }
+    drawContext.canvas.nativeCanvas.drawText(
+        debugText,
+        24f,
+        40f,
+        Paint().apply {
+            color = debugColor
+            textSize = 30f
+            isAntiAlias = true
+        }
+    )
 
     if (!SHOW_POSE_DEBUG_POINTS) return
 
