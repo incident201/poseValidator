@@ -6,6 +6,8 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.tracker.FaceDetectionStatus
+import com.example.tracker.FaceDetectorService
 import com.example.tracker.MovementTracker
 import com.example.tracker.Point3D
 import com.example.tracker.PoseFrameCropper
@@ -28,11 +30,31 @@ enum class GameState {
     Failed
 }
 
+data class FaceOverlayPoint(
+    val x: Float,
+    val y: Float
+)
+
+data class FaceOverlayState(
+    val status: FaceDetectionStatus = FaceDetectionStatus.NotProcessed,
+    val faceRect: PoseOverlayRect? = null,
+    val keypoints: List<FaceOverlayPoint> = emptyList(),
+    val score: Float = 0f
+) {
+    val isFacingCamera: Boolean
+        get() = status == FaceDetectionStatus.FaceVisible
+
+    val hasProcessedFaceDetection: Boolean
+        get() = status == FaceDetectionStatus.FaceVisible ||
+            status == FaceDetectionStatus.FaceNotVisible
+}
+
 data class PoseOverlayState(
     val imageWidth: Int = 0,
     val imageHeight: Int = 0,
     val landmarks: List<Point3D> = emptyList(),
-    val cropRect: PoseOverlayRect? = null
+    val cropRect: PoseOverlayRect? = null,
+    val face: FaceOverlayState = FaceOverlayState()
 )
 
 data class PoseOverlayRect(
@@ -84,8 +106,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     private data class AnalyzedPoseFrame(
         val bitmap: Bitmap,
         val pose: PoseLandmarks,
-        val timestampMs: Long
+        val timestampMs: Long,
+        val face: FaceOverlayState
     )
+
+    private val faceDetectorService = FaceDetectorService(application.applicationContext)
 
     private val frameLock = Any()
     private val pendingFrames = LinkedHashMap<Long, Bitmap>()
@@ -136,32 +161,87 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     fun processMediaPipeResults(pose: PoseLandmarks, timestamp: Long, imageWidth: Int, imageHeight: Int) {
         latestLandmarks = pose
         Log.v(TAG, "MediaPipe frame ts=$timestamp size=${imageWidth}x$imageHeight landmarks=${pose.allLandmarks.size}")
-        var nextOverlayState = PoseOverlayState()
+
+        var matchedBitmap: Bitmap? = null
         synchronized(frameLock) {
-            val matchedBitmap = pendingFrames.remove(timestamp)
-            if (matchedBitmap != null) {
-                latestAnalyzedFrame = AnalyzedPoseFrame(matchedBitmap, pose, timestamp)
-                val cropRect = PoseFrameCropper.calculateCropRect(
-                    bitmapWidth = matchedBitmap.width,
-                    bitmapHeight = matchedBitmap.height,
-                    pose = pose
-                )
-                val normalizedRect = cropRect?.let {
-                    PoseOverlayRect(
-                        left = it.left.toFloat() / matchedBitmap.width.toFloat(),
-                        top = it.top.toFloat() / matchedBitmap.height.toFloat(),
-                        right = it.right.toFloat() / matchedBitmap.width.toFloat(),
-                        bottom = it.bottom.toFloat() / matchedBitmap.height.toFloat()
+            matchedBitmap = pendingFrames.remove(timestamp)
+        }
+
+        val nextOverlayState = if (matchedBitmap == null) {
+            PoseOverlayState()
+        } else {
+            val bitmap = matchedBitmap!!
+            val cropRect = PoseFrameCropper.calculateCropRect(
+                bitmapWidth = bitmap.width,
+                bitmapHeight = bitmap.height,
+                pose = pose
+            )
+
+            val faceOverlayState = if (cropRect != null) {
+                var cropBitmap: Bitmap? = null
+                try {
+                    cropBitmap = Bitmap.createBitmap(
+                        bitmap,
+                        cropRect.left,
+                        cropRect.top,
+                        cropRect.width,
+                        cropRect.height
                     )
+                    val faceResult = faceDetectorService.detectOnCrop(cropBitmap)
+                    val faceBox = faceResult.boundingBox
+                    if (faceResult.status == FaceDetectionStatus.FaceVisible && faceBox != null) {
+                        val leftNorm = ((cropRect.left + faceBox.leftPx) / bitmap.width).coerceIn(0f, 1f)
+                        val topNorm = ((cropRect.top + faceBox.topPx) / bitmap.height).coerceIn(0f, 1f)
+                        val rightNorm = ((cropRect.left + faceBox.rightPx) / bitmap.width).coerceIn(0f, 1f)
+                        val bottomNorm = ((cropRect.top + faceBox.bottomPx) / bitmap.height).coerceIn(0f, 1f)
+                        val mappedKeypoints = faceResult.keypoints.map { keypoint ->
+                            FaceOverlayPoint(
+                                x = ((cropRect.left + keypoint.x * cropRect.width) / bitmap.width).coerceIn(0f, 1f),
+                                y = ((cropRect.top + keypoint.y * cropRect.height) / bitmap.height).coerceIn(0f, 1f)
+                            )
+                        }
+                        FaceOverlayState(
+                            status = FaceDetectionStatus.FaceVisible,
+                            faceRect = PoseOverlayRect(leftNorm, topNorm, rightNorm, bottomNorm),
+                            keypoints = mappedKeypoints,
+                            score = faceResult.score
+                        )
+                    } else {
+                        FaceOverlayState(status = faceResult.status)
+                    }
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Failed to prepare face crop", t)
+                    FaceOverlayState(status = FaceDetectionStatus.Error)
+                } finally {
+                    cropBitmap?.recycle()
                 }
-                nextOverlayState = PoseOverlayState(
-                    imageWidth = matchedBitmap.width,
-                    imageHeight = matchedBitmap.height,
-                    landmarks = pose.allLandmarks,
-                    cropRect = normalizedRect
+            } else {
+                FaceOverlayState(status = FaceDetectionStatus.NotProcessed)
+            }
+
+            val analyzedFrame = AnalyzedPoseFrame(bitmap, pose, timestamp, faceOverlayState)
+            synchronized(frameLock) {
+                latestAnalyzedFrame = analyzedFrame
+            }
+
+            val normalizedRect = cropRect?.let {
+                PoseOverlayRect(
+                    left = it.left.toFloat() / bitmap.width.toFloat(),
+                    top = it.top.toFloat() / bitmap.height.toFloat(),
+                    right = it.right.toFloat() / bitmap.width.toFloat(),
+                    bottom = it.bottom.toFloat() / bitmap.height.toFloat()
                 )
             }
+
+            PoseOverlayState(
+                imageWidth = bitmap.width,
+                imageHeight = bitmap.height,
+                landmarks = pose.allLandmarks,
+                cropRect = normalizedRect,
+                face = faceOverlayState
+            )
         }
+
         _poseOverlayState.value = nextOverlayState
         val state = _gameState.value
         val scale = pose.getBodyScale()
@@ -326,6 +406,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         movementTracker.reset()
         movementViolationCount = 0
         lastMovementPenaltyAtMs = 0L
+    }
+
+    override fun onCleared() {
+        faceDetectorService.close()
+        super.onCleared()
     }
 
     private fun calculateSingleDisplacement(p1: PoseLandmarks, p2: PoseLandmarks): Float {

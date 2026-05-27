@@ -297,7 +297,33 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
         }
     }
 
-    if (!SHOW_POSE_DEBUG_POINTS || rect == null) return
+    val face = overlayState.face
+    val faceRect = face.faceRect
+    if (faceRect != null) {
+        val left = mapX(faceRect.left)
+        val top = mapY(faceRect.top)
+        val right = mapX(faceRect.right)
+        val bottom = mapY(faceRect.bottom)
+        if (right > left && bottom > top) {
+            drawRect(
+                color = Color.Magenta.copy(alpha = 0.95f),
+                topLeft = Offset(left, top),
+                size = ComposeSize(right - left, bottom - top),
+                style = Stroke(width = 4f)
+            )
+        }
+    }
+
+    face.keypoints.forEach { point ->
+        if (!point.x.isFinite() || !point.y.isFinite()) return@forEach
+        drawCircle(
+            color = Color.Red.copy(alpha = 0.95f),
+            radius = 5f,
+            center = Offset(mapX(point.x), mapY(point.y))
+        )
+    }
+
+    if (!SHOW_POSE_DEBUG_POINTS) return
 
     overlayState.landmarks.forEach { point ->
         if (!point.x.isFinite() || !point.y.isFinite()) return@forEach
