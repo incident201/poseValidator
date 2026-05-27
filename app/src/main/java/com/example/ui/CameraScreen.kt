@@ -700,11 +700,25 @@ private fun decodeBitmapFromUri(context: android.content.Context, uri: Uri): Bit
     return runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val source = ImageDecoder.createSource(context.contentResolver, uri)
-            ImageDecoder.decodeBitmap(source)
+            val decoded = ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            }
+            normalizeSoftwareArgb8888(decoded)
         } else {
             context.contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream)
+                BitmapFactory.decodeStream(stream)?.let { normalizeSoftwareArgb8888(it) }
             }
         }
     }.getOrNull()
+}
+
+private fun normalizeSoftwareArgb8888(bitmap: Bitmap): Bitmap {
+    val isHardwareBitmap = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+        bitmap.config == Bitmap.Config.HARDWARE
+    val requiresConfigConversion = bitmap.config != Bitmap.Config.ARGB_8888
+    return if (isHardwareBitmap || requiresConfigConversion) {
+        bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: bitmap
+    } else {
+        bitmap
+    }
 }
