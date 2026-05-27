@@ -49,8 +49,25 @@ jobs:
       - name: Build Debug APK
         run: gradle assembleDebug --no-daemon
 
+      - name: Rename APK with Timestamp
+        id: rename_apk
+        run: |
+          # Генерируем таймстамп в формате ddMMyyyyHHmmss (например, 27052026123045)
+          TIMESTAMP=$(date +'%d%m%Y%H%M%S')
+          
+          ORIGINAL_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          NEW_NAME="poseValidator_${TIMESTAMP}.apk"
+          NEW_PATH="app/build/outputs/apk/debug/${NEW_NAME}"
+          
+          # Переименовываем физический файл на диске
+          mv "$ORIGINAL_PATH" "$NEW_PATH"
+          
+          # Передаем путь и имя файла в переменные окружения шага для использования далее
+          echo "APK_PATH=${NEW_PATH}" >> $GITHUB_ENV
+          echo "APK_NAME=${NEW_NAME}" >> $GITHUB_ENV
+
       - name: Upload Build Artifacts (Debug APK)
         uses: actions/upload-artifact@v4
         with:
-          name: PoseGuard-Debug-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: ${{ env.APK_NAME }}
+          path: ${{ env.APK_PATH }}
