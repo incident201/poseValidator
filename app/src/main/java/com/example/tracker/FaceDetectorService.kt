@@ -53,8 +53,11 @@ class FaceDetectorService(context: Context) {
     @Synchronized
     fun detectOnCrop(cropBitmap: Bitmap): FaceDetectionOnCrop {
         val detector = faceDetector ?: return FaceDetectionOnCrop(false)
+        var argbBitmap: Bitmap? = null
+        var shouldRecycleArgb = false
         return try {
-            val argbBitmap = if (cropBitmap.config != Bitmap.Config.ARGB_8888) {
+            argbBitmap = if (cropBitmap.config != Bitmap.Config.ARGB_8888) {
+                shouldRecycleArgb = true
                 cropBitmap.copy(Bitmap.Config.ARGB_8888, false)
             } else {
                 cropBitmap
@@ -95,9 +98,14 @@ class FaceDetectorService(context: Context) {
         } catch (t: Throwable) {
             Log.e(tag, "Face detection on crop failed", t)
             FaceDetectionOnCrop(false)
+        } finally {
+            if (shouldRecycleArgb) {
+                argbBitmap?.recycle()
+            }
         }
     }
 
+    @Synchronized
     fun close() {
         faceDetector?.close()
         faceDetector = null

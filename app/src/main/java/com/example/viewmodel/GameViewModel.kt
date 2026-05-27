@@ -153,36 +153,44 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     fun processMediaPipeResults(pose: PoseLandmarks, timestamp: Long, imageWidth: Int, imageHeight: Int) {
         latestLandmarks = pose
         Log.v(TAG, "MediaPipe frame ts=$timestamp size=${imageWidth}x$imageHeight landmarks=${pose.allLandmarks.size}")
-        var nextOverlayState = PoseOverlayState()
+
+        var matchedBitmap: Bitmap? = null
         synchronized(frameLock) {
-            val matchedBitmap = pendingFrames.remove(timestamp)
-            if (matchedBitmap != null) {
-                val cropRect = PoseFrameCropper.calculateCropRect(
-                    bitmapWidth = matchedBitmap.width,
-                    bitmapHeight = matchedBitmap.height,
-                    pose = pose
+            matchedBitmap = pendingFrames.remove(timestamp)
+        }
+
+        val nextOverlayState = if (matchedBitmap == null) {
+            PoseOverlayState()
+        } else {
+            val bitmap = matchedBitmap!!
+            val cropRect = PoseFrameCropper.calculateCropRect(
+                bitmapWidth = bitmap.width,
+                bitmapHeight = bitmap.height,
+                pose = pose
+            )
+
+            val faceOverlayState = if (cropRect != null) {
+                val cropBitmap = Bitmap.createBitmap(
+                    bitmap,
+                    cropRect.left,
+                    cropRect.top,
+                    cropRect.width,
+                    cropRect.height
                 )
-                val faceOverlayState = if (cropRect != null) {
-                    val cropBitmap = Bitmap.createBitmap(
-                        matchedBitmap,
-                        cropRect.left,
-                        cropRect.top,
-                        cropRect.width,
-                        cropRect.height
-                    )
+                try {
                     val faceResult = faceDetectorService.detectOnCrop(cropBitmap)
                     val faceBox = faceResult.boundingBox
                     if (!faceResult.isFaceVisible || faceBox == null) {
                         FaceOverlayState()
                     } else {
-                        val leftNorm = ((cropRect.left + faceBox.leftPx) / matchedBitmap.width).coerceIn(0f, 1f)
-                        val topNorm = ((cropRect.top + faceBox.topPx) / matchedBitmap.height).coerceIn(0f, 1f)
-                        val rightNorm = ((cropRect.left + faceBox.rightPx) / matchedBitmap.width).coerceIn(0f, 1f)
-                        val bottomNorm = ((cropRect.top + faceBox.bottomPx) / matchedBitmap.height).coerceIn(0f, 1f)
+                        val leftNorm = ((cropRect.left + faceBox.leftPx) / bitmap.width).coerceIn(0f, 1f)
+                        val topNorm = ((cropRect.top + faceBox.topPx) / bitmap.height).coerceIn(0f, 1f)
+                        val rightNorm = ((cropRect.left + faceBox.rightPx) / bitmap.width).coerceIn(0f, 1f)
+                        val bottomNorm = ((cropRect.top + faceBox.bottomPx) / bitmap.height).coerceIn(0f, 1f)
                         val mappedKeypoints = faceResult.keypoints.map { keypoint ->
                             FaceOverlayPoint(
-                                x = ((cropRect.left + keypoint.x * cropRect.width) / matchedBitmap.width).coerceIn(0f, 1f),
-                                y = ((cropRect.top + keypoint.y * cropRect.height) / matchedBitmap.height).coerceIn(0f, 1f)
+                                x = ((cropRect.left + keypoint.x * cropRect.width) / bitmap.width).coerceIn(0f, 1f),
+                                y = ((cropRect.top + keypoint.y * cropRect.height) / bitmap.height).coerceIn(0f, 1f)
                             )
                         }
                         FaceOverlayState(
@@ -192,27 +200,36 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                             score = faceResult.score
                         )
                     }
-                } else {
-                    FaceOverlayState()
+                } finally {
+                    cropBitmap.recycle()
                 }
-                latestAnalyzedFrame = AnalyzedPoseFrame(matchedBitmap, pose, timestamp, faceOverlayState)
-                val normalizedRect = cropRect?.let {
-                    PoseOverlayRect(
-                        left = it.left.toFloat() / matchedBitmap.width.toFloat(),
-                        top = it.top.toFloat() / matchedBitmap.height.toFloat(),
-                        right = it.right.toFloat() / matchedBitmap.width.toFloat(),
-                        bottom = it.bottom.toFloat() / matchedBitmap.height.toFloat()
-                    )
-                }
-                nextOverlayState = PoseOverlayState(
-                    imageWidth = matchedBitmap.width,
-                    imageHeight = matchedBitmap.height,
-                    landmarks = pose.allLandmarks,
-                    cropRect = normalizedRect,
-                    face = faceOverlayState
+            } else {
+                FaceOverlayState()
+            }
+
+            val analyzedFrame = AnalyzedPoseFrame(bitmap, pose, timestamp, faceOverlayState)
+            synchronized(frameLock) {
+                latestAnalyzedFrame = analyzedFrame
+            }
+
+            val normalizedRect = cropRect?.let {
+                PoseOverlayRect(
+                    left = it.left.toFloat() / bitmap.width.toFloat(),
+                    top = it.top.toFloat() / bitmap.height.toFloat(),
+                    right = it.right.toFloat() / bitmap.width.toFloat(),
+                    bottom = it.bottom.toFloat() / bitmap.height.toFloat()
                 )
             }
+
+            PoseOverlayState(
+                imageWidth = bitmap.width,
+                imageHeight = bitmap.height,
+                landmarks = pose.allLandmarks,
+                cropRect = normalizedRect,
+                face = faceOverlayState
+            )
         }
+
         _poseOverlayState.value = nextOverlayState
         val state = _gameState.value
         val scale = pose.getBodyScale()
