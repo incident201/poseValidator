@@ -51,8 +51,10 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -202,7 +204,14 @@ fun CameraScreen(
             onFaceModeChanged = viewModel::updateFaceCheckMode,
             onFaceConfidenceChanged = viewModel::updateFaceDetectionConfidence,
             onDriftChanged = viewModel::updateDriftThresholdFactor,
-            onMotionChanged = viewModel::updateMotionThresholdFactor
+            onMotionChanged = viewModel::updateMotionThresholdFactor,
+            onPenaltyIntervalChanged = viewModel::updateMinimumPenaltyIntervalSeconds,
+            onMaxViolationsChanged = viewModel::updateMaxViolations,
+            onPenaltiesEnabledChanged = viewModel::updatePenaltiesEnabled,
+            onFirstViolationPenaltyChanged = viewModel::updateFirstViolationPenaltyMinutes,
+            onSecondViolationPenaltyChanged = viewModel::updateSecondViolationPenaltyMinutes,
+            onThirdViolationPenaltyChanged = viewModel::updateThirdViolationPenaltyMinutes,
+            onSubsequentViolationPenaltyChanged = viewModel::updateSubsequentViolationPenaltyMinutes
         )
         return
     }
@@ -212,14 +221,14 @@ fun CameraScreen(
         modifier = modifier
             .fillMaxSize()
             .background(DarkBg)
-            .windowInsetsPadding(WindowInsets.statusBars)
+            .windowInsetsPadding(WindowInsets.navigationBars)
     ) {
         // 2. Camera feed viewport with overlay graphics
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(start = 12.dp, end = 12.dp, bottom = 8.dp)
                 .clip(RoundedCornerShape(32.dp))
                 .background(Color.Black)
                 .testTag("camera_preview_container")
@@ -569,7 +578,14 @@ private fun SettingsScreen(
     onFaceModeChanged: (FaceCheckMode) -> Unit,
     onFaceConfidenceChanged: (Float) -> Unit,
     onDriftChanged: (Float) -> Unit,
-    onMotionChanged: (Float) -> Unit
+    onMotionChanged: (Float) -> Unit,
+    onPenaltyIntervalChanged: (Int) -> Unit,
+    onMaxViolationsChanged: (Int) -> Unit,
+    onPenaltiesEnabledChanged: (Boolean) -> Unit,
+    onFirstViolationPenaltyChanged: (Int) -> Unit,
+    onSecondViolationPenaltyChanged: (Int) -> Unit,
+    onThirdViolationPenaltyChanged: (Int) -> Unit,
+    onSubsequentViolationPenaltyChanged: (Int) -> Unit
 ) {
     var faceConfidenceSlider by remember(settings.faceDetectionConfidence) {
         mutableFloatStateOf(settings.faceDetectionConfidence)
@@ -592,8 +608,8 @@ private fun SettingsScreen(
             Column(Modifier.padding(16.dp)) {
                 Text("Определение лица", color = Color.White, fontWeight = FontWeight.SemiBold)
                 listOf(
-                    "Лицом в камеру" to FaceCheckMode.FaceToCamera,
                     "Лицом от камеры" to FaceCheckMode.FaceAwayFromCamera,
+                    "Лицом в камеру" to FaceCheckMode.FaceToCamera,
                     "Не проверять" to FaceCheckMode.Disabled
                 ).forEach { (label, mode) ->
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -618,6 +634,49 @@ private fun SettingsScreen(
         Spacer(Modifier.height(12.dp))
         Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
             Column(Modifier.padding(16.dp)) {
+                Text("Максимум нарушений", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                IntegerSettingField(
+                    label = "От 0 до 9999",
+                    value = settings.maxViolations,
+                    onValueChanged = onMaxViolationsChanged,
+                    min = 0,
+                    max = 9999
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Минимальный интервал между санкциями", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                IntegerSettingField(
+                    label = "Секунды (0..30)",
+                    value = settings.minimumPenaltyIntervalSeconds,
+                    onValueChanged = onPenaltyIntervalChanged,
+                    min = 0,
+                    max = 30
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Штраф за нарушение", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = settings.penaltiesEnabled, onCheckedChange = onPenaltiesEnabledChanged)
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (settings.penaltiesEnabled) "ВКЛ" else "ВЫКЛ", color = Color.White)
+                }
+                IntegerSettingField("Первое нарушение (мин)", settings.firstViolationPenaltyMinutes, onFirstViolationPenaltyChanged, 0, 9999)
+                IntegerSettingField("Второе нарушение (мин)", settings.secondViolationPenaltyMinutes, onSecondViolationPenaltyChanged, 0, 9999)
+                IntegerSettingField("Третье нарушение (мин)", settings.thirdViolationPenaltyMinutes, onThirdViolationPenaltyChanged, 0, 9999)
+                IntegerSettingField("Последующие нарушения (мин)", settings.subsequentViolationPenaltyMinutes, onSubsequentViolationPenaltyChanged, 0, 9999)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
+            Column(Modifier.padding(16.dp)) {
                 Text("Реакция на движение", color = Color.White, fontWeight = FontWeight.SemiBold)
                 Text("Порог смещения: ${"%.2f".format(settings.driftThresholdFactor)}", color = Color.White)
                 Slider(value = settings.driftThresholdFactor, onValueChange = onDriftChanged, valueRange = 0.1f..0.8f)
@@ -626,6 +685,31 @@ private fun SettingsScreen(
             }
         }
     }
+}
+
+@Composable
+private fun IntegerSettingField(
+    label: String,
+    value: Int,
+    onValueChanged: (Int) -> Unit,
+    min: Int,
+    max: Int
+) {
+    var text by remember(value) { mutableStateOf(value.toString()) }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { input ->
+            val digits = input.filter { it.isDigit() }
+            text = digits
+            val parsed = digits.toIntOrNull() ?: min
+            onValueChanged(parsed.coerceIn(min, max))
+        },
+        label = { Text(label) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = Modifier.fillMaxWidth()
+    )
+    Spacer(Modifier.height(8.dp))
 }
 
 @Composable
