@@ -26,6 +26,7 @@ import kotlinx.coroutines.launch
 enum class GameState {
     ModelDownloadRequired,
     ModelDownloading,
+    ModelPreparing,
     Idle,
     StartingDelay,
     CheckingStartPose,
@@ -134,7 +135,28 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         if (GemmaModelManager.isModelDownloaded(application)) {
-            _gameState.value = GameState.Idle
+            _gameState.value = GameState.ModelPreparing
+            _statusMessage.value = "Проверка локальной Gemma модели..."
+            viewModelScope.launch {
+                when (GemmaModelManager.prepareModelForCurrentApk(application)) {
+                    GemmaModelManager.ModelPrepareResult.Ready -> {
+                        _gameState.value = GameState.Idle
+                        _statusMessage.value = "Поставь телефон и встань в позу"
+                    }
+                    GemmaModelManager.ModelPrepareResult.Missing -> {
+                        _gameState.value = GameState.ModelDownloadRequired
+                        _statusMessage.value = "Требуется скачать локальную Gemma модель"
+                    }
+                    GemmaModelManager.ModelPrepareResult.ChecksumMismatch -> {
+                        _gameState.value = GameState.ModelDownloadRequired
+                        _statusMessage.value = "Контрольная сумма модели не совпала. Скачай модель заново."
+                    }
+                    is GemmaModelManager.ModelPrepareResult.Error -> {
+                        _gameState.value = GameState.ModelDownloadRequired
+                        _statusMessage.value = "Ошибка подготовки модели. Скачай модель заново."
+                    }
+                }
+            }
         } else {
             _gameState.value = GameState.ModelDownloadRequired
             _statusMessage.value = "Требуется скачать локальную Gemma модель"
@@ -164,7 +186,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 _statusMessage.value = "Модель успешно загружена! Камера активна."
             } else {
                 _gameState.value = GameState.ModelDownloadRequired
-                _statusMessage.value = "Ошибка скачивания. Пожалуйста, попробуйте снова."
+                _statusMessage.value = "Ошибка скачивания или проверки модели. Попробуй скачать заново."
             }
         }
     }

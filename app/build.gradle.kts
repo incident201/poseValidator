@@ -77,7 +77,7 @@ dependencies {
   implementation(libs.androidx.camera.view)
   implementation(libs.mediapipe.tasks.vision)
   implementation(libs.mediapipe.tasks.genai)
-  implementation("com.google.ai.edge.litertlm:litertlm-android:latest.release")
+  implementation(libs.litertlm.android)
   implementation(libs.androidx.compose.material.icons.core)
   // implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.androidx.compose.material3)
