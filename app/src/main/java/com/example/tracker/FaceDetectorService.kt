@@ -77,12 +77,14 @@ class FaceDetectorService(context: Context) {
                 rightPx = box.right,
                 bottomPx = box.bottom
             )
-            val keypoints = bestDetection.keypoints().map { keypoint ->
-                CropFacePoint(
-                    x = keypoint.x().coerceIn(0f, 1f),
-                    y = keypoint.y().coerceIn(0f, 1f)
-                )
-            }
+            val keypoints = bestDetection.keypoints()
+                .mapNotNull { keypointOptional -> keypointOptional.orElse(null) }
+                .map { keypoint ->
+                    CropFacePoint(
+                        x = keypoint.x().coerceIn(0f, 1f),
+                        y = keypoint.y().coerceIn(0f, 1f)
+                    )
+                }
 
             FaceDetectionOnCrop(
                 isFaceVisible = true,
