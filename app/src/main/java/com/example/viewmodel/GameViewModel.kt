@@ -43,7 +43,14 @@ data class GameSettings(
     val faceCheckMode: FaceCheckMode = FaceCheckMode.FaceAwayFromCamera,
     val faceDetectionConfidence: Float = 0.8f,
     val driftThresholdFactor: Float = 0.46f,
-    val motionThresholdFactor: Float = 0.32f
+    val motionThresholdFactor: Float = 0.32f,
+    val minimumPenaltyIntervalSeconds: Int = 5,
+    val maxViolations: Int = 4,
+    val penaltiesEnabled: Boolean = true,
+    val firstViolationPenaltyMinutes: Int = 1,
+    val secondViolationPenaltyMinutes: Int = 3,
+    val thirdViolationPenaltyMinutes: Int = 3,
+    val subsequentViolationPenaltyMinutes: Int = 3
 )
 
 data class FaceOverlayPoint(val x: Float, val y: Float)
@@ -116,7 +123,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private var violationCount = 0
     private var lastPenaltyAtMs = 0L
-    private val penaltyCooldownMs = 5000L
     private var consecutiveFaceFailFrames = 0
     private val faceFailFramesThreshold = 5
 
@@ -133,7 +139,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             faceCheckMode = mode,
             faceDetectionConfidence = prefs.getFloat("face_conf", 0.8f).coerceIn(0.5f, 0.95f),
             driftThresholdFactor = prefs.getFloat("drift_factor", 0.46f).coerceIn(0.1f, 0.8f),
-            motionThresholdFactor = prefs.getFloat("motion_factor", 0.32f).coerceIn(0.1f, 0.8f)
+            motionThresholdFactor = prefs.getFloat("motion_factor", 0.32f).coerceIn(0.1f, 0.8f),
+            minimumPenaltyIntervalSeconds = prefs.getInt("penalty_interval_sec", 5).coerceIn(0, 30),
+            maxViolations = prefs.getInt("max_violations", 4).coerceIn(0, 9999),
+            penaltiesEnabled = prefs.getBoolean("penalties_enabled", true),
+            firstViolationPenaltyMinutes = prefs.getInt("penalty_1_min", 1).coerceIn(0, 9999),
+            secondViolationPenaltyMinutes = prefs.getInt("penalty_2_min", 3).coerceIn(0, 9999),
+            thirdViolationPenaltyMinutes = prefs.getInt("penalty_3_min", 3).coerceIn(0, 9999),
+            subsequentViolationPenaltyMinutes = prefs.getInt("penalty_subsequent_min", 3).coerceIn(0, 9999)
         )
     }
 
@@ -169,6 +182,35 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         _gameSettings.value = _gameSettings.value.copy(motionThresholdFactor = normalized)
         prefs.edit().putFloat("motion_factor", normalized).apply()
         movementTracker.motionThresholdFactor = normalized
+    }
+
+
+    fun updateMinimumPenaltyIntervalSeconds(value: Int) {
+        val normalized = value.coerceIn(0, 30)
+        _gameSettings.value = _gameSettings.value.copy(minimumPenaltyIntervalSeconds = normalized)
+        prefs.edit().putInt("penalty_interval_sec", normalized).apply()
+    }
+
+    fun updateMaxViolations(value: Int) {
+        val normalized = value.coerceIn(0, 9999)
+        _gameSettings.value = _gameSettings.value.copy(maxViolations = normalized)
+        prefs.edit().putInt("max_violations", normalized).apply()
+    }
+
+    fun updatePenaltiesEnabled(enabled: Boolean) {
+        _gameSettings.value = _gameSettings.value.copy(penaltiesEnabled = enabled)
+        prefs.edit().putBoolean("penalties_enabled", enabled).apply()
+    }
+
+    fun updateFirstViolationPenaltyMinutes(value: Int) = updatePenaltyMinutes("penalty_1_min", value) { copy(firstViolationPenaltyMinutes = it) }
+    fun updateSecondViolationPenaltyMinutes(value: Int) = updatePenaltyMinutes("penalty_2_min", value) { copy(secondViolationPenaltyMinutes = it) }
+    fun updateThirdViolationPenaltyMinutes(value: Int) = updatePenaltyMinutes("penalty_3_min", value) { copy(thirdViolationPenaltyMinutes = it) }
+    fun updateSubsequentViolationPenaltyMinutes(value: Int) = updatePenaltyMinutes("penalty_subsequent_min", value) { copy(subsequentViolationPenaltyMinutes = it) }
+
+    private fun updatePenaltyMinutes(prefKey: String, value: Int, apply: GameSettings.(Int) -> GameSettings) {
+        val normalized = value.coerceIn(0, 9999)
+        _gameSettings.value = _gameSettings.value.apply(normalized)
+        prefs.edit().putInt(prefKey, normalized).apply()
     }
 
     fun updateSelectedDurationMinutes(minutes: Int) { /* unchanged behavior */
@@ -238,13 +280,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun handleRuleViolation(type: RuleViolationType, pose: PoseLandmarks): Boolean {
         val now = System.currentTimeMillis()
-        if (lastPenaltyAtMs > 0L && now - lastPenaltyAtMs < penaltyCooldownMs) {
+        if (lastPenaltyAtMs > 0L && now - lastPenaltyAtMs < _gameSettings.value.minimumPenaltyIntervalSeconds * 1000L) {
             if (_gameState.value == GameState.HoldingPose) movementTracker.startTracking(pose)
             return false
         }
 
         violationCount += 1
-        if (violationCount >= 4) {
+        if (violationCount >= _gameSettings.value.maxViolations) {
             val defeatReason = when (type) {
                 RuleViolationType.Drift -> "Пользователь сильно сдвинулся"
                 RuleViolationType.Motion -> "Пользователь резко двинулся"
@@ -256,54 +298,51 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             return true
         }
 
-        when (violationCount) {
-            1 -> applyPenalty(type, 60)
-            2 -> applyPenalty(type, 180)
-            3 -> applyPenalty(type, 180)
-        }
+        applyPenalty(type, penaltyMinutesForViolation(violationCount))
         lastPenaltyAtMs = now
         if (_gameState.value == GameState.HoldingPose) movementTracker.startTracking(pose)
         return false
     }
 
-    private fun applyPenalty(type: RuleViolationType, sec: Int) {
-        _timerSeconds.value += sec
+    private fun penaltyMinutesForViolation(violationIndex: Int): Int {
+        val settings = _gameSettings.value
+        return when (violationIndex) {
+            1 -> settings.firstViolationPenaltyMinutes
+            2 -> settings.secondViolationPenaltyMinutes
+            3 -> settings.thirdViolationPenaltyMinutes
+            else -> settings.subsequentViolationPenaltyMinutes
+        }.coerceIn(0, 9999)
+    }
+
+    private fun applyPenalty(type: RuleViolationType, minutes: Int) {
+        val sec = minutes * 60
+        if (_gameSettings.value.penaltiesEnabled) {
+            _timerSeconds.value += sec
+        }
+
         if (type == RuleViolationType.FaceNotMatchingMode) {
-            val statusText = if (sec == 60) {
-                "Нарушено условие положения лица: +1 минута"
+            val statusText = if (_gameSettings.value.penaltiesEnabled) {
+                "Нарушено условие положения лица: +$minutes мин"
             } else {
-                "Нарушено условие положения лица: +3 минуты"
+                "Нарушено условие положения лица"
             }
             val prefix = if (_gameSettings.value.faceCheckMode == FaceCheckMode.FaceToCamera) {
                 "Вы отвернулись"
             } else {
                 "Вы посмотрели в камеру"
             }
-            val sanction = if (sec == 60) {
-                "Плюс 1 минута к таймеру"
-            } else {
-                "Плюс 3 минуты к таймеру"
-            }
+            val sanction = if (_gameSettings.value.penaltiesEnabled) "Плюс $minutes минут к таймеру" else "Штраф по времени отключен"
             _statusMessage.value = statusText
             speak("$prefix. $sanction")
             return
         }
 
-        when (sec) {
-            60 -> {
-                _statusMessage.value = "Зафиксировано движение: +1 минута"
-                speak("Вы двинулись. Плюс 1 минута к таймеру")
-            }
-
-            else -> {
-                val isSecondViolation = violationCount == 2
-                _statusMessage.value = if (isSecondViolation) {
-                    "Зафиксировано повторное движение: +3 минуты"
-                } else {
-                    "Зафиксировано третье движение: +3 минуты"
-                }
-                speak("Вы снова двинулись. Плюс 3 минуты к таймеру")
-            }
+        if (_gameSettings.value.penaltiesEnabled) {
+            _statusMessage.value = "Зафиксировано нарушение: +$minutes мин"
+            speak("Нарушение зафиксировано. Плюс $minutes минут к таймеру")
+        } else {
+            _statusMessage.value = "Зафиксировано нарушение"
+            speak("Нарушение зафиксировано. Штраф по времени отключен")
         }
     }
 
