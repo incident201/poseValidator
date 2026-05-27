@@ -219,6 +219,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 triggerDefeat("Камера не видит тело. Встань полностью в кадр.")
                 return@launch
             }
+
+            _timerSeconds.value = _selectedDurationSeconds.value.coerceAtLeast(minimumDurationSeconds)
+            movementTracker.reset()
+            movementViolationCount = 0
+            lastMovementPenaltyAtMs = 0L
+            movementTracker.startTracking(initialPose)
+            _gameState.value = GameState.HoldingPose
+            _statusMessage.value = "Таймер запущен. Удерживай позу"
+            startTimerLoop()
+            speak("Время пошло. Удерживайте позицию")
         }
     }
 
