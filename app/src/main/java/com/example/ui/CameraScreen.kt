@@ -3,6 +3,10 @@ package com.example.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.net.Uri
+import android.os.Build
 import android.speech.tts.TextToSpeech
 import android.os.SystemClock
 import android.util.Log
@@ -15,6 +19,7 @@ import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -32,8 +37,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size as ComposeSize
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
@@ -43,6 +50,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.tracker.PoseLandmarkerService
@@ -55,6 +63,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.Locale
 import android.util.Size
+import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -116,6 +127,18 @@ fun CameraScreen(
     // MediaPipe Setup
     val cameraExecutor: ExecutorService = remember { Executors.newSingleThreadExecutor() }
     var landmarkerService by remember { mutableStateOf<PoseLandmarkerService?>(null) }
+    var isDemoMode by rememberSaveable { mutableStateOf(false) }
+    var demoBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    val demoImagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val decodedBitmap = decodeBitmapFromUri(context, uri)
+        if (decodedBitmap != null) {
+            demoBitmap = resizeBitmapLongSide(decodedBitmap, 1280)
+            isDemoMode = true
+        }
+    }
 
     LaunchedEffect(context) {
         landmarkerService = PoseLandmarkerService(context, object : PoseLandmarkerService.LandmarkerListener {
@@ -137,6 +160,23 @@ fun CameraScreen(
         }
     }
 
+    LaunchedEffect(isDemoMode, demoBitmap, landmarkerService) {
+        val bitmap = demoBitmap
+        if (!isDemoMode || bitmap == null) return@LaunchedEffect
+        while (isActive && isDemoMode && demoBitmap === bitmap) {
+            cameraExecutor.execute {
+                val timestampMs = SystemClock.elapsedRealtimeNanos() / 1_000_000L
+                submitFrameToPosePipeline(
+                    bitmap = bitmap,
+                    viewModel = viewModel,
+                    landmarkerService = landmarkerService,
+                    timestampMs = timestampMs
+                )
+            }
+            delay(250L)
+        }
+    }
+
     // Main layout
     Column(
         modifier = modifier
@@ -154,7 +194,16 @@ fun CameraScreen(
                 .background(Color.Black)
                 .testTag("camera_preview_container")
         ) {
-            if (hasCameraPermission) {
+            when {
+                isDemoMode && demoBitmap != null -> {
+                    Image(
+                        bitmap = demoBitmap!!.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+                hasCameraPermission -> {
                 // Initialize CameraX Process
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
@@ -197,10 +246,11 @@ fun CameraScreen(
                                     val timestampMs = SystemClock.elapsedRealtimeNanos() / 1_000_000L
                                     val analysisBitmap = resizeBitmapLongSide(finalBitmap, 1280)
                                     Log.d("CameraScreen", "analysisBitmap=${analysisBitmap.width}x${analysisBitmap.height}")
-                                    viewModel.registerCameraFrame(analysisBitmap, timestampMs)
-                                    landmarkerService?.detectLiveStreamFrame(
-                                        analysisBitmap,
-                                        timestampMs
+                                    submitFrameToPosePipeline(
+                                        bitmap = analysisBitmap,
+                                        viewModel = viewModel,
+                                        landmarkerService = landmarkerService,
+                                        timestampMs = timestampMs
                                     )
                                 } catch (e: Exception) {
                                     Log.e("CameraScreen", "Frame analysis failed", e)
@@ -224,16 +274,42 @@ fun CameraScreen(
                             }
                         }, ContextCompat.getMainExecutor(ctx))
                         previewView
+                    },
+                    onRelease = { previewView ->
+                        runCatching {
+                            val cameraProvider = ProcessCameraProvider.getInstance(previewView.context).get()
+                            cameraProvider.unbindAll()
+                        }.onFailure {
+                            Log.w("CameraScreen", "Failed to unbind camera on release", it)
+                        }
                     }
                 )
-                if (SHOW_POSE_DEBUG_OVERLAY) {
-                    PoseDebugOverlay(
-                        overlayState = poseOverlayState,
-                        modifier = Modifier.matchParentSize()
-                    )
                 }
             }
 
+            FilledTonalButton(
+                onClick = {
+                    if (isDemoMode) {
+                        isDemoMode = false
+                    } else {
+                        demoImagePickerLauncher.launch("image/*")
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .zIndex(1f),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text(if (isDemoMode) "CAM" else "DEMO")
+            }
+
+            if (SHOW_POSE_DEBUG_OVERLAY) {
+                PoseDebugOverlay(
+                    overlayState = poseOverlayState,
+                    modifier = Modifier.matchParentSize()
+                )
+            }
         }
 
         // 3. Bottom Controls HUD
@@ -610,3 +686,25 @@ private fun resizeBitmapLongSide(bitmap: Bitmap, maxLongSide: Int): Bitmap {
     return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
 }
 
+private fun submitFrameToPosePipeline(
+    bitmap: Bitmap,
+    viewModel: GameViewModel,
+    landmarkerService: PoseLandmarkerService?,
+    timestampMs: Long
+) {
+    viewModel.registerCameraFrame(bitmap, timestampMs)
+    landmarkerService?.detectLiveStreamFrame(bitmap, timestampMs)
+}
+
+private fun decodeBitmapFromUri(context: android.content.Context, uri: Uri): Bitmap? {
+    return runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val source = ImageDecoder.createSource(context.contentResolver, uri)
+            ImageDecoder.decodeBitmap(source)
+        } else {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream)
+            }
+        }
+    }.getOrNull()
+}
