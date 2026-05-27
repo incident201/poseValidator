@@ -24,6 +24,12 @@ object GemmaModelManager {
     private const val CURRENT_MODEL_PROPERTIES = "current_model.properties"
     private const val MODEL_PREPARED_PREFS = "model_prepared_state"
     private const val KEY_PREPARED_APK_LAST_UPDATE_TIME = "prepared_apk_last_update_time"
+    private data class CurrentModelMetadata(
+        val modelPath: String,
+        val sha256: String,
+        val size: Long,
+        val apkLastUpdateTime: Long
+    )
 
     sealed class ModelPrepareResult {
         data object Ready : ModelPrepareResult()
@@ -95,28 +101,27 @@ object GemmaModelManager {
 
             if (!currentModel.exists()) return@withContext ModelPrepareResult.Missing
 
+            val savedApkTime = appContext.getSharedPreferences(MODEL_PREPARED_PREFS, Context.MODE_PRIVATE)
+                .getLong(KEY_PREPARED_APK_LAST_UPDATE_TIME, -1L)
+            val metadata = readCurrentModelMetadata(propertiesFile)
+            val insideModelRoot = currentModel.parentFile?.parentFile?.canonicalFile == modelRootDir.canonicalFile
+            val pointsToCurrent = metadata?.modelPath == currentModel.absolutePath
+            val metadataValid = metadata != null &&
+                metadata.modelPath == currentModel.absolutePath &&
+                metadata.sha256.equals(EXPECTED_MODEL_SHA256, ignoreCase = true) &&
+                metadata.size == EXPECTED_MODEL_SIZE_BYTES &&
+                metadata.apkLastUpdateTime == apkLastUpdateTime &&
+                currentModel.length() == EXPECTED_MODEL_SIZE_BYTES
+
+            if (savedApkTime == apkLastUpdateTime && insideModelRoot && pointsToCurrent && metadataValid) {
+                return@withContext ModelPrepareResult.Ready
+            }
+
             if (!validateModelFile(currentModel)) {
                 currentModel.delete()
                 propertiesFile.delete()
                 cleanupOldModelCopies(appContext, keepDir = File(modelRootDir, "__none__"))
                 return@withContext ModelPrepareResult.ChecksumMismatch
-            }
-
-            val savedApkTime = appContext.getSharedPreferences(MODEL_PREPARED_PREFS, Context.MODE_PRIVATE)
-                .getLong(KEY_PREPARED_APK_LAST_UPDATE_TIME, -1L)
-
-            val insideModelRoot = currentModel.parentFile?.parentFile?.canonicalFile == modelRootDir.canonicalFile
-            val pointsToCurrent = if (propertiesFile.exists()) {
-                runCatching {
-                    FileInputStream(propertiesFile).use { input ->
-                        val p = Properties().apply { load(input) }
-                        p.getProperty("modelPath") == currentModel.absolutePath
-                    }
-                }.getOrDefault(false)
-            } else false
-
-            if (savedApkTime == apkLastUpdateTime && insideModelRoot && pointsToCurrent) {
-                return@withContext ModelPrepareResult.Ready
             }
 
             val freshDir = File(modelRootDir, "model_${apkLastUpdateTime}_${System.currentTimeMillis()}").apply { mkdirs() }
@@ -141,7 +146,7 @@ object GemmaModelManager {
             writeCurrentModelProperties(
                 propertiesFile = propertiesFile,
                 modelFile = finalFile,
-                sha256 = EXPECTED_MODEL_SHA256,
+                sha256 = tempSha,
                 apkLastUpdateTime = apkLastUpdateTime
             )
             cleanupOldModelCopies(appContext, keepDir = freshDir)
@@ -244,7 +249,7 @@ object GemmaModelManager {
                 writeCurrentModelProperties(
                     propertiesFile = propertiesFile,
                     modelFile = finalFile,
-                    sha256 = EXPECTED_MODEL_SHA256,
+                    sha256 = downloadedSha,
                     apkLastUpdateTime = apkLastUpdateTime
                 )
             } catch (e: Exception) {
@@ -285,6 +290,28 @@ object GemmaModelManager {
         }
         if (!tempFile.renameTo(propertiesFile)) {
             throw IllegalStateException("Failed to atomically write current model properties")
+        }
+    }
+
+    private fun readCurrentModelMetadata(propertiesFile: File): CurrentModelMetadata? {
+        if (!propertiesFile.exists()) return null
+        return try {
+            FileInputStream(propertiesFile).use { input ->
+                val properties = Properties().apply { load(input) }
+                val modelPath = properties.getProperty("modelPath") ?: return null
+                val sha256 = properties.getProperty("sha256") ?: return null
+                val size = properties.getProperty("size")?.toLong() ?: return null
+                val apkLastUpdateTime = properties.getProperty("apkLastUpdateTime")?.toLong() ?: return null
+                CurrentModelMetadata(
+                    modelPath = modelPath,
+                    sha256 = sha256,
+                    size = size,
+                    apkLastUpdateTime = apkLastUpdateTime
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to read current model metadata", e)
+            null
         }
     }
 
