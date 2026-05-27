@@ -40,7 +40,7 @@ enum class FaceCheckMode {
 }
 
 data class GameSettings(
-    val faceCheckMode: FaceCheckMode = FaceCheckMode.Disabled,
+    val faceCheckMode: FaceCheckMode = FaceCheckMode.FaceAwayFromCamera,
     val faceDetectionConfidence: Float = 0.8f,
     val driftThresholdFactor: Float = 0.46f,
     val motionThresholdFactor: Float = 0.32f
@@ -116,7 +116,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private var violationCount = 0
     private var lastPenaltyAtMs = 0L
-    private val penaltyCooldownMs = 3000L
+    private val penaltyCooldownMs = 5000L
     private var consecutiveFaceFailFrames = 0
     private val faceFailFramesThreshold = 5
 
@@ -127,8 +127,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun loadSettings(): GameSettings {
-        val mode = runCatching { FaceCheckMode.valueOf(prefs.getString("face_mode", FaceCheckMode.Disabled.name) ?: FaceCheckMode.Disabled.name) }
-            .getOrDefault(FaceCheckMode.Disabled)
+        val mode = runCatching { FaceCheckMode.valueOf(prefs.getString("face_mode", FaceCheckMode.FaceAwayFromCamera.name) ?: FaceCheckMode.FaceAwayFromCamera.name) }
+            .getOrDefault(FaceCheckMode.FaceAwayFromCamera)
         return GameSettings(
             faceCheckMode = mode,
             faceDetectionConfidence = prefs.getFloat("face_conf", 0.8f).coerceIn(0.5f, 0.95f),

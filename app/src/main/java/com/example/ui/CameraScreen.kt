@@ -212,14 +212,14 @@ fun CameraScreen(
         modifier = modifier
             .fillMaxSize()
             .background(DarkBg)
-            .windowInsetsPadding(WindowInsets.statusBars)
+            .windowInsetsPadding(WindowInsets.navigationBars)
     ) {
         // 2. Camera feed viewport with overlay graphics
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(start = 12.dp, end = 12.dp, bottom = 8.dp)
                 .clip(RoundedCornerShape(32.dp))
                 .background(Color.Black)
                 .testTag("camera_preview_container")
@@ -592,8 +592,8 @@ private fun SettingsScreen(
             Column(Modifier.padding(16.dp)) {
                 Text("Определение лица", color = Color.White, fontWeight = FontWeight.SemiBold)
                 listOf(
-                    "Лицом в камеру" to FaceCheckMode.FaceToCamera,
                     "Лицом от камеры" to FaceCheckMode.FaceAwayFromCamera,
+                    "Лицом в камеру" to FaceCheckMode.FaceToCamera,
                     "Не проверять" to FaceCheckMode.Disabled
                 ).forEach { (label, mode) ->
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
