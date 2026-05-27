@@ -62,34 +62,30 @@ object FaceCandidateCropper {
             return null
         }
 
-        val half = cropSize / 2f
-        val rawLeft = (centerX - half).roundToInt()
-        val rawTop = (centerY - half).roundToInt()
-        val rawRight = (centerX + half).roundToInt()
-        val rawBottom = (centerY + half).roundToInt()
+        val fittedToBody = fitSquareToBounds(
+            centerX = centerX,
+            centerY = centerY,
+            requestedSize = cropSize,
+            minLeft = bodyCropRect.left,
+            minTop = bodyCropRect.top,
+            maxRight = bodyCropRect.right,
+            maxBottom = bodyCropRect.bottom
+        ) ?: return null
 
-        val clampedToBody = clampRectToBounds(
-            rawLeft,
-            rawTop,
-            rawRight,
-            rawBottom,
-            bodyCropRect.left,
-            bodyCropRect.top,
-            bodyCropRect.right,
-            bodyCropRect.bottom
-        )
-        val clampedToBitmap = clampRectToBounds(
-            clampedToBody.left,
-            clampedToBody.top,
-            clampedToBody.right,
-            clampedToBody.bottom,
-            0,
-            0,
-            bitmapWidth,
-            bitmapHeight
-        )
-        if (clampedToBitmap.width < 96 || clampedToBitmap.height < 96) return null
-        return clampedToBitmap
+        val fittedCenterX = (fittedToBody.left + fittedToBody.right) / 2f
+        val fittedCenterY = (fittedToBody.top + fittedToBody.bottom) / 2f
+        val fittedToBitmap = fitSquareToBounds(
+            centerX = fittedCenterX,
+            centerY = fittedCenterY,
+            requestedSize = fittedToBody.width.toFloat(),
+            minLeft = 0,
+            minTop = 0,
+            maxRight = bitmapWidth,
+            maxBottom = bitmapHeight
+        ) ?: return null
+
+        if (fittedToBitmap.width < 96 || fittedToBitmap.height < 96) return null
+        return fittedToBitmap
     }
 
     private fun finitePoint(pose: PoseLandmarks, index: Int): Point3D? {
@@ -103,20 +99,37 @@ object FaceCandidateCropper {
         return px to py
     }
 
-    private fun clampRectToBounds(
-        left: Int,
-        top: Int,
-        right: Int,
-        bottom: Int,
+    private fun fitSquareToBounds(
+        centerX: Float,
+        centerY: Float,
+        requestedSize: Float,
         minLeft: Int,
         minTop: Int,
         maxRight: Int,
         maxBottom: Int
-    ): FaceCandidateRect {
-        val clampedLeft = left.coerceIn(minLeft, maxRight - 1)
-        val clampedTop = top.coerceIn(minTop, maxBottom - 1)
-        val clampedRight = right.coerceIn(clampedLeft + 1, maxRight)
-        val clampedBottom = bottom.coerceIn(clampedTop + 1, maxBottom)
-        return FaceCandidateRect(clampedLeft, clampedTop, clampedRight, clampedBottom)
+    ): FaceCandidateRect? {
+        if (requestedSize <= 0f) return null
+        if (maxRight <= minLeft || maxBottom <= minTop) return null
+
+        val boundsWidth = maxRight - minLeft
+        val boundsHeight = maxBottom - minTop
+        val size = minOf(
+            requestedSize.roundToInt().coerceAtLeast(1),
+            boundsWidth,
+            boundsHeight
+        )
+        if (size <= 0) return null
+
+        var left = (centerX - size / 2f).roundToInt()
+        var top = (centerY - size / 2f).roundToInt()
+
+        left = left.coerceIn(minLeft, maxRight - size)
+        top = top.coerceIn(minTop, maxBottom - size)
+
+        val right = left + size
+        val bottom = top + size
+
+        return FaceCandidateRect(left, top, right, bottom)
     }
+
 }
