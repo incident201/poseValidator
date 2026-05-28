@@ -91,7 +91,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private val tag = "GameViewModel"
     private val minimumDurationSeconds = 180
     private val startDelaySeconds = 10
-    private val stabilizationDurationMs = 3_000L
+    private val stabilizationDurationMs = 5_000L
     private val gyroscopeStillThresholdRadPerSec = 0.08f
 
     private val sensorManager =
