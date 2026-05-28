@@ -70,7 +70,7 @@ import com.example.viewmodel.GameSettings
 import com.example.viewmodel.GameState
 import com.example.viewmodel.GameViewModel
 import com.example.viewmodel.PoseOverlayState
-import com.example.posevalidator.R
+import com.example.R
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference

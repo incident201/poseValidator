@@ -8,7 +8,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.posevalidator.R
+import com.example.R
 import com.example.tracker.FaceDetectionStatus
 import com.example.tracker.FaceCandidateCropper
 import com.example.tracker.FaceDetectorService
