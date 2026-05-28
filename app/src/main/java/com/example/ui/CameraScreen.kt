@@ -281,6 +281,7 @@ fun CameraScreen(
     LaunchedEffect(gameState) {
         when (gameState) {
             GameState.StartingDelay -> timelapseRecorder.start(SystemClock.elapsedRealtime())
+            GameState.HoldingPose -> timelapseRecorder.startTimer(SystemClock.elapsedRealtime())
             GameState.Success, GameState.Failed -> {
                 val file = withContext(Dispatchers.IO) { timelapseRecorder.stop() }
                 if (file != null && file.exists() && file.length() > 0L) {

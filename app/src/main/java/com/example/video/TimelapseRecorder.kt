@@ -36,7 +36,8 @@ class TimelapseRecorder(
     private val stopMutex = Mutex()
     private val frameExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
-    private var startTimestampMs: Long = 0L
+    private var recordingStartTimestampMs: Long = 0L
+    private var timerStartTimestampMs: Long? = null
     private var nextCaptureTimestampMs: Long = 0L
     private var videoWidth: Int = 0
     private var videoHeight: Int = 0
@@ -54,7 +55,8 @@ class TimelapseRecorder(
     fun start(startTimestampMs: Long) {
         synchronized(lock) {
             discardInternalLocked()
-            this.startTimestampMs = startTimestampMs
+            this.recordingStartTimestampMs = startTimestampMs
+            this.timerStartTimestampMs = null
             nextCaptureTimestampMs = startTimestampMs
             videoWidth = 0
             videoHeight = 0
@@ -64,6 +66,15 @@ class TimelapseRecorder(
             lastPresentationTimeUs = -1L
             hadEncodingError = false
             isRecording = true
+        }
+    }
+
+    fun startTimer(startTimestampMs: Long) {
+        synchronized(lock) {
+            if (!isRecording) return
+            if (timerStartTimestampMs == null) {
+                timerStartTimestampMs = startTimestampMs
+            }
         }
     }
 
@@ -78,12 +89,17 @@ class TimelapseRecorder(
         frameExecutor.execute {
             try {
                 if (!isRecording) return@execute
-                val elapsedMs = (timestampMs - startTimestampMs).coerceAtLeast(0L)
+                val recordingElapsedMs = (timestampMs - recordingStartTimestampMs).coerceAtLeast(0L)
+                val timerElapsedMs = synchronized(lock) {
+                    timerStartTimestampMs
+                }?.let { timerStart ->
+                    (timestampMs - timerStart).coerceAtLeast(0L)
+                } ?: 0L
                 ensureEncoder(bitmap)
                 synchronized(lock) {
-                    pendingPresentationTimesUs.addLast((elapsedMs * 1000L) / SPEED_FACTOR)
+                    pendingPresentationTimesUs.addLast((recordingElapsedMs * 1000L) / SPEED_FACTOR)
                 }
-                val frame = drawElapsedTimer(bitmap, elapsedMs)
+                val frame = drawElapsedTimer(bitmap, timerElapsedMs)
                 renderFrameToSurface(frame)
                 frame.recycle()
                 drainEncoder(endOfStream = false)
