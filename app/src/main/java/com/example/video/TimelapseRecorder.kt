@@ -23,6 +23,7 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class TimelapseRecorder(
     private val context: Context
@@ -140,8 +141,16 @@ class TimelapseRecorder(
 
     fun release() {
         synchronized(lock) { isRecording = false }
+        runCatching {
+            frameExecutor.submit {
+                releaseCodecResources(deleteTempFile = true)
+            }.get()
+        }.onFailure {
+            Log.e(TAG, "Failed to release on executor thread", it)
+            releaseCodecResources(deleteTempFile = true)
+        }
         frameExecutor.shutdown()
-        releaseCodecResources(deleteTempFile = true)
+        runCatching { frameExecutor.awaitTermination(2, TimeUnit.SECONDS) }
     }
 
     private fun ensureEncoder(firstFrame: Bitmap) {
