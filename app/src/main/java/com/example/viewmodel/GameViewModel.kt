@@ -8,6 +8,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.R
 import com.example.tracker.FaceDetectionStatus
 import com.example.tracker.FaceCandidateCropper
 import com.example.tracker.FaceDetectorService
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 enum class GameState {
     Idle,
@@ -39,7 +41,10 @@ enum class FaceCheckMode {
     Disabled
 }
 
+enum class AppLanguage { Russian, English }
+
 data class GameSettings(
+    val language: AppLanguage = AppLanguage.English,
     val faceCheckMode: FaceCheckMode = FaceCheckMode.FaceAwayFromCamera,
     val faceDetectionConfidence: Float = 0.8f,
     val driftThresholdFactor: Float = 0.46f,
@@ -89,7 +94,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     val timerSeconds: StateFlow<Int> = _timerSeconds.asStateFlow()
     private val _selectedDurationSeconds = MutableStateFlow(minimumDurationSeconds)
     val selectedDurationSeconds: StateFlow<Int> = _selectedDurationSeconds.asStateFlow()
-    private val _statusMessage = MutableStateFlow("Поставь телефон и встань в позу")
+    private val _statusMessage = MutableStateFlow("")
     val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
     private val _defeatReason = MutableStateFlow("")
     val defeatReason: StateFlow<String> = _defeatReason.asStateFlow()
@@ -128,14 +133,26 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     private enum class RuleViolationType { Drift, Motion, PersonDisappeared, FaceNotMatchingMode }
 
+
+    private fun tr(resId: Int, vararg args: Any): String {
+        val locale = if (_gameSettings.value.language == AppLanguage.Russian) Locale("ru", "RU") else Locale.US
+        val config = android.content.res.Configuration(getApplication<Application>().resources.configuration)
+        config.setLocale(locale)
+        val res = getApplication<Application>().createConfigurationContext(config).resources
+        return if (args.isEmpty()) res.getString(resId) else res.getString(resId, *args)
+    }
+
     init {
         applySettingsToEngines(_gameSettings.value)
+        _statusMessage.value = tr(R.string.status_initial)
     }
 
     private fun loadSettings(): GameSettings {
         val mode = runCatching { FaceCheckMode.valueOf(prefs.getString("face_mode", FaceCheckMode.FaceAwayFromCamera.name) ?: FaceCheckMode.FaceAwayFromCamera.name) }
             .getOrDefault(FaceCheckMode.FaceAwayFromCamera)
+        val language = runCatching { AppLanguage.valueOf(prefs.getString("app_language", AppLanguage.English.name) ?: AppLanguage.English.name) }.getOrDefault(AppLanguage.English)
         return GameSettings(
+            language = language,
             faceCheckMode = mode,
             faceDetectionConfidence = prefs.getFloat("face_conf", 0.8f).coerceIn(0.5f, 0.95f),
             driftThresholdFactor = prefs.getFloat("drift_factor", 0.46f).coerceIn(0.1f, 0.8f),
@@ -195,6 +212,15 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         val normalized = value.coerceIn(0, 9999)
         _gameSettings.value = _gameSettings.value.copy(maxViolations = normalized)
         prefs.edit().putInt("max_violations", normalized).apply()
+    }
+
+
+    fun updateLanguage(language: AppLanguage) {
+        _gameSettings.value = _gameSettings.value.copy(language = language)
+        prefs.edit().putString("app_language", language.name).apply()
+        if (_gameState.value == GameState.Idle) {
+            _statusMessage.value = tr(R.string.status_initial)
+        }
     }
 
     fun updatePenaltiesEnabled(enabled: Boolean) {
@@ -288,13 +314,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         violationCount += 1
         if (violationCount >= _gameSettings.value.maxViolations) {
             val defeatReason = when (type) {
-                RuleViolationType.Drift -> "Пользователь сильно сдвинулся"
-                RuleViolationType.Motion -> "Пользователь резко двинулся"
-                RuleViolationType.PersonDisappeared -> "Человек пропал из кадра"
+                RuleViolationType.Drift -> tr(R.string.defeat_drift)
+                RuleViolationType.Motion -> tr(R.string.defeat_motion)
+                RuleViolationType.PersonDisappeared -> tr(R.string.defeat_disappeared)
                 RuleViolationType.FaceNotMatchingMode -> if (_gameSettings.value.faceCheckMode == FaceCheckMode.FaceToCamera)
-                    "Лицо не было направлено в камеру" else "Лицо было направлено в камеру"
+                    tr(R.string.defeat_face_not_to_camera)
+                else tr(R.string.defeat_face_to_camera)
             }
-            triggerDefeat(defeatReason, "Вы не справились. Попробуйте снова")
+            triggerDefeat(defeatReason, tr(R.string.defeat_try_again))
             return true
         }
 
@@ -322,27 +349,30 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
         if (type == RuleViolationType.FaceNotMatchingMode) {
             val statusText = if (_gameSettings.value.penaltiesEnabled) {
-                "Нарушено условие положения лица: +$minutes мин"
+                tr(R.string.face_rule_violated_with_penalty, minutes)
             } else {
-                "Нарушено условие положения лица"
+                tr(R.string.face_rule_violated)
             }
             val prefix = if (_gameSettings.value.faceCheckMode == FaceCheckMode.FaceToCamera) {
-                "Вы отвернулись"
+                tr(R.string.you_turned_away)
             } else {
-                "Вы посмотрели в камеру"
+                tr(R.string.you_looked_at_camera)
             }
-            val sanction = if (_gameSettings.value.penaltiesEnabled) "Плюс $minutes минут к таймеру" else "Штраф по времени отключен"
             _statusMessage.value = statusText
-            speak("$prefix. $sanction")
+            if (_gameSettings.value.penaltiesEnabled) {
+                speak("$prefix. ${tr(R.string.penalty_added_to_timer, minutes)}")
+            } else {
+                speak(prefix)
+            }
             return
         }
 
         if (_gameSettings.value.penaltiesEnabled) {
-            _statusMessage.value = "Зафиксировано нарушение: +$minutes мин"
-            speak("Нарушение зафиксировано. Плюс $minutes минут к таймеру")
+            _statusMessage.value = tr(R.string.violation_recorded_with_penalty, minutes)
+            speak("${tr(R.string.violation_recorded)}. ${tr(R.string.penalty_added_to_timer, minutes)}")
         } else {
-            _statusMessage.value = "Зафиксировано нарушение"
-            speak("Нарушение зафиксировано. Штраф по времени отключен")
+            _statusMessage.value = tr(R.string.violation_recorded)
+            speak(tr(R.string.violation_recorded))
         }
     }
 
@@ -391,21 +421,21 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startSession() {
         if (_gameState.value != GameState.Idle && _gameState.value != GameState.Failed && _gameState.value != GameState.Success) return
-        speak("Займите позицию")
+        speak(tr(R.string.take_position))
         _defeatReason.value = ""; _driftScore.value = 0f; _motionScore.value = 0f; _startDelayRemainingSeconds.value = 0
         movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0
         startDelayJob?.cancel(); timerJob?.cancel()
         startDelayJob = viewModelScope.launch {
             _gameState.value = GameState.StartingDelay
-            for (seconds in startDelaySeconds downTo 1) { _startDelayRemainingSeconds.value = seconds; _statusMessage.value = "Старт через $seconds сек. Прими позу"; delay(1000) }
+            for (seconds in startDelaySeconds downTo 1) { _startDelayRemainingSeconds.value = seconds; _statusMessage.value = tr(R.string.start_in_pose, seconds); delay(1000) }
             _startDelayRemainingSeconds.value = 0
             val analyzedFrame = getFreshAnalyzedFrame(); val initialPose = analyzedFrame?.pose
-            if (analyzedFrame == null) { triggerDefeat("Камера не предоставила свежий синхронизированный кадр"); return@launch }
-            if (initialPose == null || !initialPose.hasEnoughKeypoints()) { triggerDefeat("Камера не видит тело. Встань полностью в кадр."); return@launch }
+            if (analyzedFrame == null) { triggerDefeat(tr(R.string.camera_no_frame)); return@launch }
+            if (initialPose == null || !initialPose.hasEnoughKeypoints()) { triggerDefeat(tr(R.string.camera_no_body)); return@launch }
             _timerSeconds.value = _selectedDurationSeconds.value.coerceAtLeast(minimumDurationSeconds)
             movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0
             movementTracker.startTracking(initialPose)
-            _gameState.value = GameState.HoldingPose; _statusMessage.value = "Таймер запущен. Удерживай позу"; startTimerLoop(); speak("Время пошло. Удерживайте позицию")
+            _gameState.value = GameState.HoldingPose; _statusMessage.value = tr(R.string.timer_started_hold_pose); startTimerLoop(); speak(tr(R.string.time_started_hold_position))
         }
     }
 
@@ -414,12 +444,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         return synchronized(frameLock) { latestAnalyzedFrame?.takeIf { now - it.timestampMs <= maxAgeMs } }
     }
 
-    private fun startTimerLoop() { timerJob?.cancel(); timerJob = viewModelScope.launch { while (_timerSeconds.value > 0 && _gameState.value == GameState.HoldingPose) { delay(1000); if (_gameState.value != GameState.HoldingPose) break; _timerSeconds.value -= 1; _statusMessage.value = "Осталось: ${formatTime(_timerSeconds.value)}" }; if (_timerSeconds.value <= 0 && _gameState.value == GameState.HoldingPose) { _gameState.value = GameState.Success; _statusMessage.value = "Победа"; speak("Время вышло") } } }
+    private fun startTimerLoop() { timerJob?.cancel(); timerJob = viewModelScope.launch { while (_timerSeconds.value > 0 && _gameState.value == GameState.HoldingPose) { delay(1000); if (_gameState.value != GameState.HoldingPose) break; _timerSeconds.value -= 1; _statusMessage.value = tr(R.string.remaining_time, formatTime(_timerSeconds.value)) }; if (_timerSeconds.value <= 0 && _gameState.value == GameState.HoldingPose) { _gameState.value = GameState.Success; _statusMessage.value = tr(R.string.victory); speak(tr(R.string.time_is_up)) } } }
 
-    fun triggerDefeat(reason: String, voiceMessage: String = "Вы не справились. Попробуйте снова") { val alreadyFailed = _gameState.value == GameState.Failed; startDelayJob?.cancel(); timerJob?.cancel(); _startDelayRemainingSeconds.value = 0; _gameState.value = GameState.Failed; _defeatReason.value = reason; _statusMessage.value = "Проверка не пройдена"; if (!alreadyFailed) speak(voiceMessage) }
+    fun triggerDefeat(reason: String, voiceMessage: String = tr(R.string.defeat_try_again)) { val alreadyFailed = _gameState.value == GameState.Failed; startDelayJob?.cancel(); timerJob?.cancel(); _startDelayRemainingSeconds.value = 0; _gameState.value = GameState.Failed; _defeatReason.value = reason; _statusMessage.value = tr(R.string.check_failed); if (!alreadyFailed) speak(voiceMessage) }
     private fun speak(text: String) { _voiceEvents.tryEmit(text) }
 
-    fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); _startDelayRemainingSeconds.value = 0; _gameState.value = GameState.Idle; _statusMessage.value = "Поставь телефон и встань в позу"; _defeatReason.value = ""; _driftScore.value = 0f; _motionScore.value = 0f; _timerSeconds.value = _selectedDurationSeconds.value; movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }
+    fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); _startDelayRemainingSeconds.value = 0; _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _driftScore.value = 0f; _motionScore.value = 0f; _timerSeconds.value = _selectedDurationSeconds.value; movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }
     override fun onCleared() { faceDetectorService.close(); super.onCleared() }
     private fun calculateSingleDisplacement(p1: PoseLandmarks, p2: PoseLandmarks): Float { var total = 0f; var count = 0; fun add(a: Point3D?, b: Point3D?) { if (a != null && b != null) { total += a.distanceTo(b); count++ } }; add(p1.leftShoulder, p2.leftShoulder); add(p1.rightShoulder, p2.rightShoulder); add(p1.leftHip, p2.leftHip); add(p1.rightHip, p2.rightHip); return if (count > 0) total / count else 0f }
     private fun formatTime(seconds: Int): String = String.format("%02d:%02d", seconds / 60, seconds % 60)

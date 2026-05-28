@@ -25,6 +25,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -58,16 +59,19 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.annotation.StringRes
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.tracker.PoseLandmarkerService
 import com.example.tracker.FaceDetectionStatus
 import com.example.ui.theme.*
 import com.example.viewmodel.FaceCheckMode
+import com.example.viewmodel.AppLanguage
 import com.example.viewmodel.GameSettings
 import com.example.viewmodel.GameState
 import com.example.viewmodel.GameViewModel
 import com.example.viewmodel.PoseOverlayState
+import com.example.R
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -82,6 +86,16 @@ import java.util.concurrent.Executors
 private const val SHOW_POSE_DEBUG_OVERLAY = true
 private const val SHOW_POSE_DEBUG_POINTS = true
 
+
+@Composable
+private fun localizedString(language: AppLanguage, @StringRes id: Int): String {
+    val context = LocalContext.current
+    val locale = if (language == AppLanguage.Russian) Locale("ru", "RU") else Locale.US
+    val config = android.content.res.Configuration(context.resources.configuration)
+    config.setLocale(locale)
+    return context.createConfigurationContext(config).resources.getString(id)
+}
+
 @Composable
 fun CameraScreen(
     viewModel: GameViewModel,
@@ -90,16 +104,16 @@ fun CameraScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val view = LocalView.current
-    VoiceAnnouncer(viewModel = viewModel)
 
     val gameState by viewModel.gameState.collectAsState()
+    val gameSettings by viewModel.gameSettings.collectAsState()
     val timerSeconds by viewModel.timerSeconds.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
     val defeatReason by viewModel.defeatReason.collectAsState()
     val selectedDurationSeconds by viewModel.selectedDurationSeconds.collectAsState()
     val startDelayRemainingSeconds by viewModel.startDelayRemainingSeconds.collectAsState()
     val poseOverlayState by viewModel.poseOverlayState.collectAsState()
-    val gameSettings by viewModel.gameSettings.collectAsState()
+    VoiceAnnouncer(viewModel = viewModel, language = gameSettings.language)
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val canOpenSettings = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
 
@@ -211,7 +225,8 @@ fun CameraScreen(
             onFirstViolationPenaltyChanged = viewModel::updateFirstViolationPenaltyMinutes,
             onSecondViolationPenaltyChanged = viewModel::updateSecondViolationPenaltyMinutes,
             onThirdViolationPenaltyChanged = viewModel::updateThirdViolationPenaltyMinutes,
-            onSubsequentViolationPenaltyChanged = viewModel::updateSubsequentViolationPenaltyMinutes
+            onSubsequentViolationPenaltyChanged = viewModel::updateSubsequentViolationPenaltyMinutes,
+            onLanguageChanged = viewModel::updateLanguage
         )
         return
     }
@@ -340,7 +355,7 @@ fun CameraScreen(
                     .zIndex(1f),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
             ) {
-                Text(if (isDemoMode) "CAM" else "DEMO")
+                Text(if (isDemoMode) localizedString(gameSettings.language, R.string.camera) else localizedString(gameSettings.language, R.string.demo))
             }
 
 
@@ -352,7 +367,7 @@ fun CameraScreen(
                     .padding(8.dp)
                     .zIndex(1f)
             ) {
-                Icon(Icons.Default.Settings, contentDescription = "Настройки")
+                Icon(Icons.Default.Settings, contentDescription = localizedString(gameSettings.language, R.string.settings))
             }
 
             if (SHOW_POSE_DEBUG_OVERLAY) {
@@ -365,6 +380,7 @@ fun CameraScreen(
 
         // 3. Bottom Controls HUD
         BottomHUDEngine(
+            language = gameSettings.language,
             gameState = gameState,
             statusMessage = statusMessage,
             defeatReason = defeatReason,
@@ -513,17 +529,18 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
 }
 
 @Composable
-private fun VoiceAnnouncer(viewModel: GameViewModel) {
+private fun VoiceAnnouncer(viewModel: GameViewModel, language: AppLanguage) {
     val context = LocalContext.current
     val pendingMessages = remember { ConcurrentLinkedQueue<String>() }
     val ttsRef = remember { AtomicReference<TextToSpeech?>(null) }
     val isReady = remember { AtomicBoolean(false) }
 
-    DisposableEffect(context) {
+    DisposableEffect(context, language) {
         val engine = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 val tts = ttsRef.get() ?: return@TextToSpeech
-                val result = tts.setLanguage(Locale("ru", "RU"))
+                val locale = if (language == AppLanguage.Russian) Locale("ru", "RU") else Locale.US
+                val result = tts.setLanguage(locale)
                 val ready = result != TextToSpeech.LANG_MISSING_DATA &&
                     result != TextToSpeech.LANG_NOT_SUPPORTED
                 isReady.set(ready)
@@ -566,6 +583,7 @@ private fun VoiceAnnouncer(viewModel: GameViewModel) {
                 pendingMessages.add(message)
             }
         }
+
     }
 }
 
@@ -585,8 +603,9 @@ private fun SettingsScreen(
     onFirstViolationPenaltyChanged: (Int) -> Unit,
     onSecondViolationPenaltyChanged: (Int) -> Unit,
     onThirdViolationPenaltyChanged: (Int) -> Unit,
-    onSubsequentViolationPenaltyChanged: (Int) -> Unit
-) {
+    onSubsequentViolationPenaltyChanged: (Int) -> Unit,
+    onLanguageChanged: (AppLanguage) -> Unit
+ ) {
     var faceConfidenceSlider by remember(settings.faceDetectionConfidence) {
         mutableFloatStateOf(settings.faceDetectionConfidence)
     }
@@ -600,17 +619,17 @@ private fun SettingsScreen(
             .padding(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onClose) { Text("Назад") }
-            Text("Настройки", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            TextButton(onClick = onClose) { Text(localizedString(settings.language, R.string.back)) }
+            Text(localizedString(settings.language, R.string.settings), color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(12.dp))
         Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
             Column(Modifier.padding(16.dp)) {
-                Text("Определение лица", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text(localizedString(settings.language, R.string.face_detection), color = Color.White, fontWeight = FontWeight.SemiBold)
                 listOf(
-                    "Лицом от камеры" to FaceCheckMode.FaceAwayFromCamera,
-                    "Лицом в камеру" to FaceCheckMode.FaceToCamera,
-                    "Не проверять" to FaceCheckMode.Disabled
+                    localizedString(settings.language, R.string.face_away) to FaceCheckMode.FaceAwayFromCamera,
+                    localizedString(settings.language, R.string.face_to_camera) to FaceCheckMode.FaceToCamera,
+                    localizedString(settings.language, R.string.do_not_check) to FaceCheckMode.Disabled
                 ).forEach { (label, mode) ->
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                         RadioButton(selected = settings.faceCheckMode == mode, onClick = { onFaceModeChanged(mode) })
@@ -622,7 +641,7 @@ private fun SettingsScreen(
         Spacer(Modifier.height(12.dp))
         Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
             Column(Modifier.padding(16.dp)) {
-                Text("Порог определения лица: ${"%.2f".format(faceConfidenceSlider)}", color = Color.White)
+                Text("${localizedString(settings.language, R.string.face_detection_threshold)}: ${"%.2f".format(faceConfidenceSlider)}", color = Color.White)
                 Slider(
                     value = faceConfidenceSlider,
                     onValueChange = { faceConfidenceSlider = it.coerceIn(0.5f, 0.95f) },
@@ -634,10 +653,10 @@ private fun SettingsScreen(
         Spacer(Modifier.height(12.dp))
         Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
             Column(Modifier.padding(16.dp)) {
-                Text("Максимум нарушений", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text(localizedString(settings.language, R.string.maximum_violations), color = Color.White, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
                 IntegerSettingField(
-                    label = "От 0 до 9999",
+                    label = localizedString(settings.language, R.string.range_0_9999),
                     value = settings.maxViolations,
                     onValueChanged = onMaxViolationsChanged,
                     min = 0,
@@ -648,10 +667,10 @@ private fun SettingsScreen(
         Spacer(Modifier.height(12.dp))
         Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
             Column(Modifier.padding(16.dp)) {
-                Text("Минимальный интервал между санкциями", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text(localizedString(settings.language, R.string.min_interval_errors), color = Color.White, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
                 IntegerSettingField(
-                    label = "Секунды (0..30)",
+                    label = localizedString(settings.language, R.string.seconds_0_30),
                     value = settings.minimumPenaltyIntervalSeconds,
                     onValueChanged = onPenaltyIntervalChanged,
                     min = 0,
@@ -662,26 +681,63 @@ private fun SettingsScreen(
         Spacer(Modifier.height(12.dp))
         Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
             Column(Modifier.padding(16.dp)) {
-                Text("Штраф за нарушение", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text(localizedString(settings.language, R.string.penalty_for_violation), color = Color.White, fontWeight = FontWeight.SemiBold)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Switch(checked = settings.penaltiesEnabled, onCheckedChange = onPenaltiesEnabledChanged)
                     Spacer(Modifier.width(8.dp))
-                    Text(if (settings.penaltiesEnabled) "ВКЛ" else "ВЫКЛ", color = Color.White)
+                    Text(if (settings.penaltiesEnabled) localizedString(settings.language, R.string.on) else localizedString(settings.language, R.string.off), color = Color.White)
                 }
-                IntegerSettingField("Первое нарушение (мин)", settings.firstViolationPenaltyMinutes, onFirstViolationPenaltyChanged, 0, 9999)
-                IntegerSettingField("Второе нарушение (мин)", settings.secondViolationPenaltyMinutes, onSecondViolationPenaltyChanged, 0, 9999)
-                IntegerSettingField("Третье нарушение (мин)", settings.thirdViolationPenaltyMinutes, onThirdViolationPenaltyChanged, 0, 9999)
-                IntegerSettingField("Последующие нарушения (мин)", settings.subsequentViolationPenaltyMinutes, onSubsequentViolationPenaltyChanged, 0, 9999)
+                IntegerSettingField(localizedString(settings.language, R.string.first_violation_min), settings.firstViolationPenaltyMinutes, onFirstViolationPenaltyChanged, 0, 9999)
+                IntegerSettingField(localizedString(settings.language, R.string.second_violation_min), settings.secondViolationPenaltyMinutes, onSecondViolationPenaltyChanged, 0, 9999)
+                IntegerSettingField(localizedString(settings.language, R.string.third_violation_min), settings.thirdViolationPenaltyMinutes, onThirdViolationPenaltyChanged, 0, 9999)
+                IntegerSettingField(localizedString(settings.language, R.string.subsequent_violation_min), settings.subsequentViolationPenaltyMinutes, onSubsequentViolationPenaltyChanged, 0, 9999)
             }
         }
         Spacer(Modifier.height(12.dp))
         Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
             Column(Modifier.padding(16.dp)) {
-                Text("Реакция на движение", color = Color.White, fontWeight = FontWeight.SemiBold)
-                Text("Порог смещения: ${"%.2f".format(settings.driftThresholdFactor)}", color = Color.White)
+                Text(localizedString(settings.language, R.string.motion_reaction), color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text("${localizedString(settings.language, R.string.drift_threshold)}: ${"%.2f".format(settings.driftThresholdFactor)}", color = Color.White)
                 Slider(value = settings.driftThresholdFactor, onValueChange = onDriftChanged, valueRange = 0.1f..0.8f)
-                Text("Порог резкого движения: ${"%.2f".format(settings.motionThresholdFactor)}", color = Color.White)
+                Text("${localizedString(settings.language, R.string.abrupt_motion_threshold)}: ${"%.2f".format(settings.motionThresholdFactor)}", color = Color.White)
                 Slider(value = settings.motionThresholdFactor, onValueChange = onMotionChanged, valueRange = 0.1f..0.8f)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
+            Column(Modifier.padding(16.dp)) {
+                Text(localizedString(settings.language, R.string.language), color = Color.White, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onLanguageChanged(AppLanguage.English) }
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(selected = settings.language == AppLanguage.English, onClick = { onLanguageChanged(AppLanguage.English) })
+                    Text(
+                        localizedString(settings.language, R.string.language_english),
+                        color = Color.White,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onLanguageChanged(AppLanguage.Russian) }
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(selected = settings.language == AppLanguage.Russian, onClick = { onLanguageChanged(AppLanguage.Russian) })
+                    Text(
+                        localizedString(settings.language, R.string.language_russian),
+                        color = Color.White,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
     }
@@ -713,10 +769,10 @@ private fun IntegerSettingField(
 }
 
 @Composable
-fun DurationPicker(selectedMinutes: Int, onMinutesChanged: (Int) -> Unit) {
+fun DurationPicker(selectedMinutes: Int, language: AppLanguage, onMinutesChanged: (Int) -> Unit) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = "Длительность (минуты)",
+            text = localizedString(language, R.string.duration_minutes),
             color = Color.White.copy(alpha = 0.9f),
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold
@@ -735,7 +791,7 @@ fun DurationPicker(selectedMinutes: Int, onMinutesChanged: (Int) -> Unit) {
                 Text("−", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
             }
             Text(
-                text = "$selectedMinutes мин",
+                text = "$selectedMinutes ${localizedString(language, R.string.min_short)}",
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
                 fontSize = 20.sp,
@@ -743,7 +799,7 @@ fun DurationPicker(selectedMinutes: Int, onMinutesChanged: (Int) -> Unit) {
                 textAlign = TextAlign.Center
             )
             IconButton(onClick = { onMinutesChanged((selectedMinutes + 1).coerceAtMost(120)) }) {
-                Icon(Icons.Default.Add, contentDescription = "Увеличить", tint = Color.White)
+                Icon(Icons.Default.Add, contentDescription = localizedString(language, R.string.increase), tint = Color.White)
             }
         }
     }
@@ -751,6 +807,7 @@ fun DurationPicker(selectedMinutes: Int, onMinutesChanged: (Int) -> Unit) {
 
 @Composable
 fun BottomHUDEngine(
+    language: AppLanguage,
     gameState: GameState,
     statusMessage: String,
     defeatReason: String,
@@ -778,11 +835,11 @@ fun BottomHUDEngine(
             // Status/Instruction Box
             Column(modifier = Modifier.fillMaxWidth()) {
                 val stateHeadline = when (gameState) {
-                    GameState.Idle -> "ЖДЁМ СТАРТА"
-                    GameState.StartingDelay -> "СТАРТ ЧЕРЕЗ ${startDelayRemainingSeconds}s"
-                    GameState.HoldingPose -> "СТАБИЛИЗАЦИЯ ТЕЛА"
-                    GameState.Success -> "ПОЗДРАВЛЯЕМ! ПОБЕДА"
-                    GameState.Failed -> "ПОВАЛЕНО"
+                    GameState.Idle -> localizedString(language, R.string.waiting_to_start)
+                    GameState.StartingDelay -> "${localizedString(language, R.string.start_in)} ${startDelayRemainingSeconds}s"
+                    GameState.HoldingPose -> localizedString(language, R.string.holding_pose)
+                    GameState.Success -> localizedString(language, R.string.congrats_victory)
+                    GameState.Failed -> localizedString(language, R.string.failed)
                 }
                 val headlineColor = when (gameState) {
                     GameState.Success -> AccentGreen
@@ -808,7 +865,7 @@ fun BottomHUDEngine(
                 if (defeatReason.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Причина: $defeatReason",
+                        text = "${localizedString(language, R.string.reason)}: $defeatReason",
                         color = AccentRed.copy(alpha = 0.85f),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Normal
@@ -818,7 +875,7 @@ fun BottomHUDEngine(
 
             Spacer(modifier = Modifier.height(16.dp))
             if (canStart) {
-                DurationPicker(selectedDurationSeconds / 60, onDurationChanged)
+                DurationPicker(selectedDurationSeconds / 60, language, onDurationChanged)
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
@@ -839,7 +896,7 @@ fun BottomHUDEngine(
                     verticalArrangement = Arrangement.Center
                 ) {
                     Text(
-                        text = "REMAINING",
+                        text = localizedString(language, R.string.remaining),
                         color = DarkTertiary,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
@@ -869,12 +926,12 @@ fun BottomHUDEngine(
                     ) {
                         Icon(
                             imageVector = Icons.Default.PlayArrow,
-                            contentDescription = "Start",
+                            contentDescription = localizedString(language, R.string.start),
                             tint = DarkOnPrimary
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "START",
+                            text = localizedString(language, R.string.start),
                             color = DarkOnPrimary,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
@@ -897,7 +954,7 @@ fun BottomHUDEngine(
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "STOP",
+                            text = localizedString(language, R.string.stop),
                             color = Color.White,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
