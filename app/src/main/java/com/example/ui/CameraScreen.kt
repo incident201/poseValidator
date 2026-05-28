@@ -706,13 +706,36 @@ private fun SettingsScreen(
         Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
             Column(Modifier.padding(16.dp)) {
                 Text(localizedString(settings.language, R.string.language), color = Color.White, fontWeight = FontWeight.SemiBold)
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onLanguageChanged(AppLanguage.English) }
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     RadioButton(selected = settings.language == AppLanguage.English, onClick = { onLanguageChanged(AppLanguage.English) })
-                    Text(localizedString(settings.language, R.string.language_english), color = Color.White)
+                    Text(
+                        localizedString(settings.language, R.string.language_english),
+                        color = Color.White,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onLanguageChanged(AppLanguage.Russian) }
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     RadioButton(selected = settings.language == AppLanguage.Russian, onClick = { onLanguageChanged(AppLanguage.Russian) })
-                    Text(localizedString(settings.language, R.string.language_russian), color = Color.White)
+                    Text(
+                        localizedString(settings.language, R.string.language_russian),
+                        color = Color.White,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
         }
