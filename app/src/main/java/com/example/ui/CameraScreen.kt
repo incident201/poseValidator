@@ -88,29 +88,32 @@ import java.util.concurrent.Executors
 
 private const val SHOW_POSE_DEBUG_OVERLAY = true
 private const val SHOW_POSE_DEBUG_POINTS = true
-private val POSE_CONNECTIONS_1_BASED = listOf(
+private val POSE_CONNECTIONS = listOf(
     11 to 12,
+    11 to 13,
+    13 to 15,
+    15 to 19,
+    15 to 21,
+    17 to 19,
     12 to 14,
     14 to 16,
     16 to 18,
     16 to 20,
     16 to 22,
-    12 to 13,
-    13 to 15,
-    15 to 17,
-    15 to 19,
-    15 to 21,
+    18 to 20,
+    11 to 23,
+    12 to 24,
     23 to 24,
+    23 to 25,
+    25 to 27,
+    27 to 29,
+    27 to 31,
+    29 to 31,
     24 to 26,
     26 to 28,
     28 to 30,
     28 to 32,
-    30 to 32,
-    23 to 25,
-    25 to 27,
-    27 to 29,
-    29 to 31,
-    31 to 27
+    30 to 32
 )
 
 
@@ -548,9 +551,7 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
 
     if (!SHOW_POSE_DEBUG_POINTS) return
 
-    POSE_CONNECTIONS_1_BASED.forEach { (startId, endId) ->
-        val startIndex = startId - 1
-        val endIndex = endId - 1
+    POSE_CONNECTIONS.forEach { (startIndex, endIndex) ->
         val start = overlayState.landmarks.getOrNull(startIndex) ?: return@forEach
         val end = overlayState.landmarks.getOrNull(endIndex) ?: return@forEach
         if (!start.x.isFinite() || !start.y.isFinite() || !end.x.isFinite() || !end.y.isFinite()) return@forEach
