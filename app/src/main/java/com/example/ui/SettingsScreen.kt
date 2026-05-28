@@ -42,7 +42,8 @@ internal fun SettingsScreen(
     onSecondViolationPenaltyChanged: (Int) -> Unit,
     onThirdViolationPenaltyChanged: (Int) -> Unit,
     onSubsequentViolationPenaltyChanged: (Int) -> Unit,
-    onLanguageChanged: (AppLanguage) -> Unit
+    onLanguageChanged: (AppLanguage) -> Unit,
+    onTimelapseRecordingEnabledChanged: (Boolean) -> Unit
  ) {
     var faceConfidenceSlider by remember(settings.faceDetectionConfidence) {
         mutableFloatStateOf(settings.faceDetectionConfidence)
@@ -202,6 +203,33 @@ internal fun SettingsScreen(
                         color = Color.White,
                         modifier = Modifier.weight(1f)
                     )
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
+            Column(Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        localizedString(settings.language, R.string.record_timelapse_video),
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (settings.timelapseRecordingEnabled) localizedString(settings.language, R.string.on) else localizedString(settings.language, R.string.off),
+                            color = Color.White
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Switch(
+                            checked = settings.timelapseRecordingEnabled,
+                            onCheckedChange = onTimelapseRecordingEnabledChanged
+                        )
+                    }
                 }
             }
         }

@@ -157,6 +157,7 @@ fun CameraScreen(
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val canOpenSettings = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
     val currentGameState = rememberUpdatedState(gameState)
+    val currentTimelapseRecordingEnabled = rememberUpdatedState(gameSettings.timelapseRecordingEnabled)
     val timelapseRecorder = remember(context) { TimelapseRecorder(context.applicationContext) }
     var pendingTimelapseFile by remember { mutableStateOf<File?>(null) }
     val timelapseSaveErrorText = localizedString(gameSettings.language, R.string.timelapse_save_error)
@@ -263,7 +264,14 @@ fun CameraScreen(
         }
     }
 
-    LaunchedEffect(gameState) {
+    LaunchedEffect(gameState, gameSettings.timelapseRecordingEnabled) {
+        if (!gameSettings.timelapseRecordingEnabled) {
+            timelapseRecorder.discard()
+            pendingTimelapseFile?.delete()
+            pendingTimelapseFile = null
+            return@LaunchedEffect
+        }
+
         when (gameState) {
             GameState.StartingDelay -> timelapseRecorder.start(SystemClock.elapsedRealtime())
             GameState.HoldingPose -> timelapseRecorder.startTimer(SystemClock.elapsedRealtime())
@@ -300,7 +308,8 @@ fun CameraScreen(
             onSecondViolationPenaltyChanged = viewModel::updateSecondViolationPenaltyMinutes,
             onThirdViolationPenaltyChanged = viewModel::updateThirdViolationPenaltyMinutes,
             onSubsequentViolationPenaltyChanged = viewModel::updateSubsequentViolationPenaltyMinutes,
-            onLanguageChanged = viewModel::updateLanguage
+            onLanguageChanged = viewModel::updateLanguage,
+            onTimelapseRecordingEnabledChanged = viewModel::updateTimelapseRecordingEnabled
         )
         return
     }
@@ -381,7 +390,9 @@ fun CameraScreen(
                                         timestampMs = timestampMs
                                     )
                                     val state = currentGameState.value
-                                    if (state == GameState.StartingDelay || state == GameState.HoldingPose) {
+                                    if (currentTimelapseRecordingEnabled.value &&
+                                        (state == GameState.StartingDelay || state == GameState.HoldingPose)
+                                    ) {
                                         timelapseRecorder.offerFrame(
                                             bitmap = analysisBitmap,
                                             timestampMs = timestampMs

@@ -72,4 +72,5 @@
     <string name="save">Save</string>
     <string name="dont_save">Do not save</string>
     <string name="timelapse_save_error">Failed to save timelapse video.</string>
+    <string name="record_timelapse_video">Record Timelapse video</string>
 </resources>
