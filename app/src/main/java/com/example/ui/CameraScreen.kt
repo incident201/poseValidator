@@ -280,7 +280,7 @@ fun CameraScreen(
 
     LaunchedEffect(gameState) {
         when (gameState) {
-            GameState.HoldingPose -> timelapseRecorder.start(SystemClock.elapsedRealtime())
+            GameState.StartingDelay -> timelapseRecorder.start(SystemClock.elapsedRealtime())
             GameState.Success, GameState.Failed -> {
                 val file = withContext(Dispatchers.IO) { timelapseRecorder.stop() }
                 if (file != null && file.exists() && file.length() > 0L) {
@@ -394,7 +394,8 @@ fun CameraScreen(
                                         landmarkerService = landmarkerService,
                                         timestampMs = timestampMs
                                     )
-                                    if (currentGameState.value == GameState.HoldingPose) {
+                                    val state = currentGameState.value
+                                    if (state == GameState.StartingDelay || state == GameState.HoldingPose) {
                                         timelapseRecorder.offerFrame(
                                             bitmap = analysisBitmap,
                                             timestampMs = timestampMs
