@@ -358,13 +358,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 tr(R.string.you_looked_at_camera)
             }
-            val sanction = if (_gameSettings.value.penaltiesEnabled) {
-                tr(R.string.penalty_added_to_timer, minutes)
-            } else {
-                tr(R.string.time_penalty_disabled)
-            }
             _statusMessage.value = statusText
-            speak("$prefix. $sanction")
+            if (_gameSettings.value.penaltiesEnabled) {
+                speak("$prefix. ${tr(R.string.penalty_added_to_timer, minutes)}")
+            } else {
+                speak(prefix)
+            }
             return
         }
 
@@ -373,7 +372,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
             speak("${tr(R.string.violation_recorded)}. ${tr(R.string.penalty_added_to_timer, minutes)}")
         } else {
             _statusMessage.value = tr(R.string.violation_recorded)
-            speak("${tr(R.string.violation_recorded)}. ${tr(R.string.time_penalty_disabled)}")
+            speak(tr(R.string.violation_recorded))
         }
     }
 
