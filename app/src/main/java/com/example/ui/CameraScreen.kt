@@ -120,7 +120,8 @@ fun CameraScreen(
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val canOpenSettings = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
 
-    val keepScreenOn = gameState == GameState.StartingDelay ||
+    val keepScreenOn = gameState == GameState.WaitingForStabilization ||
+        gameState == GameState.StartingDelay ||
         gameState == GameState.HoldingPose
 
     DisposableEffect(keepScreenOn, view) {
@@ -663,6 +664,7 @@ fun BottomHUDEngine(
             Column(modifier = Modifier.fillMaxWidth()) {
                 val stateHeadline = when (gameState) {
                     GameState.Idle -> localizedString(language, R.string.waiting_to_start)
+                    GameState.WaitingForStabilization -> localizedString(language, R.string.device_stabilization)
                     GameState.StartingDelay -> "${localizedString(language, R.string.start_in)} ${startDelayRemainingSeconds}s"
                     GameState.HoldingPose -> localizedString(language, R.string.holding_pose)
                     GameState.Success -> localizedString(language, R.string.congrats_victory)

@@ -4,6 +4,10 @@ import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Bitmap
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
@@ -26,9 +30,11 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
+import kotlin.math.sqrt
 
 enum class GameState {
     Idle,
+    WaitingForStabilization,
     StartingDelay,
     HoldingPose,
     Success,
@@ -81,10 +87,21 @@ data class PoseOverlayState(
 
 data class PoseOverlayRect(val left: Float, val top: Float, val right: Float, val bottom: Float)
 
-class GameViewModel(application: Application) : AndroidViewModel(application) {
+class GameViewModel(application: Application) : AndroidViewModel(application), SensorEventListener {
     private val tag = "GameViewModel"
     private val minimumDurationSeconds = 180
     private val startDelaySeconds = 10
+    private val stabilizationDurationMs = 3_000L
+    private val gyroscopeStillThresholdRadPerSec = 0.08f
+
+    private val sensorManager =
+        application.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+
+    private val gyroscopeSensor =
+        sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+
+    private var stabilizationStableSinceMs: Long? = null
+    private var stabilizationCompleted = false
 
     private val prefs: SharedPreferences = application.getSharedPreferences("game_settings", Context.MODE_PRIVATE)
 
@@ -421,36 +438,98 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startSession() {
         if (_gameState.value != GameState.Idle && _gameState.value != GameState.Failed && _gameState.value != GameState.Success) return
+
+        _defeatReason.value = ""
+        _driftScore.value = 0f
+        _motionScore.value = 0f
+        _startDelayRemainingSeconds.value = 0
+        movementTracker.reset()
+        violationCount = 0
+        lastPenaltyAtMs = 0L
+        consecutiveFaceFailFrames = 0
+        startDelayJob?.cancel()
+        timerJob?.cancel()
+
+        if (gyroscopeSensor == null) {
+            triggerDefeat(tr(R.string.gyroscope_unavailable), tr(R.string.gyroscope_unavailable))
+            return
+        }
+
+        stabilizationStableSinceMs = null
+        stabilizationCompleted = false
+        _gameState.value = GameState.WaitingForStabilization
+        _statusMessage.value = tr(R.string.place_device_still)
+        speak(tr(R.string.place_device_still))
+        sensorManager.unregisterListener(this)
+        sensorManager.registerListener(this, gyroscopeSensor, SensorManager.SENSOR_DELAY_GAME)
+    }
+
+    private fun startPoseCountdownAfterDeviceStabilized() {
         speak(tr(R.string.take_position))
-        _defeatReason.value = ""; _driftScore.value = 0f; _motionScore.value = 0f; _startDelayRemainingSeconds.value = 0
-        movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0
-        startDelayJob?.cancel(); timerJob?.cancel()
+        _gameState.value = GameState.StartingDelay
+        startDelayJob?.cancel()
         startDelayJob = viewModelScope.launch {
-            _gameState.value = GameState.StartingDelay
-            for (seconds in startDelaySeconds downTo 1) { _startDelayRemainingSeconds.value = seconds; _statusMessage.value = tr(R.string.start_in_pose, seconds); delay(1000) }
+            for (i in startDelaySeconds downTo 1) {
+                _startDelayRemainingSeconds.value = i
+                _statusMessage.value = tr(R.string.start_in_pose, i)
+                delay(1000)
+            }
             _startDelayRemainingSeconds.value = 0
-            val analyzedFrame = getFreshAnalyzedFrame(); val initialPose = analyzedFrame?.pose
+            val analyzedFrame = getFreshAnalyzedFrame(1200)
+            val initialPose = analyzedFrame?.pose
             if (analyzedFrame == null) { triggerDefeat(tr(R.string.camera_no_frame)); return@launch }
             if (initialPose == null || !initialPose.hasEnoughKeypoints()) { triggerDefeat(tr(R.string.camera_no_body)); return@launch }
-            _timerSeconds.value = _selectedDurationSeconds.value.coerceAtLeast(minimumDurationSeconds)
-            movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0
+            _timerSeconds.value = _selectedDurationSeconds.value
+            movementTracker.reset()
+            violationCount = 0
+            lastPenaltyAtMs = 0L
+            consecutiveFaceFailFrames = 0
             movementTracker.startTracking(initialPose)
-            _gameState.value = GameState.HoldingPose; _statusMessage.value = tr(R.string.timer_started_hold_pose); startTimerLoop(); speak(tr(R.string.time_started_hold_position))
+            _gameState.value = GameState.HoldingPose
+            _statusMessage.value = tr(R.string.remaining_time, formatTime(_timerSeconds.value))
+            startTimerLoop()
+            speak(tr(R.string.time_started_hold_position))
         }
     }
 
-    private fun getFreshAnalyzedFrame(maxAgeMs: Long = 1000L): AnalyzedPoseFrame? {
-        val now = SystemClock.elapsedRealtimeNanos() / 1_000_000L
-        return synchronized(frameLock) { latestAnalyzedFrame?.takeIf { now - it.timestampMs <= maxAgeMs } }
+    private fun completeDeviceStabilization() {
+        if (_gameState.value != GameState.WaitingForStabilization || stabilizationCompleted) return
+        stabilizationCompleted = true
+        sensorManager.unregisterListener(this)
+        stabilizationStableSinceMs = null
+        startPoseCountdownAfterDeviceStabilized()
     }
 
-    private fun startTimerLoop() { timerJob?.cancel(); timerJob = viewModelScope.launch { while (_timerSeconds.value > 0 && _gameState.value == GameState.HoldingPose) { delay(1000); if (_gameState.value != GameState.HoldingPose) break; _timerSeconds.value -= 1; _statusMessage.value = tr(R.string.remaining_time, formatTime(_timerSeconds.value)) }; if (_timerSeconds.value <= 0 && _gameState.value == GameState.HoldingPose) { _gameState.value = GameState.Success; _statusMessage.value = tr(R.string.victory); speak(tr(R.string.time_is_up)) } } }
+    override fun onSensorChanged(event: SensorEvent) {
+        if (event.sensor.type != Sensor.TYPE_GYROSCOPE) return
+        if (_gameState.value != GameState.WaitingForStabilization) return
 
-    fun triggerDefeat(reason: String, voiceMessage: String = tr(R.string.defeat_try_again)) { val alreadyFailed = _gameState.value == GameState.Failed; startDelayJob?.cancel(); timerJob?.cancel(); _startDelayRemainingSeconds.value = 0; _gameState.value = GameState.Failed; _defeatReason.value = reason; _statusMessage.value = tr(R.string.check_failed); if (!alreadyFailed) speak(voiceMessage) }
+        val magnitude = sqrt(
+            event.values[0] * event.values[0] +
+                event.values[1] * event.values[1] +
+                event.values[2] * event.values[2]
+        )
+
+        val now = SystemClock.elapsedRealtime()
+        if (magnitude <= gyroscopeStillThresholdRadPerSec) {
+            val stableSince = stabilizationStableSinceMs ?: now.also { stabilizationStableSinceMs = it }
+            if (now - stableSince >= stabilizationDurationMs) {
+                viewModelScope.launch {
+                    completeDeviceStabilization()
+                }
+            }
+        } else {
+            stabilizationStableSinceMs = null
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+
+    fun triggerDefeat(reason: String, voiceMessage: String = tr(R.string.defeat_try_again)) { val alreadyFailed = _gameState.value == GameState.Failed; startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; _gameState.value = GameState.Failed; _defeatReason.value = reason; _statusMessage.value = tr(R.string.check_failed); if (!alreadyFailed) speak(voiceMessage) }
     private fun speak(text: String) { _voiceEvents.tryEmit(text) }
 
-    fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); _startDelayRemainingSeconds.value = 0; _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _driftScore.value = 0f; _motionScore.value = 0f; _timerSeconds.value = _selectedDurationSeconds.value; movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }
-    override fun onCleared() { faceDetectorService.close(); super.onCleared() }
+    fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _driftScore.value = 0f; _motionScore.value = 0f; _timerSeconds.value = _selectedDurationSeconds.value; movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }
+    override fun onCleared() { sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; faceDetectorService.close(); super.onCleared() }
     private fun calculateSingleDisplacement(p1: PoseLandmarks, p2: PoseLandmarks): Float { var total = 0f; var count = 0; fun add(a: Point3D?, b: Point3D?) { if (a != null && b != null) { total += a.distanceTo(b); count++ } }; add(p1.leftShoulder, p2.leftShoulder); add(p1.rightShoulder, p2.rightShoulder); add(p1.leftHip, p2.leftHip); add(p1.rightHip, p2.rightHip); return if (count > 0) total / count else 0f }
     private fun formatTime(seconds: Int): String = String.format("%02d:%02d", seconds / 60, seconds % 60)
 }

@@ -26,6 +26,8 @@ data class PoseLandmarks(
     fun hasEnoughKeypoints(): Boolean {
         return leftShoulder != null &&
             rightShoulder != null &&
+            leftElbow != null &&
+            rightElbow != null &&
             leftHip != null &&
             rightHip != null &&
             leftKnee != null &&

@@ -35,6 +35,7 @@
     <string name="violation_recorded_with_penalty">Зафиксировано нарушение: +%1$d мин</string>
     <string name="violation_recorded">Зафиксировано нарушение</string>
     <string name="take_position">Займите позицию</string>
+    <string name="place_device_still">Поставьте устройство неподвижно</string>
     <string name="start_in_pose">Старт через %1$d сек. Прими позу</string>
     <string name="camera_no_frame">Камера не предоставила свежий синхронизированный кадр</string>
     <string name="camera_no_body">Камера не видит тело. Встань полностью в кадр.</string>
@@ -44,6 +45,7 @@
     <string name="victory">Победа</string>
     <string name="time_is_up">Время вышло</string>
     <string name="check_failed">Проверка не пройдена</string>
+    <string name="gyroscope_unavailable">Гироскоп недоступен на этом устройстве</string>
 
     <string name="face_detection_threshold">Порог определения лица</string>
     <string name="first_violation_min">Первое нарушение (мин)</string>
@@ -55,6 +57,7 @@
     <string name="abrupt_motion_threshold">Порог резкого движения</string>
     <string name="min_short">мин</string>
     <string name="waiting_to_start">ЖДЁМ СТАРТА</string>
+    <string name="device_stabilization">СТАБИЛИЗАЦИЯ УСТРОЙСТВА</string>
     <string name="start_in">СТАРТ ЧЕРЕЗ</string>
     <string name="holding_pose">СТАБИЛИЗАЦИЯ ТЕЛА</string>
     <string name="congrats_victory">ПОЗДРАВЛЯЕМ! ПОБЕДА</string>

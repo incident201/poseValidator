@@ -35,6 +35,7 @@
     <string name="violation_recorded_with_penalty">Violation recorded: +%1$d min</string>
     <string name="violation_recorded">Violation recorded</string>
     <string name="take_position">Take position</string>
+    <string name="place_device_still">Place the device still</string>
     <string name="start_in_pose">Start in %1$d sec. Take the pose</string>
     <string name="camera_no_frame">Camera did not provide a fresh synchronized frame</string>
     <string name="camera_no_body">Camera cannot see the full body. Step fully into the frame.</string>
@@ -44,6 +45,7 @@
     <string name="victory">Victory</string>
     <string name="time_is_up">Time is up</string>
     <string name="check_failed">Check failed</string>
+    <string name="gyroscope_unavailable">Gyroscope is unavailable on this device</string>
 
     <string name="face_detection_threshold">Face detection threshold</string>
     <string name="first_violation_min">First violation (min)</string>
@@ -55,6 +57,7 @@
     <string name="abrupt_motion_threshold">Abrupt motion threshold</string>
     <string name="min_short">min</string>
     <string name="waiting_to_start">WAITING TO START</string>
+    <string name="device_stabilization">DEVICE STABILIZATION</string>
     <string name="start_in">START IN</string>
     <string name="holding_pose">HOLDING POSE</string>
     <string name="congrats_victory">CONGRATULATIONS! VICTORY</string>
