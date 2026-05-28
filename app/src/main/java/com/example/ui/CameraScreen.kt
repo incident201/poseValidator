@@ -88,6 +88,34 @@ import java.util.concurrent.Executors
 
 private const val SHOW_POSE_DEBUG_OVERLAY = true
 private const val SHOW_POSE_DEBUG_POINTS = true
+private val POSE_CONNECTIONS = listOf(
+    11 to 12,
+    11 to 13,
+    13 to 15,
+    15 to 17,
+    15 to 19,
+    15 to 21,
+    17 to 19,
+    12 to 14,
+    14 to 16,
+    16 to 18,
+    16 to 20,
+    16 to 22,
+    18 to 20,
+    11 to 23,
+    12 to 24,
+    23 to 24,
+    23 to 25,
+    25 to 27,
+    27 to 29,
+    27 to 31,
+    29 to 31,
+    24 to 26,
+    26 to 28,
+    28 to 30,
+    28 to 32,
+    30 to 32
+)
 
 
 @Composable
@@ -120,7 +148,8 @@ fun CameraScreen(
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val canOpenSettings = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
 
-    val keepScreenOn = gameState == GameState.StartingDelay ||
+    val keepScreenOn = gameState == GameState.WaitingForStabilization ||
+        gameState == GameState.StartingDelay ||
         gameState == GameState.HoldingPose
 
     DisposableEffect(keepScreenOn, view) {
@@ -523,6 +552,19 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
 
     if (!SHOW_POSE_DEBUG_POINTS) return
 
+    POSE_CONNECTIONS.forEach { (startIndex, endIndex) ->
+        val start = overlayState.landmarks.getOrNull(startIndex) ?: return@forEach
+        val end = overlayState.landmarks.getOrNull(endIndex) ?: return@forEach
+        if (!start.x.isFinite() || !start.y.isFinite() || !end.x.isFinite() || !end.y.isFinite()) return@forEach
+
+        drawLine(
+            color = Color.Cyan.copy(alpha = 0.65f),
+            start = Offset(mapX(start.x), mapY(start.y)),
+            end = Offset(mapX(end.x), mapY(end.y)),
+            strokeWidth = 2.5f
+        )
+    }
+
     overlayState.landmarks.forEach { point ->
         if (!point.x.isFinite() || !point.y.isFinite()) return@forEach
         drawCircle(
@@ -663,6 +705,7 @@ fun BottomHUDEngine(
             Column(modifier = Modifier.fillMaxWidth()) {
                 val stateHeadline = when (gameState) {
                     GameState.Idle -> localizedString(language, R.string.waiting_to_start)
+                    GameState.WaitingForStabilization -> localizedString(language, R.string.device_stabilization)
                     GameState.StartingDelay -> "${localizedString(language, R.string.start_in)} ${startDelayRemainingSeconds}s"
                     GameState.HoldingPose -> localizedString(language, R.string.holding_pose)
                     GameState.Success -> localizedString(language, R.string.congrats_victory)
