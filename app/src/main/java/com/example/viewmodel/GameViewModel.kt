@@ -436,6 +436,39 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         return PoseOverlayState(bitmap.width, bitmap.height, pose.allLandmarks, normalizedRect, faceOverlayState)
     }
 
+    private suspend fun getFreshAnalyzedFrame(maxAgeMs: Long): AnalyzedPoseFrame? {
+        val deadline = SystemClock.elapsedRealtime() + maxAgeMs
+        while (SystemClock.elapsedRealtime() <= deadline) {
+            val frame = synchronized(frameLock) { latestAnalyzedFrame }
+            if (frame != null) {
+                val ageMs = SystemClock.elapsedRealtime() - frame.timestampMs
+                if (ageMs in 0..maxAgeMs) {
+                    return frame
+                }
+            }
+            delay(40)
+        }
+        return null
+    }
+
+    private fun startTimerLoop() {
+        timerJob?.cancel()
+        timerJob = viewModelScope.launch {
+            while (_gameState.value == GameState.HoldingPose && _timerSeconds.value > 0) {
+                delay(1000)
+                if (_gameState.value != GameState.HoldingPose) return@launch
+                val next = (_timerSeconds.value - 1).coerceAtLeast(0)
+                _timerSeconds.value = next
+                _statusMessage.value = tr(R.string.remaining_time, formatTime(next))
+            }
+            if (_gameState.value == GameState.HoldingPose && _timerSeconds.value <= 0) {
+                _gameState.value = GameState.Success
+                _statusMessage.value = tr(R.string.victory)
+                speak(tr(R.string.time_is_up))
+            }
+        }
+    }
+
     fun startSession() {
         if (_gameState.value != GameState.Idle && _gameState.value != GameState.Failed && _gameState.value != GameState.Success) return
 
