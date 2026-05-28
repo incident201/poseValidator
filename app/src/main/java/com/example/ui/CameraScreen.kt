@@ -92,6 +92,7 @@ private val POSE_CONNECTIONS = listOf(
     11 to 12,
     11 to 13,
     13 to 15,
+    15 to 17,
     15 to 19,
     15 to 21,
     17 to 19,
