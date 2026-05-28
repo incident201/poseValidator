@@ -1,14 +1,18 @@
 package com.example.ui
 
 import android.Manifest
+import android.content.ContentValues
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.speech.tts.TextToSpeech
 import android.os.SystemClock
+import android.provider.MediaStore
 import android.graphics.Paint
 import android.util.Log
 import androidx.activity.compose.BackHandler
@@ -76,6 +80,7 @@ import com.example.viewmodel.GameViewModel
 import com.example.viewmodel.PoseOverlayState
 import com.example.video.TimelapseRecorder
 import com.example.R
+import java.io.File
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -153,7 +158,7 @@ fun CameraScreen(
     val canOpenSettings = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
     val currentGameState = rememberUpdatedState(gameState)
     val timelapseRecorder = remember(context) { TimelapseRecorder(context.applicationContext) }
-    var pendingTimelapseFile by remember { mutableStateOf<java.io.File?>(null) }
+    var pendingTimelapseFile by remember { mutableStateOf<File?>(null) }
     val timelapseSaveErrorText = localizedString(gameSettings.language, R.string.timelapse_save_error)
     val saveTimelapseTitleText = localizedString(gameSettings.language, R.string.save_timelapse_title)
     val saveTimelapseMessageText = localizedString(gameSettings.language, R.string.save_timelapse_message)
@@ -200,26 +205,6 @@ fun CameraScreen(
     var landmarkerService by remember { mutableStateOf<PoseLandmarkerService?>(null) }
     var isDemoMode by rememberSaveable { mutableStateOf(false) }
     var demoBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    val saveTimelapseLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("video/mp4")
-    ) { uri ->
-        val file = pendingTimelapseFile
-        if (uri != null && file != null) {
-            runCatching {
-                context.contentResolver.openOutputStream(uri)?.use { output ->
-                    file.inputStream().use { input ->
-                        input.copyTo(output)
-                    }
-                }
-            }.onFailure {
-                Log.e("CameraScreen", "Failed to save timelapse", it)
-                Toast.makeText(context, timelapseSaveErrorText, Toast.LENGTH_SHORT).show()
-            }
-        }
-        file?.delete()
-        pendingTimelapseFile = null
-    }
-
     val demoImagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -485,7 +470,19 @@ fun CameraScreen(
                 confirmButton = {
                     TextButton(
                         onClick = {
-                            saveTimelapseLauncher.launch("pose_timelapse_${System.currentTimeMillis()}.mp4")
+                            val file = pendingTimelapseFile
+                            if (file != null) {
+                                val saved = saveTimelapseToMediaStore(context, file)
+                                if (!saved) {
+                                    Toast.makeText(
+                                        context,
+                                        timelapseSaveErrorText,
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                                file.delete()
+                                pendingTimelapseFile = null
+                            }
                         }
                     ) { Text(saveText) }
                 },
@@ -926,6 +923,53 @@ fun BottomHUDEngine(
     }
 }
 
+
+private fun saveTimelapseToMediaStore(
+    context: Context,
+    sourceFile: File
+): Boolean {
+    val resolver = context.contentResolver
+    val fileName = "pose_timelapse_${System.currentTimeMillis()}.mp4"
+
+    val values = ContentValues().apply {
+        put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
+        put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+        put(
+            MediaStore.Video.Media.RELATIVE_PATH,
+            "${Environment.DIRECTORY_MOVIES}/PoseValidator"
+        )
+        put(MediaStore.Video.Media.IS_PENDING, 1)
+    }
+
+    val collection = MediaStore.Video.Media.getContentUri(
+        MediaStore.VOLUME_EXTERNAL_PRIMARY
+    )
+
+    val uri = runCatching {
+        resolver.insert(collection, values)
+    }.getOrElse {
+        Log.e("CameraScreen", "Failed to create timelapse MediaStore entry", it)
+        null
+    } ?: return false
+
+    return runCatching {
+        resolver.openOutputStream(uri)?.use { output ->
+            sourceFile.inputStream().use { input ->
+                input.copyTo(output)
+            }
+        } ?: error("Failed to open output stream for timelapse video")
+
+        values.clear()
+        values.put(MediaStore.Video.Media.IS_PENDING, 0)
+        resolver.update(uri, values, null, null)
+
+        true
+    }.getOrElse {
+        Log.e("CameraScreen", "Failed to save timelapse to MediaStore", it)
+        runCatching { resolver.delete(uri, null, null) }
+        false
+    }
+}
 
 private fun rotateBitmap(bitmap: Bitmap, rotationDegrees: Int): Bitmap {
     val matrix = android.graphics.Matrix()
