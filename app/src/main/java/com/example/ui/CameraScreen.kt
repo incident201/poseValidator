@@ -74,15 +74,19 @@ import com.example.viewmodel.GameSettings
 import com.example.viewmodel.GameState
 import com.example.viewmodel.GameViewModel
 import com.example.viewmodel.PoseOverlayState
+import com.example.video.TimelapseRecorder
 import com.example.R
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.Locale
 import android.util.Size
+import android.widget.Toast
 import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -147,6 +151,14 @@ fun CameraScreen(
     VoiceAnnouncer(viewModel = viewModel, language = gameSettings.language)
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val canOpenSettings = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
+    val currentGameState = rememberUpdatedState(gameState)
+    val timelapseRecorder = remember(context) { TimelapseRecorder(context.applicationContext) }
+    var pendingTimelapseFile by remember { mutableStateOf<java.io.File?>(null) }
+    val timelapseSaveErrorText = localizedString(gameSettings.language, R.string.timelapse_save_error)
+    val saveTimelapseTitleText = localizedString(gameSettings.language, R.string.save_timelapse_title)
+    val saveTimelapseMessageText = localizedString(gameSettings.language, R.string.save_timelapse_message)
+    val saveText = localizedString(gameSettings.language, R.string.save)
+    val dontSaveText = localizedString(gameSettings.language, R.string.dont_save)
 
     val keepScreenOn = gameState == GameState.WaitingForStabilization ||
         gameState == GameState.StartingDelay ||
@@ -188,6 +200,26 @@ fun CameraScreen(
     var landmarkerService by remember { mutableStateOf<PoseLandmarkerService?>(null) }
     var isDemoMode by rememberSaveable { mutableStateOf(false) }
     var demoBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    val saveTimelapseLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("video/mp4")
+    ) { uri ->
+        val file = pendingTimelapseFile
+        if (uri != null && file != null) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    file.inputStream().use { input ->
+                        input.copyTo(output)
+                    }
+                }
+            }.onFailure {
+                Log.e("CameraScreen", "Failed to save timelapse", it)
+                Toast.makeText(context, timelapseSaveErrorText, Toast.LENGTH_SHORT).show()
+            }
+        }
+        file?.delete()
+        pendingTimelapseFile = null
+    }
+
     val demoImagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -216,6 +248,9 @@ fun CameraScreen(
         onDispose {
             cameraExecutor.shutdown()
             landmarkerService?.close()
+            pendingTimelapseFile?.delete()
+            pendingTimelapseFile = null
+            timelapseRecorder.release()
         }
     }
 
@@ -240,6 +275,25 @@ fun CameraScreen(
                 )
             }
             delay(250L)
+        }
+    }
+
+    LaunchedEffect(gameState) {
+        when (gameState) {
+            GameState.HoldingPose -> timelapseRecorder.start(SystemClock.elapsedRealtime())
+            GameState.Success, GameState.Failed -> {
+                val file = withContext(Dispatchers.IO) { timelapseRecorder.stop() }
+                if (file != null && file.exists() && file.length() > 0L) {
+                    pendingTimelapseFile?.delete()
+                    pendingTimelapseFile = file
+                }
+            }
+            GameState.Idle -> {
+                timelapseRecorder.discard()
+                pendingTimelapseFile?.delete()
+                pendingTimelapseFile = null
+            }
+            else -> Unit
         }
     }
 
@@ -340,6 +394,12 @@ fun CameraScreen(
                                         landmarkerService = landmarkerService,
                                         timestampMs = timestampMs
                                     )
+                                    if (currentGameState.value == GameState.HoldingPose) {
+                                        timelapseRecorder.offerFrame(
+                                            bitmap = analysisBitmap,
+                                            timestampMs = timestampMs
+                                        )
+                                    }
                                 } catch (e: Exception) {
                                     Log.e("CameraScreen", "Frame analysis failed", e)
                                 } finally {
@@ -410,6 +470,32 @@ fun CameraScreen(
                     modifier = Modifier.matchParentSize()
                 )
             }
+        }
+
+        if (pendingTimelapseFile != null) {
+            AlertDialog(
+                onDismissRequest = {
+                    pendingTimelapseFile?.delete()
+                    pendingTimelapseFile = null
+                },
+                title = { Text(saveTimelapseTitleText) },
+                text = { Text(saveTimelapseMessageText) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            saveTimelapseLauncher.launch("pose_timelapse_${System.currentTimeMillis()}.mp4")
+                        }
+                    ) { Text(saveText) }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            pendingTimelapseFile?.delete()
+                            pendingTimelapseFile = null
+                        }
+                    ) { Text(dontSaveText) }
+                }
+            )
         }
 
         // 3. Bottom Controls HUD
