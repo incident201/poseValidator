@@ -290,8 +290,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _driftThreshold.value = movementTracker.driftThresholdFactor * scale
         _motionThreshold.value = movementTracker.motionThresholdFactor * scale
 
-        movementTracker.referencePose?.let { _driftScore.value = calculateSingleDisplacement(pose, it) }
-        movementTracker.previousPose?.let { _motionScore.value = calculateSingleDisplacement(pose, it) }
+        movementTracker.referencePose?.let { _driftScore.value = movementTracker.calculateDisplacement(pose, it) }
+        movementTracker.previousPose?.let { _motionScore.value = movementTracker.calculateDisplacement(pose, it) }
         val violation = movementTracker.trackFrame(pose, timestamp)
 
         when (violation) {
@@ -570,24 +570,5 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _driftScore.value = 0f; _motionScore.value = 0f; _timerSeconds.value = _selectedDurationSeconds.value; movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }
     override fun onCleared() { sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; faceDetectorService.close(); super.onCleared() }
-    private fun calculateSingleDisplacement(p1: PoseLandmarks, p2: PoseLandmarks): Float {
-        var total = 0f
-        var count = 0
-        fun add(a: Point3D?, b: Point3D?) {
-            if (a != null && b != null) {
-                total += a.distanceTo(b)
-                count++
-            }
-        }
-        add(p1.leftShoulder, p2.leftShoulder)
-        add(p1.rightShoulder, p2.rightShoulder)
-        add(p1.leftElbow, p2.leftElbow)
-        add(p1.rightElbow, p2.rightElbow)
-        add(p1.leftHip, p2.leftHip)
-        add(p1.rightHip, p2.rightHip)
-        add(p1.leftKnee, p2.leftKnee)
-        add(p1.rightKnee, p2.rightKnee)
-        return if (count > 0) total / count else 0f
-    }
     private fun formatTime(seconds: Int): String = String.format("%02d:%02d", seconds / 60, seconds % 60)
 }
