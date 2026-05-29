@@ -17,6 +17,7 @@
     <string name="language">Язык</string>
     <string name="duration_minutes">Длительность (минуты)</string>
     <string name="increase">Увеличить</string>
+    <string name="decrease">Уменьшить</string>
     <string name="start">СТАРТ</string>
     <string name="stop">СТОП</string>
     <string name="status_initial">Поставь телефон и встань в позу</string>

@@ -29,9 +29,12 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -41,6 +44,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size as ComposeSize
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -350,7 +354,8 @@ fun CameraScreen(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(start = 12.dp, end = 12.dp, bottom = 8.dp)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+                .padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 8.dp)
                 .clip(RoundedCornerShape(32.dp))
                 .background(Color.Black)
                 .testTag("camera_preview_container")
@@ -935,13 +940,12 @@ fun BottomHUDEngine(
                     horizontalArrangement = Arrangement.Center
                 ) {
                     if (canStart) {
-                        OutlinedIconButton(
-                            onClick = { onDurationChanged((selectedMinutes - 1).coerceAtLeast(1)) },
+                        TimerStepButton(
+                            icon = Icons.Default.Remove,
                             enabled = selectedMinutes > 1,
-                            modifier = Modifier.size(42.dp)
-                        ) {
-                            Text("−", fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                        }
+                            contentDescription = localizedString(language, R.string.decrease),
+                            onClick = { onDurationChanged((selectedMinutes - 1).coerceAtLeast(1)) }
+                        )
                     }
 
                     Column(
@@ -969,13 +973,12 @@ fun BottomHUDEngine(
                     }
 
                     if (canStart) {
-                        OutlinedIconButton(
-                            onClick = { onDurationChanged((selectedMinutes + 1).coerceAtMost(120)) },
+                        TimerStepButton(
+                            icon = Icons.Default.Add,
                             enabled = selectedMinutes < 120,
-                            modifier = Modifier.size(42.dp)
-                        ) {
-                            Text("+", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        }
+                            contentDescription = localizedString(language, R.string.increase),
+                            onClick = { onDurationChanged((selectedMinutes + 1).coerceAtMost(120)) }
+                        )
                     }
                 }
 
@@ -1034,6 +1037,31 @@ fun BottomHUDEngine(
     }
 }
 
+@Composable
+private fun TimerStepButton(
+    icon: ImageVector,
+    enabled: Boolean,
+    contentDescription: String,
+    onClick: () -> Unit
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(44.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            modifier = Modifier.size(24.dp),
+            tint = if (enabled) {
+                colorScheme.primary
+            } else {
+                colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+            }
+        )
+    }
+}
 
 private fun saveTimelapseToMediaStore(
     context: Context,
