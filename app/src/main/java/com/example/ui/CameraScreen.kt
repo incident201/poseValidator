@@ -77,6 +77,7 @@ import com.example.viewmodel.AppLanguage
 import com.example.viewmodel.GameSettings
 import com.example.viewmodel.GameState
 import com.example.viewmodel.GameViewModel
+import com.example.viewmodel.MovementGaugeState
 import com.example.viewmodel.PoseOverlayState
 import com.example.video.TimelapseRecorder
 import com.example.R
@@ -154,10 +155,7 @@ fun CameraScreen(
     val selectedDurationSeconds by viewModel.selectedDurationSeconds.collectAsState()
     val startDelayRemainingSeconds by viewModel.startDelayRemainingSeconds.collectAsState()
     val poseOverlayState by viewModel.poseOverlayState.collectAsState()
-    val driftScore by viewModel.driftScore.collectAsState()
-    val motionScore by viewModel.motionScore.collectAsState()
-    val driftThreshold by viewModel.driftThreshold.collectAsState()
-    val motionThreshold by viewModel.motionThreshold.collectAsState()
+    val movementGaugeState by viewModel.movementGaugeState.collectAsState()
     VoiceAnnouncer(viewModel = viewModel, language = gameSettings.language)
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val canOpenSettings = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
@@ -474,17 +472,17 @@ fun CameraScreen(
                 )
             }
 
-            MovementGaugeOverlay(
-                driftScore = driftScore,
-                driftThreshold = driftThreshold,
-                motionScore = motionScore,
-                motionThreshold = motionThreshold,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 12.dp)
-                    .zIndex(1f)
-            )
+            if (movementGaugeState.active) {
+                MovementGaugeOverlay(
+                    state = movementGaugeState,
+                    language = gameSettings.language,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 12.dp)
+                        .zIndex(1f)
+                )
+            }
         }
 
         if (pendingTimelapseFile != null) {
@@ -543,10 +541,8 @@ fun CameraScreen(
 
 @Composable
 private fun MovementGaugeOverlay(
-    driftScore: Float,
-    driftThreshold: Float,
-    motionScore: Float,
-    motionThreshold: Float,
+    state: MovementGaugeState,
+    language: AppLanguage,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -557,15 +553,15 @@ private fun MovementGaugeOverlay(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         MovementGaugeRow(
-            label = "Drift",
-            value = driftScore,
-            threshold = driftThreshold,
+            label = localizedString(language, R.string.movement_gauge_drift),
+            value = state.driftScore,
+            threshold = state.driftThreshold,
             color = DarkPrimary
         )
         MovementGaugeRow(
-            label = "Motion",
-            value = motionScore,
-            threshold = motionThreshold,
+            label = localizedString(language, R.string.movement_gauge_motion),
+            value = state.motionScore,
+            threshold = state.motionThreshold,
             color = AccentGreen
         )
     }
@@ -594,7 +590,7 @@ private fun MovementGaugeRow(
             color = Color.White.copy(alpha = 0.9f),
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.width(52.dp)
+            modifier = Modifier.width(68.dp)
         )
         LinearProgressIndicator(
             progress = { progress },
@@ -606,13 +602,13 @@ private fun MovementGaugeRow(
             trackColor = Color.White.copy(alpha = 0.18f)
         )
         Text(
-            text = "%.3f".format(value),
+            text = String.format(Locale.US, "%.3f / %.3f", value, threshold),
             color = gaugeColor,
             fontSize = 11.sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.End,
-            modifier = Modifier.width(54.dp)
+            modifier = Modifier.width(104.dp)
         )
     }
 }

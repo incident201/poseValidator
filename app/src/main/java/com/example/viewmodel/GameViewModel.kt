@@ -88,6 +88,14 @@ data class PoseOverlayState(
 
 data class PoseOverlayRect(val left: Float, val top: Float, val right: Float, val bottom: Float)
 
+data class MovementGaugeState(
+    val active: Boolean = false,
+    val driftScore: Float = 0f,
+    val driftThreshold: Float = 0f,
+    val motionScore: Float = 0f,
+    val motionThreshold: Float = 0f
+)
+
 class GameViewModel(application: Application) : AndroidViewModel(application), SensorEventListener {
     private val tag = "GameViewModel"
     private val minimumDurationSeconds = 180
@@ -116,14 +124,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
     private val _defeatReason = MutableStateFlow("")
     val defeatReason: StateFlow<String> = _defeatReason.asStateFlow()
-    private val _driftScore = MutableStateFlow(0f)
-    val driftScore: StateFlow<Float> = _driftScore.asStateFlow()
-    private val _motionScore = MutableStateFlow(0f)
-    val motionScore: StateFlow<Float> = _motionScore.asStateFlow()
-    private val _driftThreshold = MutableStateFlow(0.075f)
-    val driftThreshold: StateFlow<Float> = _driftThreshold.asStateFlow()
-    private val _motionThreshold = MutableStateFlow(0.054f)
-    val motionThreshold: StateFlow<Float> = _motionThreshold.asStateFlow()
+    private val _movementGaugeState = MutableStateFlow(MovementGaugeState())
+    val movementGaugeState: StateFlow<MovementGaugeState> = _movementGaugeState.asStateFlow()
     private val _startDelayRemainingSeconds = MutableStateFlow(0)
     val startDelayRemainingSeconds: StateFlow<Int> = _startDelayRemainingSeconds.asStateFlow()
     private val _poseOverlayState = MutableStateFlow(PoseOverlayState())
@@ -287,11 +289,17 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         if (_gameState.value != GameState.HoldingPose) return
 
         val scale = pose.getBodyScale()
-        _driftThreshold.value = movementTracker.driftThresholdFactor * scale
-        _motionThreshold.value = movementTracker.motionThresholdFactor * scale
-
-        movementTracker.referencePose?.let { _driftScore.value = movementTracker.calculateDisplacement(pose, it) }
-        movementTracker.previousPose?.let { _motionScore.value = movementTracker.calculateDisplacement(pose, it) }
+        val driftThreshold = movementTracker.driftThresholdFactor * scale
+        val motionThreshold = movementTracker.motionThresholdFactor * scale
+        val driftScore = movementTracker.referencePose?.let { movementTracker.calculateDisplacement(pose, it) } ?: 0f
+        val motionScore = movementTracker.previousPose?.let { movementTracker.calculateDisplacement(pose, it) } ?: 0f
+        _movementGaugeState.value = MovementGaugeState(
+            active = true,
+            driftScore = driftScore,
+            driftThreshold = driftThreshold,
+            motionScore = motionScore,
+            motionThreshold = motionThreshold
+        )
         val violation = movementTracker.trackFrame(pose, timestamp)
 
         when (violation) {
@@ -470,6 +478,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             }
             if (_gameState.value == GameState.HoldingPose && _timerSeconds.value <= 0) {
                 _gameState.value = GameState.Success
+                resetMovementGaugeState()
                 _statusMessage.value = tr(R.string.victory)
                 speak(tr(R.string.time_is_up))
             }
@@ -480,8 +489,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         if (_gameState.value != GameState.Idle && _gameState.value != GameState.Failed && _gameState.value != GameState.Success) return
 
         _defeatReason.value = ""
-        _driftScore.value = 0f
-        _motionScore.value = 0f
+        resetMovementGaugeState()
         _startDelayRemainingSeconds.value = 0
         movementTracker.reset()
         violationCount = 0
@@ -565,10 +573,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
-    fun triggerDefeat(reason: String, voiceMessage: String = tr(R.string.defeat_try_again)) { val alreadyFailed = _gameState.value == GameState.Failed; startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; _gameState.value = GameState.Failed; _defeatReason.value = reason; _statusMessage.value = tr(R.string.check_failed); if (!alreadyFailed) speak(voiceMessage) }
+    private fun resetMovementGaugeState() { _movementGaugeState.value = MovementGaugeState() }
+
+    fun triggerDefeat(reason: String, voiceMessage: String = tr(R.string.defeat_try_again)) { val alreadyFailed = _gameState.value == GameState.Failed; startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; resetMovementGaugeState(); _gameState.value = GameState.Failed; _defeatReason.value = reason; _statusMessage.value = tr(R.string.check_failed); if (!alreadyFailed) speak(voiceMessage) }
     private fun speak(text: String) { _voiceEvents.tryEmit(text) }
 
-    fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _driftScore.value = 0f; _motionScore.value = 0f; _timerSeconds.value = _selectedDurationSeconds.value; movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }
+    fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; resetMovementGaugeState(); _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _timerSeconds.value = _selectedDurationSeconds.value; movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }
     override fun onCleared() { sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; faceDetectorService.close(); super.onCleared() }
     private fun formatTime(seconds: Int): String = String.format("%02d:%02d", seconds / 60, seconds % 60)
 }
