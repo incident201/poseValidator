@@ -118,7 +118,7 @@ class TimelapseRecorder(
                 var frameWithTimer: Bitmap? = null
                 try {
                     synchronized(lock) {
-                        if (!isRecording || isReleased || recordingGeneration != frameGeneration) {
+                        if (isReleased || recordingGeneration != frameGeneration) {
                             return@execute
                         }
                     }
@@ -161,7 +161,6 @@ class TimelapseRecorder(
         withContext(Dispatchers.IO) {
             val (stopGeneration, wasRecording) = synchronized(lock) {
                 val value = isRecording
-                recordingGeneration += 1
                 isRecording = false
                 recordingGeneration to value
             }

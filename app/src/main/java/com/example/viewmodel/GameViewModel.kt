@@ -289,16 +289,35 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     fun registerCameraFrame(bitmap: Bitmap, timestampMs: Long) {
-        val replacedBitmap = synchronized(frameLock) {
+        val removedBitmaps = mutableListOf<Bitmap>()
+        synchronized(frameLock) {
             val previous = pendingFrames.put(timestampMs, bitmap)
-            while (pendingFrames.size > 20) pendingFrames.remove(pendingFrames.keys.first())
+            if (previous != null && previous !== bitmap) {
+                removedBitmaps.add(previous)
+            }
+
+            while (pendingFrames.size > 20) {
+                val oldestTimestamp = pendingFrames.keys.first()
+                val removed = pendingFrames.remove(oldestTimestamp)
+                if (removed != null && removed !== bitmap) {
+                    removedBitmaps.add(removed)
+                }
+            }
+
             val minTs = timestampMs - 3000
-            pendingFrames.keys.iterator().apply { while (hasNext()) if (next() < minTs) remove() }
-            previous
+            val iterator = pendingFrames.entries.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                if (entry.key < minTs) {
+                    val removed = entry.value
+                    iterator.remove()
+                    if (removed !== bitmap) {
+                        removedBitmaps.add(removed)
+                    }
+                }
+            }
         }
-        if (replacedBitmap != null && replacedBitmap !== bitmap) {
-            replacedBitmap.recycleIfNeeded()
-        }
+        removedBitmaps.forEach { it.recycleIfNeeded() }
     }
 
     fun dropCameraFrame(timestampMs: Long, recycle: Boolean) {
