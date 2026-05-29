@@ -349,7 +349,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private fun handleRuleViolation(type: RuleViolationType, pose: PoseLandmarks): Boolean {
         val now = System.currentTimeMillis()
         if (lastPenaltyAtMs > 0L && now - lastPenaltyAtMs < _gameSettings.value.minimumPenaltyIntervalSeconds * 1000L) {
-            if (_gameState.value == GameState.HoldingPose) movementTracker.startTracking(pose)
             return false
         }
 
@@ -369,7 +368,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
         applyPenalty(type, penaltyMinutesForViolation(violationCount))
         lastPenaltyAtMs = now
-        if (_gameState.value == GameState.HoldingPose) movementTracker.startTracking(pose)
         return false
     }
 
