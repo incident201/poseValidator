@@ -23,6 +23,7 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 
 class TimelapseRecorder(
@@ -35,6 +36,8 @@ class TimelapseRecorder(
     private val lock = Any()
     private val stopMutex = Mutex()
     private val frameExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    @Volatile private var isReleased = false
+    private var recordingGeneration = 0L
 
     private var recordingStartTimestampMs: Long = 0L
     private var timerStartTimestampMs: Long? = null
@@ -54,18 +57,30 @@ class TimelapseRecorder(
 
     fun start(startTimestampMs: Long) {
         synchronized(lock) {
-            discardInternalLocked()
-            this.recordingStartTimestampMs = startTimestampMs
-            this.timerStartTimestampMs = null
+            if (isReleased) return
+            recordingGeneration += 1
+            isRecording = false
+            recordingStartTimestampMs = startTimestampMs
+            timerStartTimestampMs = null
             nextCaptureTimestampMs = startTimestampMs
-            videoWidth = 0
-            videoHeight = 0
-            outputFile = null
-            muxerTrackIndex = -1
-            muxerStarted = false
-            lastPresentationTimeUs = -1L
-            hadEncodingError = false
-            isRecording = true
+            val startGeneration = recordingGeneration
+            try {
+                frameExecutor.execute {
+                    releaseCodecResources(deleteTempFile = true)
+                    hadEncodingError = false
+                    videoWidth = 0
+                    videoHeight = 0
+                    outputFile = null
+                }
+                if (!isReleased && recordingGeneration == startGeneration) {
+                    isRecording = true
+                }
+            } catch (e: RejectedExecutionException) {
+                Log.w(TAG, "Ignoring timelapse start after executor shutdown", e)
+                if (recordingGeneration == startGeneration) {
+                    isRecording = false
+                }
+            }
         }
     }
 
@@ -79,91 +94,131 @@ class TimelapseRecorder(
     }
 
     fun offerFrame(bitmap: Bitmap, timestampMs: Long) {
-        if (!isRecording) return
-        synchronized(lock) {
-            if (!isRecording) return
+        if (isReleased || !isRecording) return
+        val (recordingStartSnapshot, frameGeneration) = synchronized(lock) {
+            if (isReleased || !isRecording) return
             if (timestampMs < nextCaptureTimestampMs) return
             nextCaptureTimestampMs = timestampMs + CAPTURE_INTERVAL_MS
+            recordingStartTimestampMs to recordingGeneration
         }
 
-        frameExecutor.execute {
-            try {
-                if (!isRecording) return@execute
-                val recordingElapsedMs = (timestampMs - recordingStartTimestampMs).coerceAtLeast(0L)
-                val timerElapsedMs = synchronized(lock) {
-                    timerStartTimestampMs
-                }?.let { timerStart ->
-                    (timestampMs - timerStart).coerceAtLeast(0L)
-                } ?: 0L
-                ensureEncoder(bitmap)
-                synchronized(lock) {
+        val ownedBitmap = try {
+            bitmap.copy(Bitmap.Config.ARGB_8888, false)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to copy timelapse frame", t)
+            return
+        }
+
+        try {
+            frameExecutor.execute {
+                var frameWithTimer: Bitmap? = null
+                try {
+                    synchronized(lock) {
+                        if (isReleased || recordingGeneration != frameGeneration) {
+                            return@execute
+                        }
+                    }
+                    val recordingElapsedMs = (timestampMs - recordingStartSnapshot).coerceAtLeast(0L)
+                    val timerElapsedMs = synchronized(lock) {
+                        timerStartTimestampMs
+                    }?.let { timerStart ->
+                        (timestampMs - timerStart).coerceAtLeast(0L)
+                    } ?: 0L
+                    ensureEncoder(ownedBitmap)
                     pendingPresentationTimesUs.addLast((recordingElapsedMs * 1000L) / SPEED_FACTOR)
+                    frameWithTimer = drawElapsedTimer(ownedBitmap, timerElapsedMs)
+                    renderFrameToSurface(frameWithTimer)
+                    drainEncoder(endOfStream = false)
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Failed to encode timelapse frame", t)
+                    synchronized(lock) {
+                        if (recordingGeneration == frameGeneration) {
+                            hadEncodingError = true
+                            isRecording = false
+                        }
+                    }
+                    releaseCodecResources(deleteTempFile = true)
+                } finally {
+                    frameWithTimer?.recycleIfNeeded()
+                    ownedBitmap.recycleIfNeeded()
                 }
-                val frame = drawElapsedTimer(bitmap, timerElapsedMs)
-                renderFrameToSurface(frame)
-                frame.recycle()
-                drainEncoder(endOfStream = false)
-            } catch (t: Throwable) {
-                Log.e(TAG, "Failed to encode timelapse frame", t)
-                synchronized(lock) {
-                    hadEncodingError = true
-                    isRecording = false
-                }
-                releaseCodecResources(deleteTempFile = true)
+            }
+        } catch (t: Throwable) {
+            ownedBitmap.recycleIfNeeded()
+            if (t is RejectedExecutionException) {
+                Log.w(TAG, "Ignoring timelapse frame after executor shutdown", t)
+            } else {
+                Log.e(TAG, "Failed to enqueue timelapse frame", t)
             }
         }
     }
 
     suspend fun stop(): File? = stopMutex.withLock {
         withContext(Dispatchers.IO) {
-            val wasRecording = synchronized(lock) {
+            val (stopGeneration, wasRecording) = synchronized(lock) {
                 val value = isRecording
                 isRecording = false
-                value
-            }
-
-            if (!wasRecording) {
-                return@withContext outputFile?.takeIf { it.exists() && it.length() > 0L }
+                recordingGeneration to value
             }
 
             try {
-                frameExecutor.submit {
-                    try {
-                        if (inputSurface != null) {
-                            encoder?.signalEndOfInputStream()
-                            drainEncoder(endOfStream = true)
+                frameExecutor.submit<File?> {
+                    if (synchronized(lock) { recordingGeneration != stopGeneration }) {
+                        return@submit null
+                    }
+                    if (!wasRecording) {
+                        outputFile?.takeIf { it.exists() && it.length() > 0L }
+                    } else {
+                        try {
+                            if (inputSurface != null) {
+                                encoder?.signalEndOfInputStream()
+                                drainEncoder(endOfStream = true)
+                            }
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "Failed to finalize timelapse", t)
+                            hadEncodingError = true
+                        } finally {
+                            releaseCodecResources(deleteTempFile = hadEncodingError)
                         }
-                    } catch (t: Throwable) {
-                        Log.e(TAG, "Failed to finalize timelapse", t)
-                        hadEncodingError = true
-                    } finally {
-                        releaseCodecResources(deleteTempFile = hadEncodingError)
+                        outputFile?.takeIf { !hadEncodingError && it.exists() && it.length() > 0L }
                     }
                 }.get()
-                outputFile?.takeIf { !hadEncodingError && it.exists() && it.length() > 0L }
             } catch (t: Throwable) {
                 Log.e(TAG, "Failed to stop timelapse recorder", t)
-                hadEncodingError = true
-                releaseCodecResources(deleteTempFile = true)
                 null
             }
         }
     }
 
     fun discard() {
-        synchronized(lock) { isRecording = false }
-        frameExecutor.execute { releaseCodecResources(deleteTempFile = true) }
+        val discardGeneration = synchronized(lock) {
+            recordingGeneration += 1
+            isRecording = false
+            recordingGeneration
+        }
+        try {
+            frameExecutor.execute {
+                if (synchronized(lock) { recordingGeneration == discardGeneration }) {
+                    releaseCodecResources(deleteTempFile = true)
+                }
+            }
+        } catch (e: RejectedExecutionException) {
+            Log.w(TAG, "Ignoring timelapse discard after executor shutdown", e)
+        }
     }
 
     fun release() {
-        synchronized(lock) { isRecording = false }
+        synchronized(lock) {
+            recordingGeneration += 1
+            isRecording = false
+            isReleased = true
+        }
         runCatching {
             frameExecutor.submit {
                 releaseCodecResources(deleteTempFile = true)
             }.get()
         }.onFailure {
-            Log.e(TAG, "Failed to release on executor thread", it)
-            releaseCodecResources(deleteTempFile = true)
+            Log.w(TAG, "Failed to release on executor thread", it)
         }
         frameExecutor.shutdown()
         runCatching { frameExecutor.awaitTermination(2, TimeUnit.SECONDS) }
@@ -288,8 +343,10 @@ class TimelapseRecorder(
                         outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
 
                         val minFrameStepUs = 1_000_000L / OUTPUT_FPS
-                        val queuedPtsUs = synchronized(lock) {
-                            if (pendingPresentationTimesUs.isEmpty()) null else pendingPresentationTimesUs.removeFirst()
+                        val queuedPtsUs = if (pendingPresentationTimesUs.isEmpty()) {
+                            null
+                        } else {
+                            pendingPresentationTimesUs.removeFirst()
                         } ?: bufferInfo.presentationTimeUs
                         val adjustedPtsUs = when {
                             lastPresentationTimeUs < 0L -> queuedPtsUs
@@ -312,12 +369,6 @@ class TimelapseRecorder(
         }
     }
 
-    private fun discardInternalLocked() {
-        isRecording = false
-        hadEncodingError = false
-        releaseCodecResources(deleteTempFile = true)
-    }
-
     private fun releaseCodecResources(deleteTempFile: Boolean) {
         runCatching { encoder?.stop() }
         runCatching { encoder?.release() }
@@ -334,7 +385,7 @@ class TimelapseRecorder(
         muxerTrackIndex = -1
         muxerStarted = false
         lastPresentationTimeUs = -1L
-        synchronized(lock) { pendingPresentationTimesUs.clear() }
+        pendingPresentationTimesUs.clear()
 
         if (deleteTempFile) {
             outputFile?.delete()
@@ -355,4 +406,8 @@ class TimelapseRecorder(
         private const val I_FRAME_INTERVAL_SEC = 1
         private const val DRAIN_TIMEOUT_US = 10_000L
     }
+}
+
+private fun Bitmap.recycleIfNeeded() {
+    if (!isRecycled) recycle()
 }

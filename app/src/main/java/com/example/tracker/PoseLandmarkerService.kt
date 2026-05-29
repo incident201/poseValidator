@@ -13,6 +13,8 @@ class PoseLandmarkerService(
     private val listener: LandmarkerListener
 ) {
     private val TAG = "PoseLandmarkerService"
+    private val lifecycleLock = Any()
+    @Volatile private var isClosed = false
     private var poseLandmarker: PoseLandmarker? = null
 
     interface LandmarkerListener {
@@ -39,44 +41,55 @@ class PoseLandmarkerService(
                 .setBaseOptions(baseOptions)
                 .setRunningMode(RunningMode.LIVE_STREAM)
                 .setResultListener { result, image ->
-                    processResult(result, image.width, image.height, result.timestampMs())
+                    if (!isClosed) {
+                        processResult(result, image.width, image.height, result.timestampMs())
+                    }
                 }
                 .setErrorListener { error ->
                     Log.e(TAG, "MediaPipe error: ${error.message}")
-                    listener.onError(error.message ?: "Unknown MediaPipe error")
+                    deliverError(error.message ?: "Unknown MediaPipe error")
                 }
                 .build()
 
-            poseLandmarker = PoseLandmarker.createFromOptions(context, options)
+            synchronized(lifecycleLock) {
+                if (isClosed) return
+                poseLandmarker = PoseLandmarker.createFromOptions(context, options)
+            }
             Log.i(TAG, "MediaPipe Pose Landmarker loaded successfully from assets")
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to initialize MediaPipe Pose Landmarker", t)
-            listener.onError(t.message ?: "Failed to initialize MediaPipe")
+            deliverError(t.message ?: "Failed to initialize MediaPipe")
         }
     }
 
-    fun detectLiveStreamFrame(bitmap: Bitmap, timestamp: Long) {
-        val landmarker = poseLandmarker ?: return
+    fun detectLiveStreamFrame(bitmap: Bitmap, timestamp: Long): Boolean {
+        return synchronized(lifecycleLock) {
+            if (isClosed) return@synchronized false
+            val landmarker = poseLandmarker ?: return@synchronized false
 
-        try {
-            val mpImage = com.google.mediapipe.framework.image.BitmapImageBuilder(bitmap).build()
-            landmarker.detectAsync(mpImage, timestamp)
-        } catch (t: Throwable) {
-            Log.e(TAG, "Error in detectLiveStreamFrame", t)
-            listener.onError(t.message ?: "MediaPipe detect error")
+            try {
+                val mpImage = com.google.mediapipe.framework.image.BitmapImageBuilder(bitmap).build()
+                landmarker.detectAsync(mpImage, timestamp)
+                true
+            } catch (t: Throwable) {
+                Log.e(TAG, "Error in detectLiveStreamFrame", t)
+                deliverError(t.message ?: "MediaPipe detect error")
+                false
+            }
         }
     }
 
     private fun processResult(result: PoseLandmarkerResult, width: Int, height: Int, timestampMs: Long) {
+        if (isClosed) return
         val landmarksList = result.landmarks()
         if (landmarksList.isNullOrEmpty()) {
-            listener.onResults(PoseLandmarks(), width, height, timestampMs)
+            deliverResults(PoseLandmarks(), width, height, timestampMs)
             return
         }
 
         val firstLandmarks = landmarksList[0]
         if (firstLandmarks.size < 33) {
-            listener.onResults(PoseLandmarks(), width, height, timestampMs)
+            deliverResults(PoseLandmarks(), width, height, timestampMs)
             return
         }
 
@@ -97,10 +110,33 @@ class PoseLandmarkerService(
             allLandmarks = allLandmarks
         )
 
-        listener.onResults(pose, width, height, timestampMs)
+        deliverResults(pose, width, height, timestampMs)
+    }
+
+    private fun deliverResults(pose: PoseLandmarks, width: Int, height: Int, timestampMs: Long) {
+        synchronized(lifecycleLock) {
+            if (!isClosed) {
+                listener.onResults(pose, width, height, timestampMs)
+            }
+        }
+    }
+
+    private fun deliverError(error: String) {
+        synchronized(lifecycleLock) {
+            if (!isClosed) {
+                listener.onError(error)
+            }
+        }
     }
 
     fun close() {
-        poseLandmarker?.close()
+        val landmarker = synchronized(lifecycleLock) {
+            if (isClosed && poseLandmarker == null) return
+            isClosed = true
+            val current = poseLandmarker
+            poseLandmarker = null
+            current
+        }
+        landmarker?.close()
     }
 }
