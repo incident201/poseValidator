@@ -288,6 +288,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
         if (_gameState.value != GameState.HoldingPose) return
 
+        if (!pose.hasEnoughKeypoints()) {
+            resetMovementGaugeState()
+            val violation = movementTracker.trackFrame(pose, timestamp)
+            if (handleMovementViolation(violation, pose)) return
+            processFaceRule(nextOverlayState.face.status, pose)
+            return
+        }
+
         val scale = pose.getBodyScale()
         val driftThreshold = movementTracker.driftThresholdFactor * scale
         val motionThreshold = movementTracker.motionThresholdFactor * scale
@@ -302,14 +310,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         )
         val violation = movementTracker.trackFrame(pose, timestamp)
 
-        when (violation) {
-            is MovementTracker.Violation.DriftLimitExceeded -> if (handleRuleViolation(RuleViolationType.Drift, pose)) return
-            is MovementTracker.Violation.MotionLimitExceeded -> if (handleRuleViolation(RuleViolationType.Motion, pose)) return
-            is MovementTracker.Violation.PersonDisappeared -> if (handleRuleViolation(RuleViolationType.PersonDisappeared, pose)) return
-            else -> Unit
-        }
+        if (handleMovementViolation(violation, pose)) return
 
         processFaceRule(nextOverlayState.face.status, pose)
+    }
+
+    private fun handleMovementViolation(violation: MovementTracker.Violation, pose: PoseLandmarks): Boolean {
+        return when (violation) {
+            is MovementTracker.Violation.DriftLimitExceeded -> handleRuleViolation(RuleViolationType.Drift, pose)
+            is MovementTracker.Violation.MotionLimitExceeded -> handleRuleViolation(RuleViolationType.Motion, pose)
+            is MovementTracker.Violation.PersonDisappeared -> handleRuleViolation(RuleViolationType.PersonDisappeared, pose)
+            else -> false
+        }
     }
 
     private fun processFaceRule(status: FaceDetectionStatus, pose: PoseLandmarks) {
