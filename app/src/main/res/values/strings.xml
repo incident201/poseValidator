@@ -17,6 +17,7 @@
     <string name="language">Language</string>
     <string name="duration_minutes">Duration (minutes)</string>
     <string name="increase">Increase</string>
+    <string name="decrease">Decrease</string>
     <string name="start">START</string>
     <string name="stop">STOP</string>
     <string name="status_initial">Set your phone and take the pose</string>
