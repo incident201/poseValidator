@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -43,9 +42,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size as ComposeSize
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathFillType
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -91,26 +87,6 @@ import kotlin.math.max
 
 private const val SHOW_POSE_DEBUG_OVERLAY = true
 private const val SHOW_POSE_DEBUG_POINTS = true
-
-private val TimerRemoveIcon: ImageVector = ImageVector.Builder(
-    name = "TimerRemove",
-    defaultWidth = 24.dp,
-    defaultHeight = 24.dp,
-    viewportWidth = 24f,
-    viewportHeight = 24f
-).apply {
-    path(
-        fill = SolidColor(Color.Black),
-        pathFillType = PathFillType.NonZero
-    ) {
-        moveTo(19f, 13f)
-        horizontalLineTo(5f)
-        verticalLineTo(11f)
-        horizontalLineTo(19f)
-        verticalLineTo(13f)
-        close()
-    }
-}.build()
 
 private val POSE_CONNECTIONS = listOf(
     11 to 12,
@@ -963,7 +939,7 @@ fun BottomHUDEngine(
                 ) {
                     if (canStart) {
                         TimerStepButton(
-                            icon = TimerRemoveIcon,
+                            symbol = "−",
                             enabled = selectedMinutes > 1,
                             contentDescription = localizedString(language, R.string.decrease),
                             onClick = { onDurationChanged((selectedMinutes - 1).coerceAtLeast(1)) }
@@ -996,7 +972,7 @@ fun BottomHUDEngine(
 
                     if (canStart) {
                         TimerStepButton(
-                            icon = Icons.Default.Add,
+                            symbol = "+",
                             enabled = selectedMinutes < 120,
                             contentDescription = localizedString(language, R.string.increase),
                             onClick = { onDurationChanged((selectedMinutes + 1).coerceAtMost(120)) }
@@ -1061,7 +1037,7 @@ fun BottomHUDEngine(
 
 @Composable
 private fun TimerStepButton(
-    icon: ImageVector,
+    symbol: String,
     enabled: Boolean,
     contentDescription: String,
     onClick: () -> Unit
@@ -1072,15 +1048,16 @@ private fun TimerStepButton(
         enabled = enabled,
         modifier = Modifier.size(44.dp)
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            modifier = Modifier.size(24.dp),
-            tint = if (enabled) {
+        Text(
+            text = symbol,
+            color = if (enabled) {
                 colorScheme.primary
             } else {
                 colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
-            }
+            },
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
         )
     }
 }
