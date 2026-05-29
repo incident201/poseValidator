@@ -5,9 +5,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.CameraScreen
@@ -21,11 +21,12 @@ class MainActivity : ComponentActivity() {
     setContent {
       MyApplicationTheme {
         val viewModel: GameViewModel = viewModel()
-        Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-          CameraScreen(
-            viewModel = viewModel,
-            modifier = Modifier.padding(innerPadding)
-          )
+        Scaffold(
+          modifier = Modifier.fillMaxSize(),
+          containerColor = MaterialTheme.colorScheme.background,
+          contentWindowInsets = WindowInsets(0, 0, 0, 0)
+        ) {
+          CameraScreen(viewModel = viewModel)
         }
       }
     }

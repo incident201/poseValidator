@@ -589,7 +589,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 if (_gameState.value != GameState.HoldingPose) return@launch
                 val next = (_timerSeconds.value - 1).coerceAtLeast(0)
                 _timerSeconds.value = next
-                _statusMessage.value = tr(R.string.remaining_time, formatTime(next))
             }
             if (_gameState.value == GameState.HoldingPose && _timerSeconds.value <= 0) {
                 _gameState.value = GameState.Success
@@ -603,6 +602,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     fun startSession() {
         if (_gameState.value != GameState.Idle && _gameState.value != GameState.Failed && _gameState.value != GameState.Success) return
 
+        _timerSeconds.value = _selectedDurationSeconds.value
         _defeatReason.value = ""
         resetMovementGaugeState()
         _startDelayRemainingSeconds.value = 0
@@ -656,7 +656,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 movementTracker.startTracking(initialPose)
             }
             _gameState.value = GameState.HoldingPose
-            _statusMessage.value = tr(R.string.remaining_time, formatTime(_timerSeconds.value))
+            _statusMessage.value = tr(R.string.time_started_hold_position)
             startTimerLoop()
             speak(tr(R.string.time_started_hold_position))
         }
@@ -702,7 +702,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset(); movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }; resetMovementGaugeState(); _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _timerSeconds.value = _selectedDurationSeconds.value }
     override fun onCleared() { isCleared = true; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
-    private fun formatTime(seconds: Int): String = String.format("%02d:%02d", seconds / 60, seconds % 60)
 }
 
 private fun Bitmap.recycleIfNeeded() {

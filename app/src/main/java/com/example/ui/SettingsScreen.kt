@@ -15,14 +15,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
-import com.example.ui.theme.DarkBg
-import com.example.ui.theme.DarkSurface
 import com.example.viewmodel.AppLanguage
 import com.example.viewmodel.FaceCheckMode
 import com.example.viewmodel.GameSettings
@@ -49,11 +46,13 @@ internal fun SettingsScreen(
         mutableFloatStateOf(settings.faceDetectionConfidence)
     }
 
+    val colorScheme = MaterialTheme.colorScheme
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(DarkBg)
-             .windowInsetsPadding(WindowInsets.statusBars)
+            .background(colorScheme.background)
+            .windowInsetsPadding(WindowInsets.statusBars)
             .windowInsetsPadding(WindowInsets.navigationBars)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 16.dp)
@@ -66,20 +65,20 @@ internal fun SettingsScreen(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = localizedString(settings.language, R.string.back),
-                    tint = Color.White
+                    tint = colorScheme.onBackground
                 )
             }
             Text(
                 localizedString(settings.language, R.string.settings),
-                color = Color.White,
+                color = colorScheme.onBackground,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold
             )
         }
         Spacer(Modifier.height(12.dp))
-        Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
+        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
             Column(Modifier.padding(16.dp)) {
-                Text(localizedString(settings.language, R.string.face_detection), color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text(localizedString(settings.language, R.string.face_detection), color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
                 listOf(
                     localizedString(settings.language, R.string.face_away) to FaceCheckMode.FaceAwayFromCamera,
                     localizedString(settings.language, R.string.face_to_camera) to FaceCheckMode.FaceToCamera,
@@ -87,15 +86,15 @@ internal fun SettingsScreen(
                 ).forEach { (label, mode) ->
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                         RadioButton(selected = settings.faceCheckMode == mode, onClick = { onFaceModeChanged(mode) })
-                        Text(label, color = Color.White)
+                        Text(label, color = colorScheme.onSurfaceVariant)
                     }
                 }
             }
         }
         Spacer(Modifier.height(12.dp))
-        Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
+        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
             Column(Modifier.padding(16.dp)) {
-                Text("${localizedString(settings.language, R.string.face_detection_threshold)}: ${"%.2f".format(faceConfidenceSlider)}", color = Color.White)
+                Text("${localizedString(settings.language, R.string.face_detection_threshold)}: ${"%.2f".format(faceConfidenceSlider)}", color = colorScheme.onSurfaceVariant)
                 Slider(
                     value = faceConfidenceSlider,
                     onValueChange = { faceConfidenceSlider = it.coerceIn(0.5f, 0.95f) },
@@ -105,9 +104,9 @@ internal fun SettingsScreen(
             }
         }
         Spacer(Modifier.height(12.dp))
-        Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
+        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
             Column(Modifier.padding(16.dp)) {
-                Text(localizedString(settings.language, R.string.maximum_violations), color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text(localizedString(settings.language, R.string.maximum_violations), color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
                 IntegerSettingField(
                     label = localizedString(settings.language, R.string.range_0_9999),
@@ -119,9 +118,9 @@ internal fun SettingsScreen(
             }
         }
         Spacer(Modifier.height(12.dp))
-        Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
+        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
             Column(Modifier.padding(16.dp)) {
-                Text(localizedString(settings.language, R.string.min_interval_errors), color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text(localizedString(settings.language, R.string.min_interval_errors), color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
                 IntegerSettingField(
                     label = localizedString(settings.language, R.string.seconds_0_30),
@@ -133,18 +132,18 @@ internal fun SettingsScreen(
             }
         }
         Spacer(Modifier.height(12.dp))
-        Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
+        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
             Column(Modifier.padding(16.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(localizedString(settings.language, R.string.penalty_for_violation), color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text(localizedString(settings.language, R.string.penalty_for_violation), color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             if (settings.penaltiesEnabled) localizedString(settings.language, R.string.on) else localizedString(settings.language, R.string.off),
-                            color = Color.White
+                            color = colorScheme.onSurfaceVariant
                         )
                         Spacer(Modifier.width(8.dp))
                         Switch(checked = settings.penaltiesEnabled, onCheckedChange = onPenaltiesEnabledChanged)
@@ -160,19 +159,19 @@ internal fun SettingsScreen(
             }
         }
         Spacer(Modifier.height(12.dp))
-        Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
+        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
             Column(Modifier.padding(16.dp)) {
-                Text(localizedString(settings.language, R.string.motion_reaction), color = Color.White, fontWeight = FontWeight.SemiBold)
-                Text("${localizedString(settings.language, R.string.drift_threshold)}: ${"%.2f".format(settings.driftThresholdFactor)}", color = Color.White)
+                Text(localizedString(settings.language, R.string.motion_reaction), color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+                Text("${localizedString(settings.language, R.string.drift_threshold)}: ${"%.2f".format(settings.driftThresholdFactor)}", color = colorScheme.onSurfaceVariant)
                 Slider(value = settings.driftThresholdFactor, onValueChange = onDriftChanged, valueRange = 0.05f..0.40f)
-                Text("${localizedString(settings.language, R.string.abrupt_motion_threshold)}: ${"%.2f".format(settings.motionThresholdFactor)}", color = Color.White)
+                Text("${localizedString(settings.language, R.string.abrupt_motion_threshold)}: ${"%.2f".format(settings.motionThresholdFactor)}", color = colorScheme.onSurfaceVariant)
                 Slider(value = settings.motionThresholdFactor, onValueChange = onMotionChanged, valueRange = 0.03f..0.25f)
             }
         }
         Spacer(Modifier.height(12.dp))
-        Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
+        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
             Column(Modifier.padding(16.dp)) {
-                Text(localizedString(settings.language, R.string.language), color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text(localizedString(settings.language, R.string.language), color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
                 Row(
                     modifier = Modifier
@@ -185,7 +184,7 @@ internal fun SettingsScreen(
                     RadioButton(selected = settings.language == AppLanguage.English, onClick = { onLanguageChanged(AppLanguage.English) })
                     Text(
                         localizedString(settings.language, R.string.language_english),
-                        color = Color.White,
+                        color = colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -200,14 +199,14 @@ internal fun SettingsScreen(
                     RadioButton(selected = settings.language == AppLanguage.Russian, onClick = { onLanguageChanged(AppLanguage.Russian) })
                     Text(
                         localizedString(settings.language, R.string.language_russian),
-                        color = Color.White,
+                        color = colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f)
                     )
                 }
             }
         }
         Spacer(Modifier.height(12.dp))
-        Card(colors = CardDefaults.cardColors(containerColor = DarkSurface)) {
+        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
             Column(Modifier.padding(16.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -216,13 +215,13 @@ internal fun SettingsScreen(
                 ) {
                     Text(
                         localizedString(settings.language, R.string.record_timelapse_video),
-                        color = Color.White,
+                        color = colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             if (settings.timelapseRecordingEnabled) localizedString(settings.language, R.string.on) else localizedString(settings.language, R.string.off),
-                            color = Color.White
+                            color = colorScheme.onSurfaceVariant
                         )
                         Spacer(Modifier.width(8.dp))
                         Switch(

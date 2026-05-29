@@ -64,6 +64,7 @@
     <string name="failed">FAILED</string>
     <string name="reason">Reason</string>
     <string name="remaining">REMAINING</string>
+    <string name="duration">DURATION</string>
     <string name="demo">DEMO</string>
     <string name="language_english">English</string>
     <string name="language_russian">Русский</string>

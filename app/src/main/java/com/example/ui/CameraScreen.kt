@@ -13,7 +13,6 @@ import android.os.Environment
 import android.speech.tts.TextToSpeech
 import android.os.SystemClock
 import android.provider.MediaStore
-import android.graphics.Paint
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -26,31 +25,23 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size as ComposeSize
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
@@ -59,10 +50,8 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -70,11 +59,7 @@ import androidx.annotation.StringRes
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.tracker.PoseLandmarkerService
-import com.example.tracker.FaceDetectionStatus
-import com.example.ui.theme.*
-import com.example.viewmodel.FaceCheckMode
 import com.example.viewmodel.AppLanguage
-import com.example.viewmodel.GameSettings
 import com.example.viewmodel.GameState
 import com.example.viewmodel.GameViewModel
 import com.example.viewmodel.MovementGaugeState
@@ -358,8 +343,7 @@ fun CameraScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(DarkBg)
-            .windowInsetsPadding(WindowInsets.navigationBars)
+            .background(MaterialTheme.colorScheme.background)
     ) {
         // 2. Camera feed viewport with overlay graphics
         Box(
@@ -494,35 +478,6 @@ fun CameraScreen(
                 }
             }
 
-            FilledTonalButton(
-                onClick = {
-                    if (isDemoMode) {
-                        isDemoMode = false
-                    } else {
-                        demoImagePickerLauncher.launch("image/*")
-                    }
-                },
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(8.dp)
-                    .zIndex(1f),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Text(if (isDemoMode) localizedString(gameSettings.language, R.string.camera) else localizedString(gameSettings.language, R.string.demo))
-            }
-
-
-            FilledTonalIconButton(
-                onClick = { if (canOpenSettings) showSettings = true },
-                enabled = canOpenSettings,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(8.dp)
-                    .zIndex(1f)
-            ) {
-                Icon(Icons.Default.Settings, contentDescription = localizedString(gameSettings.language, R.string.settings))
-            }
-
             if (SHOW_POSE_DEBUG_OVERLAY) {
                 PoseDebugOverlay(
                     overlayState = poseOverlayState,
@@ -591,6 +546,16 @@ fun CameraScreen(
             selectedDurationSeconds = selectedDurationSeconds,
             startDelayRemainingSeconds = startDelayRemainingSeconds,
             onDurationChanged = { viewModel.updateSelectedDurationMinutes(it) },
+            isDemoMode = isDemoMode,
+            onDemoClick = {
+                if (isDemoMode) {
+                    isDemoMode = false
+                } else {
+                    demoImagePickerLauncher.launch("image/*")
+                }
+            },
+            canOpenSettings = canOpenSettings,
+            onSettingsClick = { if (canOpenSettings) showSettings = true },
             onStart = { viewModel.startSession() },
             onStop = { viewModel.stopSession() }
         )
@@ -603,10 +568,12 @@ private fun MovementGaugeOverlay(
     language: AppLanguage,
     modifier: Modifier = Modifier
 ) {
+    val colorScheme = MaterialTheme.colorScheme
+
     Column(
         modifier = modifier
-            .background(Color.Black.copy(alpha = 0.46f), RoundedCornerShape(20.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(20.dp))
+            .background(colorScheme.surface.copy(alpha = 0.78f), RoundedCornerShape(20.dp))
+            .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.45f), RoundedCornerShape(20.dp))
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -614,13 +581,13 @@ private fun MovementGaugeOverlay(
             label = localizedString(language, R.string.movement_gauge_drift),
             value = state.driftNormalizedScore,
             threshold = state.driftThresholdFactor,
-            color = DarkPrimary
+            color = colorScheme.primary
         )
         MovementGaugeRow(
             label = localizedString(language, R.string.movement_gauge_motion),
             value = state.motionNormalizedScore,
             threshold = state.motionThresholdFactor,
-            color = AccentGreen
+            color = colorScheme.tertiary
         )
     }
 }
@@ -633,10 +600,11 @@ private fun MovementGaugeRow(
     color: Color,
     modifier: Modifier = Modifier
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     val safeThreshold = max(threshold, 0.001f)
     val progress = (value / safeThreshold).coerceIn(0f, 1f)
     val isOverLimit = value > safeThreshold
-    val gaugeColor = if (isOverLimit) AccentRed else color
+    val gaugeColor = if (isOverLimit) colorScheme.error else color
 
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -645,7 +613,7 @@ private fun MovementGaugeRow(
     ) {
         Text(
             text = label,
-            color = Color.White.copy(alpha = 0.9f),
+            color = colorScheme.onSurface,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.width(68.dp)
@@ -657,7 +625,7 @@ private fun MovementGaugeRow(
                 .height(8.dp)
                 .clip(RoundedCornerShape(100.dp)),
             color = gaugeColor,
-            trackColor = Color.White.copy(alpha = 0.18f)
+            trackColor = colorScheme.surfaceVariant
         )
         Text(
             text = String.format(Locale.US, "%.3f / %.3f", value, threshold),
@@ -759,40 +727,6 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
         )
     }
 
-    val debugText = face.debugMessage.ifEmpty { "face=${face.status}" }
-    val debugColor = when (face.status) {
-        FaceDetectionStatus.FaceVisible -> android.graphics.Color.GREEN
-        FaceDetectionStatus.FaceNotVisible -> android.graphics.Color.YELLOW
-        FaceDetectionStatus.Error -> android.graphics.Color.RED
-        FaceDetectionStatus.NotProcessed -> android.graphics.Color.LTGRAY
-    }
-    val debugPaint = Paint().apply {
-        color = debugColor
-        textSize = 30f
-        isAntiAlias = true
-    }
-    val maxTextWidth = (size.width - 48f).coerceAtLeast(1f)
-    var lineY = 40f
-    var textStart = 0
-    while (textStart < debugText.length) {
-        val count = debugPaint.breakText(debugText, textStart, debugText.length, true, maxTextWidth, null)
-        if (count <= 0) break
-        val lineEnd = textStart + count
-        drawContext.canvas.nativeCanvas.drawText(
-            debugText,
-            textStart,
-            lineEnd,
-            24f,
-            lineY,
-            debugPaint
-        )
-        textStart = lineEnd
-        while (textStart < debugText.length && debugText[textStart].isWhitespace()) {
-            textStart += 1
-        }
-        lineY += debugPaint.fontSpacing
-    }
-
     if (!SHOW_POSE_DEBUG_POINTS) return
 
     POSE_CONNECTIONS.forEach { (startIndex, endIndex) ->
@@ -880,44 +814,6 @@ private fun VoiceAnnouncer(viewModel: GameViewModel, language: AppLanguage) {
 
 
 @Composable
-fun DurationPicker(selectedMinutes: Int, language: AppLanguage, onMinutesChanged: (Int) -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = localizedString(language, R.string.duration_minutes),
-            color = Color.White.copy(alpha = 0.9f),
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(DarkBg)
-                .border(1.dp, DarkSecondary, RoundedCornerShape(16.dp))
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = { onMinutesChanged((selectedMinutes - 1).coerceAtLeast(3)) }) {
-                Text("−", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-            }
-            Text(
-                text = "$selectedMinutes ${localizedString(language, R.string.min_short)}",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 20.sp,
-                modifier = Modifier.weight(1f),
-                textAlign = TextAlign.Center
-            )
-            IconButton(onClick = { onMinutesChanged((selectedMinutes + 1).coerceAtMost(120)) }) {
-                Icon(Icons.Default.Add, contentDescription = localizedString(language, R.string.increase), tint = Color.White)
-            }
-        }
-        Spacer(Modifier.height(20.dp))
-    }
-}
-
-@Composable
 fun BottomHUDEngine(
     language: AppLanguage,
     gameState: GameState,
@@ -927,125 +823,182 @@ fun BottomHUDEngine(
     selectedDurationSeconds: Int,
     startDelayRemainingSeconds: Int,
     onDurationChanged: (Int) -> Unit,
+    isDemoMode: Boolean,
+    onDemoClick: () -> Unit,
+    canOpenSettings: Boolean,
+    onSettingsClick: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     val canStart = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
+    val displaySeconds = if (canStart) selectedDurationSeconds else timerSeconds
+    val selectedMinutes = (selectedDurationSeconds / 60).coerceIn(3, 120)
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+            .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)),
+        colors = CardDefaults.cardColors(containerColor = colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(24.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Status/Instruction Box
-            Column(modifier = Modifier.fillMaxWidth()) {
-                val stateHeadline = when (gameState) {
-                    GameState.Idle -> localizedString(language, R.string.waiting_to_start)
-                    GameState.WaitingForStabilization -> localizedString(language, R.string.device_stabilization)
-                    GameState.StartingDelay -> "${localizedString(language, R.string.start_in)} ${startDelayRemainingSeconds}s"
-                    GameState.HoldingPose -> localizedString(language, R.string.holding_pose)
-                    GameState.Success -> localizedString(language, R.string.congrats_victory)
-                    GameState.Failed -> localizedString(language, R.string.failed)
-                }
-                val headlineColor = when (gameState) {
-                    GameState.Success -> AccentGreen
-                    GameState.Failed -> AccentRed
-                    else -> DarkPrimary
-                }
-
-                Text(
-                    text = stateHeadline,
-                    color = headlineColor,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.5.sp
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = statusMessage,
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Light,
-                    lineHeight = 24.sp
-                )
-                if (defeatReason.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "${localizedString(language, R.string.reason)}: $defeatReason",
-                        color = AccentRed.copy(alpha = 0.85f),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Normal
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            if (canStart) {
-                DurationPicker(selectedDurationSeconds / 60, language, onDurationChanged)
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-
-            // Timer & Action Button Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Timer styled box
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(80.dp)
-                        .background(DarkBg, RoundedCornerShape(24.dp))
-                        .border(1.dp, DarkSecondary, RoundedCornerShape(24.dp)),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    val stateHeadline = when (gameState) {
+                        GameState.Idle -> localizedString(language, R.string.waiting_to_start)
+                        GameState.WaitingForStabilization -> localizedString(language, R.string.device_stabilization)
+                        GameState.StartingDelay -> "${localizedString(language, R.string.start_in)} ${startDelayRemainingSeconds}s"
+                        GameState.HoldingPose -> localizedString(language, R.string.holding_pose)
+                        GameState.Success -> localizedString(language, R.string.congrats_victory)
+                        GameState.Failed -> localizedString(language, R.string.failed)
+                    }
+                    val headlineColor = when (gameState) {
+                        GameState.Success -> colorScheme.tertiary
+                        GameState.Failed -> colorScheme.error
+                        else -> colorScheme.primary
+                    }
+
                     Text(
-                        text = localizedString(language, R.string.remaining),
-                        color = DarkTertiary,
-                        fontSize = 9.sp,
+                        text = stateHeadline,
+                        color = headlineColor,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
+                        letterSpacing = 1.2.sp,
+                        maxLines = 1
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = String.format("%02d:%02d", timerSeconds / 60, timerSeconds % 60),
-                        color = Color.White,
-                        fontSize = 30.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.testTag("timer_display")
+                        text = statusMessage,
+                        color = colorScheme.onSurface,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        lineHeight = 19.sp,
+                        maxLines = 2
                     )
+                    if (defeatReason.isNotEmpty()) {
+                        Text(
+                            text = "${localizedString(language, R.string.reason)}: $defeatReason",
+                            color = colorScheme.error,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                            maxLines = 2
+                        )
+                    }
                 }
 
-                // Action Button
+                FilledTonalButton(
+                    onClick = onDemoClick,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    modifier = Modifier.height(40.dp)
+                ) {
+                    Text(
+                        text = if (isDemoMode) localizedString(language, R.string.camera) else localizedString(language, R.string.demo),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                FilledTonalIconButton(
+                    onClick = onSettingsClick,
+                    enabled = canOpenSettings,
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = localizedString(language, R.string.settings)
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(72.dp)
+                        .background(colorScheme.surfaceVariant, RoundedCornerShape(22.dp))
+                        .border(1.dp, colorScheme.outlineVariant, RoundedCornerShape(22.dp))
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    if (canStart) {
+                        OutlinedIconButton(
+                            onClick = { onDurationChanged((selectedMinutes - 1).coerceAtLeast(3)) },
+                            enabled = selectedMinutes > 3,
+                            modifier = Modifier.size(42.dp)
+                        ) {
+                            Text("−", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = localizedString(language, if (canStart) R.string.duration else R.string.remaining),
+                            color = colorScheme.onSurfaceVariant,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp,
+                            maxLines = 1
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = String.format(Locale.US, "%02d:%02d", displaySeconds / 60, displaySeconds % 60),
+                            color = colorScheme.onSurfaceVariant,
+                            fontSize = 28.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.testTag("timer_display")
+                        )
+                    }
+
+                    if (canStart) {
+                        OutlinedIconButton(
+                            onClick = { onDurationChanged((selectedMinutes + 1).coerceAtMost(120)) },
+                            enabled = selectedMinutes < 120,
+                            modifier = Modifier.size(42.dp)
+                        ) {
+                            Text("+", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
                 if (canStart) {
                     Button(
                         onClick = onStart,
                         modifier = Modifier
-                            .height(80.dp)
-                            .weight(1.2f)
+                            .height(72.dp)
+                            .weight(1.05f)
                             .testTag("start_button"),
-                        colors = ButtonDefaults.buttonColors(containerColor = DarkPrimary),
-                        shape = RoundedCornerShape(24.dp)
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colorScheme.primary,
+                            contentColor = colorScheme.onPrimary
+                        ),
+                        shape = RoundedCornerShape(22.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.PlayArrow,
-                            contentDescription = localizedString(language, R.string.start),
-                            tint = DarkOnPrimary
+                            contentDescription = localizedString(language, R.string.start)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = localizedString(language, R.string.start),
-                            color = DarkOnPrimary,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -1054,30 +1007,30 @@ fun BottomHUDEngine(
                     Button(
                         onClick = onStop,
                         modifier = Modifier
-                            .height(80.dp)
-                            .weight(1.2f)
+                            .height(72.dp)
+                            .weight(1.05f)
                             .testTag("stop_on_button"),
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentRed),
-                        shape = RoundedCornerShape(24.dp)
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colorScheme.error,
+                            contentColor = colorScheme.onError
+                        ),
+                        shape = RoundedCornerShape(22.dp)
                     ) {
                         Box(
                             modifier = Modifier
                                 .size(14.dp)
-                                .background(Color.White, RoundedCornerShape(2.dp))
+                                .background(colorScheme.onError, RoundedCornerShape(2.dp))
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
                             text = localizedString(language, R.string.stop),
-                            color = Color.White,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
             }
-
         }
-        Spacer(Modifier.height(20.dp))
     }
 }
 
