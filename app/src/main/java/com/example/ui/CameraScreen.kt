@@ -1,14 +1,18 @@
 package com.example.ui
 
 import android.Manifest
+import android.content.ContentValues
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.speech.tts.TextToSpeech
 import android.os.SystemClock
+import android.provider.MediaStore
 import android.graphics.Paint
 import android.util.Log
 import androidx.activity.compose.BackHandler
@@ -74,15 +78,20 @@ import com.example.viewmodel.GameSettings
 import com.example.viewmodel.GameState
 import com.example.viewmodel.GameViewModel
 import com.example.viewmodel.PoseOverlayState
+import com.example.video.TimelapseRecorder
 import com.example.R
+import java.io.File
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.Locale
 import android.util.Size
+import android.widget.Toast
 import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -147,6 +156,15 @@ fun CameraScreen(
     VoiceAnnouncer(viewModel = viewModel, language = gameSettings.language)
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val canOpenSettings = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
+    val currentGameState = rememberUpdatedState(gameState)
+    val currentTimelapseRecordingEnabled = rememberUpdatedState(gameSettings.timelapseRecordingEnabled)
+    val timelapseRecorder = remember(context) { TimelapseRecorder(context.applicationContext) }
+    var pendingTimelapseFile by remember { mutableStateOf<File?>(null) }
+    val timelapseSaveErrorText = localizedString(gameSettings.language, R.string.timelapse_save_error)
+    val saveTimelapseTitleText = localizedString(gameSettings.language, R.string.save_timelapse_title)
+    val saveTimelapseMessageText = localizedString(gameSettings.language, R.string.save_timelapse_message)
+    val saveText = localizedString(gameSettings.language, R.string.save)
+    val dontSaveText = localizedString(gameSettings.language, R.string.dont_save)
 
     val keepScreenOn = gameState == GameState.WaitingForStabilization ||
         gameState == GameState.StartingDelay ||
@@ -216,6 +234,9 @@ fun CameraScreen(
         onDispose {
             cameraExecutor.shutdown()
             landmarkerService?.close()
+            pendingTimelapseFile?.delete()
+            pendingTimelapseFile = null
+            timelapseRecorder.release()
         }
     }
 
@@ -243,6 +264,33 @@ fun CameraScreen(
         }
     }
 
+    LaunchedEffect(gameState, gameSettings.timelapseRecordingEnabled) {
+        if (!gameSettings.timelapseRecordingEnabled) {
+            timelapseRecorder.discard()
+            pendingTimelapseFile?.delete()
+            pendingTimelapseFile = null
+            return@LaunchedEffect
+        }
+
+        when (gameState) {
+            GameState.StartingDelay -> timelapseRecorder.start(SystemClock.elapsedRealtime())
+            GameState.HoldingPose -> timelapseRecorder.startTimer(SystemClock.elapsedRealtime())
+            GameState.Success, GameState.Failed -> {
+                val file = withContext(Dispatchers.IO) { timelapseRecorder.stop() }
+                if (file != null && file.exists() && file.length() > 0L) {
+                    pendingTimelapseFile?.delete()
+                    pendingTimelapseFile = file
+                }
+            }
+            GameState.Idle -> {
+                timelapseRecorder.discard()
+                pendingTimelapseFile?.delete()
+                pendingTimelapseFile = null
+            }
+            else -> Unit
+        }
+    }
+
     BackHandler(enabled = showSettings) { showSettings = false }
 
     if (showSettings) {
@@ -260,7 +308,8 @@ fun CameraScreen(
             onSecondViolationPenaltyChanged = viewModel::updateSecondViolationPenaltyMinutes,
             onThirdViolationPenaltyChanged = viewModel::updateThirdViolationPenaltyMinutes,
             onSubsequentViolationPenaltyChanged = viewModel::updateSubsequentViolationPenaltyMinutes,
-            onLanguageChanged = viewModel::updateLanguage
+            onLanguageChanged = viewModel::updateLanguage,
+            onTimelapseRecordingEnabledChanged = viewModel::updateTimelapseRecordingEnabled
         )
         return
     }
@@ -340,6 +389,15 @@ fun CameraScreen(
                                         landmarkerService = landmarkerService,
                                         timestampMs = timestampMs
                                     )
+                                    val state = currentGameState.value
+                                    if (currentTimelapseRecordingEnabled.value &&
+                                        (state == GameState.StartingDelay || state == GameState.HoldingPose)
+                                    ) {
+                                        timelapseRecorder.offerFrame(
+                                            bitmap = analysisBitmap,
+                                            timestampMs = timestampMs
+                                        )
+                                    }
                                 } catch (e: Exception) {
                                     Log.e("CameraScreen", "Frame analysis failed", e)
                                 } finally {
@@ -410,6 +468,44 @@ fun CameraScreen(
                     modifier = Modifier.matchParentSize()
                 )
             }
+        }
+
+        if (pendingTimelapseFile != null) {
+            AlertDialog(
+                onDismissRequest = {
+                    pendingTimelapseFile?.delete()
+                    pendingTimelapseFile = null
+                },
+                title = { Text(saveTimelapseTitleText) },
+                text = { Text(saveTimelapseMessageText) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val file = pendingTimelapseFile
+                            if (file != null) {
+                                val saved = saveTimelapseToMediaStore(context, file)
+                                if (!saved) {
+                                    Toast.makeText(
+                                        context,
+                                        timelapseSaveErrorText,
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                                file.delete()
+                                pendingTimelapseFile = null
+                            }
+                        }
+                    ) { Text(saveText) }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            pendingTimelapseFile?.delete()
+                            pendingTimelapseFile = null
+                        }
+                    ) { Text(dontSaveText) }
+                }
+            )
         }
 
         // 3. Bottom Controls HUD
@@ -838,6 +934,53 @@ fun BottomHUDEngine(
     }
 }
 
+
+private fun saveTimelapseToMediaStore(
+    context: Context,
+    sourceFile: File
+): Boolean {
+    val resolver = context.contentResolver
+    val fileName = "pose_timelapse_${System.currentTimeMillis()}.mp4"
+
+    val values = ContentValues().apply {
+        put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
+        put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+        put(
+            MediaStore.Video.Media.RELATIVE_PATH,
+            "${Environment.DIRECTORY_MOVIES}/PoseValidator"
+        )
+        put(MediaStore.Video.Media.IS_PENDING, 1)
+    }
+
+    val collection = MediaStore.Video.Media.getContentUri(
+        MediaStore.VOLUME_EXTERNAL_PRIMARY
+    )
+
+    val uri = runCatching {
+        resolver.insert(collection, values)
+    }.getOrElse {
+        Log.e("CameraScreen", "Failed to create timelapse MediaStore entry", it)
+        null
+    } ?: return false
+
+    return runCatching {
+        resolver.openOutputStream(uri)?.use { output ->
+            sourceFile.inputStream().use { input ->
+                input.copyTo(output)
+            }
+        } ?: error("Failed to open output stream for timelapse video")
+
+        values.clear()
+        values.put(MediaStore.Video.Media.IS_PENDING, 0)
+        resolver.update(uri, values, null, null)
+
+        true
+    }.getOrElse {
+        Log.e("CameraScreen", "Failed to save timelapse to MediaStore", it)
+        runCatching { resolver.delete(uri, null, null) }
+        false
+    }
+}
 
 private fun rotateBitmap(bitmap: Bitmap, rotationDegrees: Int): Bitmap {
     val matrix = android.graphics.Matrix()

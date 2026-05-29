@@ -61,7 +61,8 @@ data class GameSettings(
     val firstViolationPenaltyMinutes: Int = 1,
     val secondViolationPenaltyMinutes: Int = 3,
     val thirdViolationPenaltyMinutes: Int = 3,
-    val subsequentViolationPenaltyMinutes: Int = 3
+    val subsequentViolationPenaltyMinutes: Int = 3,
+    val timelapseRecordingEnabled: Boolean = false
 )
 
 data class FaceOverlayPoint(val x: Float, val y: Float)
@@ -180,7 +181,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             firstViolationPenaltyMinutes = prefs.getInt("penalty_1_min", 1).coerceIn(0, 9999),
             secondViolationPenaltyMinutes = prefs.getInt("penalty_2_min", 3).coerceIn(0, 9999),
             thirdViolationPenaltyMinutes = prefs.getInt("penalty_3_min", 3).coerceIn(0, 9999),
-            subsequentViolationPenaltyMinutes = prefs.getInt("penalty_subsequent_min", 3).coerceIn(0, 9999)
+            subsequentViolationPenaltyMinutes = prefs.getInt("penalty_subsequent_min", 3).coerceIn(0, 9999),
+            timelapseRecordingEnabled = prefs.getBoolean("timelapse_recording_enabled", false)
         )
     }
 
@@ -243,6 +245,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     fun updatePenaltiesEnabled(enabled: Boolean) {
         _gameSettings.value = _gameSettings.value.copy(penaltiesEnabled = enabled)
         prefs.edit().putBoolean("penalties_enabled", enabled).apply()
+    }
+
+    fun updateTimelapseRecordingEnabled(enabled: Boolean) {
+        _gameSettings.value = _gameSettings.value.copy(timelapseRecordingEnabled = enabled)
+        prefs.edit().putBoolean("timelapse_recording_enabled", enabled).apply()
     }
 
     fun updateFirstViolationPenaltyMinutes(value: Int) = updatePenaltyMinutes("penalty_1_min", value) { copy(firstViolationPenaltyMinutes = it) }

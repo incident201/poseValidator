@@ -67,4 +67,10 @@
     <string name="demo">ДЕМО</string>
     <string name="language_english">English</string>
     <string name="language_russian">Русский</string>
+    <string name="save_timelapse_title">Сохранить timelapse-видео?</string>
+    <string name="save_timelapse_message">Timelapse-видео записано</string>
+    <string name="save">Сохранить</string>
+    <string name="dont_save">Не сохранять</string>
+    <string name="timelapse_save_error">Не удалось сохранить timelapse-видео.</string>
+    <string name="record_timelapse_video">Записывать Timelapse видео</string>
 </resources>
