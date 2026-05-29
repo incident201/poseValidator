@@ -77,6 +77,7 @@ import com.example.viewmodel.AppLanguage
 import com.example.viewmodel.GameSettings
 import com.example.viewmodel.GameState
 import com.example.viewmodel.GameViewModel
+import com.example.viewmodel.MovementGaugeState
 import com.example.viewmodel.PoseOverlayState
 import com.example.video.TimelapseRecorder
 import com.example.R
@@ -94,6 +95,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.math.max
 
 private const val SHOW_POSE_DEBUG_OVERLAY = true
 private const val SHOW_POSE_DEBUG_POINTS = true
@@ -153,6 +155,7 @@ fun CameraScreen(
     val selectedDurationSeconds by viewModel.selectedDurationSeconds.collectAsState()
     val startDelayRemainingSeconds by viewModel.startDelayRemainingSeconds.collectAsState()
     val poseOverlayState by viewModel.poseOverlayState.collectAsState()
+    val movementGaugeState by viewModel.movementGaugeState.collectAsState()
     VoiceAnnouncer(viewModel = viewModel, language = gameSettings.language)
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val canOpenSettings = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
@@ -468,6 +471,18 @@ fun CameraScreen(
                     modifier = Modifier.matchParentSize()
                 )
             }
+
+            if (movementGaugeState.active) {
+                MovementGaugeOverlay(
+                    state = movementGaugeState,
+                    language = gameSettings.language,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 12.dp)
+                        .zIndex(1f)
+                )
+            }
         }
 
         if (pendingTimelapseFile != null) {
@@ -520,6 +535,80 @@ fun CameraScreen(
             onDurationChanged = { viewModel.updateSelectedDurationMinutes(it) },
             onStart = { viewModel.startSession() },
             onStop = { viewModel.stopSession() }
+        )
+    }
+}
+
+@Composable
+private fun MovementGaugeOverlay(
+    state: MovementGaugeState,
+    language: AppLanguage,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.46f), RoundedCornerShape(20.dp))
+            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(20.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        MovementGaugeRow(
+            label = localizedString(language, R.string.movement_gauge_drift),
+            value = state.driftNormalizedScore,
+            threshold = state.driftThresholdFactor,
+            color = DarkPrimary
+        )
+        MovementGaugeRow(
+            label = localizedString(language, R.string.movement_gauge_motion),
+            value = state.motionNormalizedScore,
+            threshold = state.motionThresholdFactor,
+            color = AccentGreen
+        )
+    }
+}
+
+@Composable
+private fun MovementGaugeRow(
+    label: String,
+    value: Float,
+    threshold: Float,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    val safeThreshold = max(threshold, 0.001f)
+    val progress = (value / safeThreshold).coerceIn(0f, 1f)
+    val isOverLimit = value > safeThreshold
+    val gaugeColor = if (isOverLimit) AccentRed else color
+
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = label,
+            color = Color.White.copy(alpha = 0.9f),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(68.dp)
+        )
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier
+                .weight(1f)
+                .height(8.dp)
+                .clip(RoundedCornerShape(100.dp)),
+            color = gaugeColor,
+            trackColor = Color.White.copy(alpha = 0.18f)
+        )
+        Text(
+            text = String.format(Locale.US, "%.3f / %.3f", value, threshold),
+            color = gaugeColor,
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(104.dp)
         )
     }
 }

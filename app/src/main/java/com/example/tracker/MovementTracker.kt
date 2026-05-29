@@ -144,7 +144,7 @@ class MovementTracker {
         return count
     }
 
-    private fun calculateDisplacement(pose1: PoseLandmarks, pose2: PoseLandmarks): Float {
+    internal fun calculateDisplacement(pose1: PoseLandmarks, pose2: PoseLandmarks): Float {
         var totalDistance = 0f
         var nodeCount = 0
 

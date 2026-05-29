@@ -73,4 +73,6 @@
     <string name="dont_save">Не сохранять</string>
     <string name="timelapse_save_error">Не удалось сохранить timelapse-видео.</string>
     <string name="record_timelapse_video">Записывать Timelapse видео</string>
+    <string name="movement_gauge_drift">Дрейф</string>
+    <string name="movement_gauge_motion">Движение</string>
 </resources>
