@@ -20,6 +20,7 @@ import com.example.tracker.MovementTracker
 import com.example.tracker.Point3D
 import com.example.tracker.PoseFrameCropper
 import com.example.tracker.PoseLandmarks
+import com.example.tracker.PoseSmoother
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -30,7 +31,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
-import kotlin.math.max
 import kotlin.math.sqrt
 
 enum class GameState {
@@ -54,8 +54,8 @@ data class GameSettings(
     val language: AppLanguage = AppLanguage.English,
     val faceCheckMode: FaceCheckMode = FaceCheckMode.FaceAwayFromCamera,
     val faceDetectionConfidence: Float = 0.8f,
-    val driftThresholdFactor: Float = 0.46f,
-    val motionThresholdFactor: Float = 0.32f,
+    val driftThresholdFactor: Float = 0.18f,
+    val motionThresholdFactor: Float = 0.10f,
     val minimumPenaltyIntervalSeconds: Int = 5,
     val maxViolations: Int = 4,
     val penaltiesEnabled: Boolean = true,
@@ -140,6 +140,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private val faceDetectorService = FaceDetectorService(application.applicationContext, _gameSettings.value.faceDetectionConfidence)
     private val movementTracker = MovementTracker()
+    private val poseSmoother = PoseSmoother()
 
     private val frameLock = Any()
     private val pendingFrames = LinkedHashMap<Long, Bitmap>()
@@ -176,8 +177,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             language = language,
             faceCheckMode = mode,
             faceDetectionConfidence = prefs.getFloat("face_conf", 0.8f).coerceIn(0.5f, 0.95f),
-            driftThresholdFactor = prefs.getFloat("drift_factor", 0.46f).coerceIn(0.1f, 0.8f),
-            motionThresholdFactor = prefs.getFloat("motion_factor", 0.32f).coerceIn(0.1f, 0.8f),
+            driftThresholdFactor = prefs.getFloat("pose_drift_factor_v2", 0.18f).coerceIn(0.05f, 0.40f),
+            motionThresholdFactor = prefs.getFloat("pose_motion_factor_v2", 0.10f).coerceIn(0.03f, 0.25f),
             minimumPenaltyIntervalSeconds = prefs.getInt("penalty_interval_sec", 5).coerceIn(0, 30),
             maxViolations = prefs.getInt("max_violations", 4).coerceIn(0, 9999),
             penaltiesEnabled = prefs.getBoolean("penalties_enabled", true),
@@ -210,16 +211,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     fun updateDriftThresholdFactor(value: Float) {
-        val normalized = value.coerceIn(0.1f, 0.8f)
+        val normalized = value.coerceIn(0.05f, 0.40f)
         _gameSettings.value = _gameSettings.value.copy(driftThresholdFactor = normalized)
-        prefs.edit().putFloat("drift_factor", normalized).apply()
+        prefs.edit().putFloat("pose_drift_factor_v2", normalized).apply()
         movementTracker.driftThresholdFactor = normalized
     }
 
     fun updateMotionThresholdFactor(value: Float) {
-        val normalized = value.coerceIn(0.1f, 0.8f)
+        val normalized = value.coerceIn(0.03f, 0.25f)
         _gameSettings.value = _gameSettings.value.copy(motionThresholdFactor = normalized)
-        prefs.edit().putFloat("motion_factor", normalized).apply()
+        prefs.edit().putFloat("pose_motion_factor_v2", normalized).apply()
         movementTracker.motionThresholdFactor = normalized
     }
 
@@ -281,7 +282,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         }
     }
 
-    fun processMediaPipeResults(pose: PoseLandmarks, timestamp: Long, imageWidth: Int, imageHeight: Int) {
+    fun processMediaPipeResults(rawPose: PoseLandmarks, timestamp: Long, imageWidth: Int, imageHeight: Int) {
+        val pose = poseSmoother.smooth(rawPose, timestamp)
         Log.v(tag, "MediaPipe frame ts=$timestamp size=${imageWidth}x$imageHeight landmarks=${pose.allLandmarks.size}")
         val matchedBitmap = synchronized(frameLock) { pendingFrames.remove(timestamp) }
         val nextOverlayState = if (matchedBitmap == null) PoseOverlayState() else buildOverlayState(matchedBitmap, pose, timestamp)
@@ -291,26 +293,22 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
         if (!pose.hasEnoughKeypoints()) {
             resetMovementGaugeState()
-            val violation = movementTracker.trackFrame(pose, timestamp)
-            if (handleMovementViolation(violation, pose)) return
+            val trackingResult = movementTracker.trackFrame(pose, timestamp)
+            if (handleMovementViolation(trackingResult.violation, pose)) return
             processFaceRule(nextOverlayState.face.status, pose)
             return
         }
 
-        val bodyScale = pose.getBodyScale()
-        val safeBodyScale = max(bodyScale, 0.001f)
-        val driftScore = movementTracker.referencePose?.let { movementTracker.calculateDisplacement(pose, it) } ?: 0f
-        val motionScore = movementTracker.previousPose?.let { movementTracker.calculateDisplacement(pose, it) } ?: 0f
+        val trackingResult = movementTracker.trackFrame(pose, timestamp)
         _movementGaugeState.value = MovementGaugeState(
-            active = true,
-            driftNormalizedScore = driftScore / safeBodyScale,
-            driftThresholdFactor = movementTracker.driftThresholdFactor,
-            motionNormalizedScore = motionScore / safeBodyScale,
-            motionThresholdFactor = movementTracker.motionThresholdFactor
+            active = trackingResult.metrics.active,
+            driftNormalizedScore = trackingResult.metrics.driftNormalizedScore,
+            driftThresholdFactor = trackingResult.metrics.driftThresholdFactor,
+            motionNormalizedScore = trackingResult.metrics.motionNormalizedScore,
+            motionThresholdFactor = trackingResult.metrics.motionThresholdFactor
         )
-        val violation = movementTracker.trackFrame(pose, timestamp)
 
-        if (handleMovementViolation(violation, pose)) return
+        if (handleMovementViolation(trackingResult.violation, pose)) return
 
         processFaceRule(nextOverlayState.face.status, pose)
     }
@@ -504,6 +502,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         resetMovementGaugeState()
         _startDelayRemainingSeconds.value = 0
         movementTracker.reset()
+        poseSmoother.reset()
         violationCount = 0
         lastPenaltyAtMs = 0L
         consecutiveFaceFailFrames = 0
@@ -587,10 +586,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private fun resetMovementGaugeState() { _movementGaugeState.value = MovementGaugeState() }
 
-    fun triggerDefeat(reason: String, voiceMessage: String = tr(R.string.defeat_try_again)) { val alreadyFailed = _gameState.value == GameState.Failed; startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; resetMovementGaugeState(); _gameState.value = GameState.Failed; _defeatReason.value = reason; _statusMessage.value = tr(R.string.check_failed); if (!alreadyFailed) speak(voiceMessage) }
+    fun triggerDefeat(reason: String, voiceMessage: String = tr(R.string.defeat_try_again)) { val alreadyFailed = _gameState.value == GameState.Failed; startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; poseSmoother.reset(); resetMovementGaugeState(); _gameState.value = GameState.Failed; _defeatReason.value = reason; _statusMessage.value = tr(R.string.check_failed); if (!alreadyFailed) speak(voiceMessage) }
     private fun speak(text: String) { _voiceEvents.tryEmit(text) }
 
-    fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; resetMovementGaugeState(); _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _timerSeconds.value = _selectedDurationSeconds.value; movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }
-    override fun onCleared() { sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; faceDetectorService.close(); super.onCleared() }
+    fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; poseSmoother.reset(); resetMovementGaugeState(); _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _timerSeconds.value = _selectedDurationSeconds.value; movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }
+    override fun onCleared() { sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; poseSmoother.reset(); faceDetectorService.close(); super.onCleared() }
     private fun formatTime(seconds: Int): String = String.format("%02d:%02d", seconds / 60, seconds % 60)
 }

@@ -164,9 +164,9 @@ internal fun SettingsScreen(
             Column(Modifier.padding(16.dp)) {
                 Text(localizedString(settings.language, R.string.motion_reaction), color = Color.White, fontWeight = FontWeight.SemiBold)
                 Text("${localizedString(settings.language, R.string.drift_threshold)}: ${"%.2f".format(settings.driftThresholdFactor)}", color = Color.White)
-                Slider(value = settings.driftThresholdFactor, onValueChange = onDriftChanged, valueRange = 0.1f..0.8f)
+                Slider(value = settings.driftThresholdFactor, onValueChange = onDriftChanged, valueRange = 0.05f..0.40f)
                 Text("${localizedString(settings.language, R.string.abrupt_motion_threshold)}: ${"%.2f".format(settings.motionThresholdFactor)}", color = Color.White)
-                Slider(value = settings.motionThresholdFactor, onValueChange = onMotionChanged, valueRange = 0.1f..0.8f)
+                Slider(value = settings.motionThresholdFactor, onValueChange = onMotionChanged, valueRange = 0.03f..0.25f)
             }
         }
         Spacer(Modifier.height(12.dp))
