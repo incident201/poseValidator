@@ -554,14 +554,14 @@ private fun MovementGaugeOverlay(
     ) {
         MovementGaugeRow(
             label = localizedString(language, R.string.movement_gauge_drift),
-            value = state.driftScore,
-            threshold = state.driftThreshold,
+            value = state.driftNormalizedScore,
+            threshold = state.driftThresholdFactor,
             color = DarkPrimary
         )
         MovementGaugeRow(
             label = localizedString(language, R.string.movement_gauge_motion),
-            value = state.motionScore,
-            threshold = state.motionThreshold,
+            value = state.motionNormalizedScore,
+            threshold = state.motionThresholdFactor,
             color = AccentGreen
         )
     }

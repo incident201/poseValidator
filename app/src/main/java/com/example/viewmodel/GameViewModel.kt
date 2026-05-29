@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
+import kotlin.math.max
 import kotlin.math.sqrt
 
 enum class GameState {
@@ -90,10 +91,10 @@ data class PoseOverlayRect(val left: Float, val top: Float, val right: Float, va
 
 data class MovementGaugeState(
     val active: Boolean = false,
-    val driftScore: Float = 0f,
-    val driftThreshold: Float = 0f,
-    val motionScore: Float = 0f,
-    val motionThreshold: Float = 0f
+    val driftNormalizedScore: Float = 0f,
+    val driftThresholdFactor: Float = 0f,
+    val motionNormalizedScore: Float = 0f,
+    val motionThresholdFactor: Float = 0f
 )
 
 class GameViewModel(application: Application) : AndroidViewModel(application), SensorEventListener {
@@ -296,17 +297,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             return
         }
 
-        val scale = pose.getBodyScale()
-        val driftThreshold = movementTracker.driftThresholdFactor * scale
-        val motionThreshold = movementTracker.motionThresholdFactor * scale
+        val bodyScale = pose.getBodyScale()
+        val safeBodyScale = max(bodyScale, 0.001f)
         val driftScore = movementTracker.referencePose?.let { movementTracker.calculateDisplacement(pose, it) } ?: 0f
         val motionScore = movementTracker.previousPose?.let { movementTracker.calculateDisplacement(pose, it) } ?: 0f
         _movementGaugeState.value = MovementGaugeState(
             active = true,
-            driftScore = driftScore,
-            driftThreshold = driftThreshold,
-            motionScore = motionScore,
-            motionThreshold = motionThreshold
+            driftNormalizedScore = driftScore / safeBodyScale,
+            driftThresholdFactor = movementTracker.driftThresholdFactor,
+            motionNormalizedScore = motionScore / safeBodyScale,
+            motionThresholdFactor = movementTracker.motionThresholdFactor
         )
         val violation = movementTracker.trackFrame(pose, timestamp)
 
