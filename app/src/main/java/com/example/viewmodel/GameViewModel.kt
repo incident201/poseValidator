@@ -290,9 +290,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _driftThreshold.value = movementTracker.driftThresholdFactor * scale
         _motionThreshold.value = movementTracker.motionThresholdFactor * scale
 
-        val violation = movementTracker.trackFrame(pose, timestamp)
         movementTracker.referencePose?.let { _driftScore.value = calculateSingleDisplacement(pose, it) }
         movementTracker.previousPose?.let { _motionScore.value = calculateSingleDisplacement(pose, it) }
+        val violation = movementTracker.trackFrame(pose, timestamp)
 
         when (violation) {
             is MovementTracker.Violation.DriftLimitExceeded -> if (handleRuleViolation(RuleViolationType.Drift, pose)) return
