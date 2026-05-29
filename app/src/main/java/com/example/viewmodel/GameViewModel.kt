@@ -153,6 +153,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private val frameLock = Any()
     private val processingLock = Any()
+    private var processingGeneration = 0L
     private val mediaPipeResultExecutor = Executors.newSingleThreadExecutor()
     @Volatile private var isCleared = false
     private val pendingFrames = LinkedHashMap<Long, Bitmap>()
@@ -288,11 +289,15 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     fun registerCameraFrame(bitmap: Bitmap, timestampMs: Long) {
-        synchronized(frameLock) {
-            pendingFrames[timestampMs] = bitmap
+        val replacedBitmap = synchronized(frameLock) {
+            val previous = pendingFrames.put(timestampMs, bitmap)
             while (pendingFrames.size > 20) pendingFrames.remove(pendingFrames.keys.first())
             val minTs = timestampMs - 3000
             pendingFrames.keys.iterator().apply { while (hasNext()) if (next() < minTs) remove() }
+            previous
+        }
+        if (replacedBitmap != null && replacedBitmap !== bitmap) {
+            replacedBitmap.recycleIfNeeded()
         }
     }
 
@@ -323,22 +328,33 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private fun processMediaPipeResultsInternal(rawPose: PoseLandmarks, timestamp: Long, imageWidth: Int, imageHeight: Int) {
         if (isCleared) return
-        val pose = synchronized(processingLock) { poseSmoother.smooth(rawPose, timestamp) }
+        val (frameGeneration, pose) = synchronized(processingLock) {
+            processingGeneration to poseSmoother.smooth(rawPose, timestamp)
+        }
         if (isCleared) return
         Log.v(tag, "MediaPipe frame ts=$timestamp size=${imageWidth}x$imageHeight landmarks=${pose.allLandmarks.size}")
         val matchedBitmap = synchronized(frameLock) { pendingFrames.remove(timestamp) }
         val nextOverlayState = try {
             if (matchedBitmap == null) {
-                buildOverlayStateWithoutFace(pose, timestamp, imageWidth, imageHeight)
+                buildOverlayStateWithoutFace(pose, imageWidth, imageHeight)
             } else {
                 buildOverlayState(matchedBitmap, pose, timestamp)
             }
         } finally {
             matchedBitmap?.recycleIfNeeded()
         }
-        _poseOverlayState.value = nextOverlayState
-
         synchronized(processingLock) {
+            if (processingGeneration != frameGeneration) return
+            synchronized(frameLock) {
+                latestAnalyzedFrame = AnalyzedPoseFrame(
+                    pose = pose,
+                    timestampMs = timestamp,
+                    imageWidth = nextOverlayState.imageWidth,
+                    imageHeight = nextOverlayState.imageHeight,
+                    face = nextOverlayState.face
+                )
+            }
+            _poseOverlayState.value = nextOverlayState
             if (_gameState.value != GameState.HoldingPose) return
 
             if (!pose.hasEnoughKeypoints()) {
@@ -505,14 +521,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             }
         } else FaceOverlayState(status = FaceDetectionStatus.NotProcessed, debugMessage = "face=NotProcessed no body crop")
 
-        synchronized(frameLock) {
-            latestAnalyzedFrame = AnalyzedPoseFrame(pose, timestamp, bitmap.width, bitmap.height, faceOverlayState)
-        }
         val normalizedRect = cropRect?.let { PoseOverlayRect(it.left.toFloat() / bitmap.width, it.top.toFloat() / bitmap.height, it.right.toFloat() / bitmap.width, it.bottom.toFloat() / bitmap.height) }
         return PoseOverlayState(bitmap.width, bitmap.height, pose.allLandmarks, normalizedRect, faceOverlayState)
     }
 
-    private fun buildOverlayStateWithoutFace(pose: PoseLandmarks, timestamp: Long, imageWidth: Int, imageHeight: Int): PoseOverlayState {
+    private fun buildOverlayStateWithoutFace(pose: PoseLandmarks, imageWidth: Int, imageHeight: Int): PoseOverlayState {
         val safeWidth = imageWidth.coerceAtLeast(0)
         val safeHeight = imageHeight.coerceAtLeast(0)
         val normalizedRect = if (safeWidth > 0 && safeHeight > 0) {
@@ -531,9 +544,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             status = FaceDetectionStatus.NotProcessed,
             debugMessage = "face=NotProcessed no matched bitmap"
         )
-        synchronized(frameLock) {
-            latestAnalyzedFrame = AnalyzedPoseFrame(pose, timestamp, safeWidth, safeHeight, faceOverlayState)
-        }
         return PoseOverlayState(safeWidth, safeHeight, pose.allLandmarks, normalizedRect, faceOverlayState)
     }
 
@@ -578,6 +588,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         resetMovementGaugeState()
         _startDelayRemainingSeconds.value = 0
         synchronized(processingLock) {
+            processingGeneration += 1
             movementTracker.reset()
             poseSmoother.reset()
             violationCount = 0
@@ -618,6 +629,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             if (initialPose == null || !initialPose.hasEnoughKeypoints()) { triggerDefeat(tr(R.string.camera_no_body)); return@launch }
             _timerSeconds.value = _selectedDurationSeconds.value
             synchronized(processingLock) {
+                processingGeneration += 1
                 movementTracker.reset()
                 violationCount = 0
                 lastPenaltyAtMs = 0L
@@ -666,11 +678,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private fun resetMovementGaugeState() { _movementGaugeState.value = MovementGaugeState() }
 
-    fun triggerDefeat(reason: String, voiceMessage: String = tr(R.string.defeat_try_again)) { val alreadyFailed = _gameState.value == GameState.Failed; startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; synchronized(processingLock) { poseSmoother.reset() }; resetMovementGaugeState(); _gameState.value = GameState.Failed; _defeatReason.value = reason; _statusMessage.value = tr(R.string.check_failed); if (!alreadyFailed) speak(voiceMessage) }
+    fun triggerDefeat(reason: String, voiceMessage: String = tr(R.string.defeat_try_again)) { val alreadyFailed = _gameState.value == GameState.Failed; startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset() }; resetMovementGaugeState(); _gameState.value = GameState.Failed; _defeatReason.value = reason; _statusMessage.value = tr(R.string.check_failed); if (!alreadyFailed) speak(voiceMessage) }
     private fun speak(text: String) { _voiceEvents.tryEmit(text) }
 
-    fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; synchronized(processingLock) { poseSmoother.reset(); movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }; resetMovementGaugeState(); _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _timerSeconds.value = _selectedDurationSeconds.value }
-    override fun onCleared() { isCleared = true; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { poseSmoother.reset() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
+    fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset(); movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }; resetMovementGaugeState(); _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _timerSeconds.value = _selectedDurationSeconds.value }
+    override fun onCleared() { isCleared = true; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
     private fun formatTime(seconds: Int): String = String.format("%02d:%02d", seconds / 60, seconds % 60)
 }
 

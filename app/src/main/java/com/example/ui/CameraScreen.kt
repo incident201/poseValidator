@@ -83,8 +83,10 @@ import com.example.video.TimelapseRecorder
 import com.example.R
 import java.io.File
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicLong
 import java.util.Locale
 import android.util.Size
 import android.widget.Toast
@@ -206,6 +208,7 @@ fun CameraScreen(
 
     // MediaPipe Setup
     val cameraExecutor: ExecutorService = remember { Executors.newSingleThreadExecutor() }
+    val lastPoseTimestampMs = remember { AtomicLong(0L) }
     var imageAnalysisRef by remember { mutableStateOf<ImageAnalysis?>(null) }
     var cameraProviderRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
     var landmarkerService by remember { mutableStateOf<PoseLandmarkerService?>(null) }
@@ -267,15 +270,23 @@ fun CameraScreen(
         val bitmap = demoBitmap
         if (!isDemoMode || bitmap == null) return@LaunchedEffect
         while (isActive && isDemoMode && demoBitmap === bitmap) {
-            cameraExecutor.execute {
-                val timestampMs = SystemClock.elapsedRealtimeNanos() / 1_000_000L
-                val frameBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
-                submitFrameToPosePipeline(
-                    bitmap = frameBitmap,
-                    viewModel = viewModel,
-                    landmarkerService = landmarkerService,
-                    timestampMs = timestampMs
-                )
+            try {
+                cameraExecutor.execute {
+                    val timestampMs = nextFrameTimestampMs(
+                        lastPoseTimestampMs,
+                        SystemClock.elapsedRealtimeNanos() / 1_000_000L
+                    )
+                    val frameBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+                    submitFrameToPosePipeline(
+                        bitmap = frameBitmap,
+                        viewModel = viewModel,
+                        landmarkerService = landmarkerService,
+                        timestampMs = timestampMs
+                    )
+                }
+            } catch (e: RejectedExecutionException) {
+                Log.w("CameraScreen", "Dropping demo frame after camera executor shutdown", e)
+                break
             }
             delay(250L)
         }
@@ -408,7 +419,10 @@ fun CameraScreen(
                                     }
                                     pipelineBitmap = resizedBitmap
 
-                                    val timestampMs = SystemClock.elapsedRealtimeNanos() / 1_000_000L
+                                    val timestampMs = nextFrameTimestampMs(
+                                        lastPoseTimestampMs,
+                                        SystemClock.elapsedRealtimeNanos() / 1_000_000L
+                                    )
                                     Log.d("CameraScreen", "analysisBitmap=${pipelineBitmap.width}x${pipelineBitmap.height}")
                                     val state = currentGameState.value
                                     if (currentTimelapseRecordingEnabled.value &&
@@ -1119,6 +1133,14 @@ private fun resizeBitmapLongSide(bitmap: Bitmap, maxLongSide: Int): Bitmap {
     val newWidth = (width * scale).toInt().coerceAtLeast(1)
     val newHeight = (height * scale).toInt().coerceAtLeast(1)
     return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+}
+
+private fun nextFrameTimestampMs(lastTimestampMs: AtomicLong, candidateTimestampMs: Long): Long {
+    while (true) {
+        val previous = lastTimestampMs.get()
+        val next = maxOf(candidateTimestampMs, previous + 1L)
+        if (lastTimestampMs.compareAndSet(previous, next)) return next
+    }
 }
 
 private fun submitFrameToPosePipeline(
