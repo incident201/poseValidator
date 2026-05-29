@@ -50,6 +50,13 @@ data class PoseLandmarks(
 class MovementTracker {
     private val TAG = "MovementTracker"
 
+    data class Metrics(
+        val driftScore: Float = 0f,
+        val motionScore: Float = 0f,
+        val driftThreshold: Float = 0f,
+        val motionThreshold: Float = 0f
+    )
+
     // Configuration / Thresholds from TZ Section 8
     // Thresholds are normalized relative to bodyScale
     var driftThresholdFactor: Float = 0.46f
@@ -57,6 +64,8 @@ class MovementTracker {
 
     var referencePose: PoseLandmarks? = null
     var previousPose: PoseLandmarks? = null
+    var latestMetrics: Metrics = Metrics()
+        private set
 
     // Track state times for breaches
     private var driftExceededSince: Long? = null
@@ -72,6 +81,10 @@ class MovementTracker {
     fun startTracking(pose: PoseLandmarks) {
         referencePose = pose
         previousPose = pose
+        latestMetrics = Metrics(
+            driftThreshold = driftThresholdFactor * pose.getBodyScale(),
+            motionThreshold = motionThresholdFactor * pose.getBodyScale()
+        )
         driftExceededSince = null
         motionExceededSince = null
         Log.i(TAG, "Started tracking with body scale = ${pose.getBodyScale()}")
@@ -80,6 +93,7 @@ class MovementTracker {
     fun reset() {
         referencePose = null
         previousPose = null
+        latestMetrics = Metrics()
         driftExceededSince = null
         motionExceededSince = null
     }
@@ -102,6 +116,12 @@ class MovementTracker {
         // Calculate scores
         val driftScore = calculateDisplacement(currentPose, ref)
         val motionScore = calculateDisplacement(currentPose, prev)
+        latestMetrics = Metrics(
+            driftScore = driftScore,
+            motionScore = motionScore,
+            driftThreshold = driftThreshold,
+            motionThreshold = motionThreshold
+        )
 
         // Drift checks
         if (driftScore > driftThreshold) {

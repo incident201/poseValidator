@@ -17,7 +17,6 @@ import com.example.tracker.FaceDetectionStatus
 import com.example.tracker.FaceCandidateCropper
 import com.example.tracker.FaceDetectorService
 import com.example.tracker.MovementTracker
-import com.example.tracker.Point3D
 import com.example.tracker.PoseFrameCropper
 import com.example.tracker.PoseLandmarks
 import kotlinx.coroutines.Job
@@ -279,13 +278,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
         if (_gameState.value != GameState.HoldingPose) return
 
-        val scale = pose.getBodyScale()
-        _driftThreshold.value = movementTracker.driftThresholdFactor * scale
-        _motionThreshold.value = movementTracker.motionThresholdFactor * scale
-
         val violation = movementTracker.trackFrame(pose, timestamp)
-        movementTracker.referencePose?.let { _driftScore.value = calculateSingleDisplacement(pose, it) }
-        movementTracker.previousPose?.let { _motionScore.value = calculateSingleDisplacement(pose, it) }
+        val metrics = movementTracker.latestMetrics
+        _driftScore.value = metrics.driftScore
+        _motionScore.value = metrics.motionScore
+        _driftThreshold.value = metrics.driftThreshold
+        _motionThreshold.value = metrics.motionThreshold
 
         when (violation) {
             is MovementTracker.Violation.DriftLimitExceeded -> if (handleRuleViolation(RuleViolationType.Drift, pose)) return
@@ -563,6 +561,5 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _driftScore.value = 0f; _motionScore.value = 0f; _timerSeconds.value = _selectedDurationSeconds.value; movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }
     override fun onCleared() { sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; faceDetectorService.close(); super.onCleared() }
-    private fun calculateSingleDisplacement(p1: PoseLandmarks, p2: PoseLandmarks): Float { var total = 0f; var count = 0; fun add(a: Point3D?, b: Point3D?) { if (a != null && b != null) { total += a.distanceTo(b); count++ } }; add(p1.leftShoulder, p2.leftShoulder); add(p1.rightShoulder, p2.rightShoulder); add(p1.leftHip, p2.leftHip); add(p1.rightHip, p2.rightHip); return if (count > 0) total / count else 0f }
     private fun formatTime(seconds: Int): String = String.format("%02d:%02d", seconds / 60, seconds % 60)
 }

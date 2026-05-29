@@ -65,6 +65,8 @@
     <string name="reason">Причина</string>
     <string name="remaining">ОСТАЛОСЬ</string>
     <string name="demo">ДЕМО</string>
+    <string name="drift_gauge">СМЕЩЕНИЕ</string>
+    <string name="motion_gauge">ДВИЖЕНИЕ</string>
     <string name="language_english">English</string>
     <string name="language_russian">Русский</string>
 </resources>

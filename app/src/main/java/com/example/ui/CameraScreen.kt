@@ -144,6 +144,10 @@ fun CameraScreen(
     val selectedDurationSeconds by viewModel.selectedDurationSeconds.collectAsState()
     val startDelayRemainingSeconds by viewModel.startDelayRemainingSeconds.collectAsState()
     val poseOverlayState by viewModel.poseOverlayState.collectAsState()
+    val driftScore by viewModel.driftScore.collectAsState()
+    val motionScore by viewModel.motionScore.collectAsState()
+    val driftThreshold by viewModel.driftThreshold.collectAsState()
+    val motionThreshold by viewModel.motionThreshold.collectAsState()
     VoiceAnnouncer(viewModel = viewModel, language = gameSettings.language)
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val canOpenSettings = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
@@ -410,6 +414,18 @@ fun CameraScreen(
                     modifier = Modifier.matchParentSize()
                 )
             }
+
+            MovementGaugeOverlay(
+                language = gameSettings.language,
+                driftScore = driftScore,
+                driftThreshold = driftThreshold,
+                motionScore = motionScore,
+                motionThreshold = motionThreshold,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 12.dp, vertical = 12.dp)
+                    .zIndex(2f)
+            )
         }
 
         // 3. Bottom Controls HUD
@@ -425,6 +441,96 @@ fun CameraScreen(
             onStart = { viewModel.startSession() },
             onStop = { viewModel.stopSession() }
         )
+    }
+}
+
+@Composable
+private fun MovementGaugeOverlay(
+    language: AppLanguage,
+    driftScore: Float,
+    driftThreshold: Float,
+    motionScore: Float,
+    motionThreshold: Float,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = Color.Black.copy(alpha = 0.58f),
+        contentColor = Color.White,
+        shape = RoundedCornerShape(18.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MovementGauge(
+                label = localizedString(language, R.string.drift_gauge),
+                value = driftScore,
+                threshold = driftThreshold,
+                color = DarkPrimary,
+                modifier = Modifier.weight(1f)
+            )
+            MovementGauge(
+                label = localizedString(language, R.string.motion_gauge),
+                value = motionScore,
+                threshold = motionThreshold,
+                color = DarkTertiary,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun MovementGauge(
+    label: String,
+    value: Float,
+    threshold: Float,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    val progress = if (threshold > 0f) (value / threshold).coerceIn(0f, 1f) else 0f
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                color = Color.White.copy(alpha = 0.86f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.7.sp,
+                maxLines = 1
+            )
+            Text(
+                text = String.format(Locale.US, "%.3f", value),
+                color = Color.White,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color.White.copy(alpha = 0.2f))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(progress)
+                    .background(color)
+            )
+        }
     }
 }
 
