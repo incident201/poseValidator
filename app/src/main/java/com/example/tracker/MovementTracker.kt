@@ -112,6 +112,7 @@ class MovementTracker {
     private val driftDeadband = 0.025f
     private val motionDeadband = 0.015f
     private val globalDriftWeight = 1.0f
+    private val motionImmediateSpikeMultiplier = 2.5f
 
     // Track state times for breaches
     private var driftExceededSince: Long? = null
@@ -175,7 +176,7 @@ class MovementTracker {
             val reference = refNormalized[index] ?: return@mapNotNull null
             current.distance2DTo(reference)
         }
-        val poseDrift = robustMean(poseDistances)
+        val poseDrift = robustShapeScore(poseDistances)
         val globalDrift = currentCenter.distance2DTo(refCenter) / referenceScale
         val driftRaw = maxOf(poseDrift, globalDrift * globalDriftWeight)
         val driftScore = applyDeadband(driftRaw, driftDeadband)
@@ -188,7 +189,7 @@ class MovementTracker {
                 val previous = prevNormalized[index] ?: return@mapNotNull null
                 current.distance2DTo(previous)
             }
-            robustMean(motionDistances)
+            robustShapeScore(motionDistances)
         }
         val globalMotion = if (prevCenter == null) 0f else currentCenter.distance2DTo(prevCenter) / referenceScale
         val motionRaw = maxOf(poseMotion, globalMotion)
@@ -222,6 +223,12 @@ class MovementTracker {
             }
         } else {
             driftExceededSince = null
+        }
+
+        if (motionScore >= motionThresholdFactor * motionImmediateSpikeMultiplier) {
+            motionExceededSince = null
+            Log.w(TAG, "Immediate motion breach! Score: $motionScore, Threshold: $motionThresholdFactor")
+            return Violation.MotionLimitExceeded(motionScore, motionThresholdFactor)
         }
 
         if (motionScore > motionThresholdFactor) {
@@ -319,6 +326,20 @@ class MovementTracker {
         val trimCount = 1
         val trimmed = sorted.drop(trimCount).dropLast(trimCount)
         return trimmed.average().toFloat()
+    }
+
+    private fun robustShapeScore(values: List<Float>): Float {
+        if (values.isEmpty()) return 0f
+        if (values.size == 1) return values.first()
+
+        val sorted = values.sorted()
+        val trimmedMean = robustMean(values)
+
+        // Ignore a single isolated outlier, but catch local limb changes
+        // where at least two landmarks move together, e.g. elbow + wrist or knee + ankle.
+        val secondLargest = sorted[sorted.lastIndex - 1]
+
+        return maxOf(trimmedMean, secondLargest)
     }
 
     private fun applyDeadband(value: Float, deadband: Float): Float {

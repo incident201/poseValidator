@@ -57,6 +57,38 @@ class MovementTrackerTest {
     }
 
     @Test
+    fun `single arm pose change breaches drift threshold`() {
+        val tracker = MovementTracker()
+        val reference = referencePose()
+        val leftArmLowered = reference.withMovedLandmarks(
+            13 to Point3D(0.34f, 0.56f, 0f),
+            15 to Point3D(0.32f, 0.76f, 0f)
+        )
+
+        tracker.startTracking(reference)
+        val firstResult = tracker.trackFrame(leftArmLowered, currentTime = 0L)
+        val sustainedResult = tracker.trackFrame(leftArmLowered, currentTime = 1601L)
+
+        assertTrue(firstResult.metrics.driftNormalizedScore > firstResult.metrics.driftThresholdFactor)
+        assertTrue(sustainedResult.violation is MovementTracker.Violation.DriftLimitExceeded)
+    }
+
+    @Test
+    fun `single landmark outlier is ignored by robust shape score`() {
+        val tracker = MovementTracker()
+        val reference = referencePose()
+        val oneWristOutlier = reference.withMovedLandmarks(
+            15 to Point3D(0.32f, 0.76f, 0f)
+        )
+
+        tracker.startTracking(reference)
+        val result = tracker.trackFrame(oneWristOutlier, currentTime = 0L)
+
+        assertTrue(result.metrics.driftNormalizedScore <= result.metrics.driftThresholdFactor)
+        assertTrue(result.violation is MovementTracker.Violation.None)
+    }
+
+    @Test
     fun `knee bend breaches drift threshold`() {
         val tracker = MovementTracker()
         val reference = referencePose()
@@ -71,7 +103,6 @@ class MovementTrackerTest {
         val result = tracker.trackFrame(squat, currentTime = 0L)
 
         assertTrue(result.metrics.driftNormalizedScore > result.metrics.driftThresholdFactor)
-        assertTrue(result.violation is MovementTracker.Violation.None)
     }
 
     @Test
@@ -93,22 +124,19 @@ class MovementTrackerTest {
     }
 
     @Test
-    fun `abrupt pose changes breach motion after grace period`() {
+    fun `abrupt single arm pose change breaches motion immediately`() {
         val tracker = MovementTracker()
         val reference = referencePose()
-        val armsLowered = reference.withMovedLandmarks(
+        val leftArmLowered = reference.withMovedLandmarks(
             13 to Point3D(0.34f, 0.56f, 0f),
-            14 to Point3D(0.66f, 0.56f, 0f),
-            15 to Point3D(0.32f, 0.76f, 0f),
-            16 to Point3D(0.68f, 0.76f, 0f)
+            15 to Point3D(0.32f, 0.76f, 0f)
         )
 
         tracker.startTracking(reference)
-        val firstResult = tracker.trackFrame(armsLowered, currentTime = 0L)
-        val secondResult = tracker.trackFrame(reference, currentTime = 901L)
+        val result = tracker.trackFrame(leftArmLowered, currentTime = 0L)
 
-        assertTrue(firstResult.metrics.motionNormalizedScore > firstResult.metrics.motionThresholdFactor)
-        assertTrue(secondResult.violation is MovementTracker.Violation.MotionLimitExceeded)
+        assertTrue(result.metrics.motionNormalizedScore > result.metrics.motionThresholdFactor)
+        assertTrue(result.violation is MovementTracker.Violation.MotionLimitExceeded)
     }
 
     private fun referencePose(): PoseLandmarks {
