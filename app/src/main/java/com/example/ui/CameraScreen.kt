@@ -946,20 +946,12 @@ fun BottomHUDEngine(
                         )
                     }
 
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = localizedString(language, if (canStart) R.string.duration else R.string.remaining),
-                            color = colorScheme.onSurfaceVariant,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp,
-                            maxLines = 1
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = String.format(Locale.US, "%02d:%02d", displaySeconds / 60, displaySeconds % 60),
                             color = colorScheme.onSurfaceVariant,
