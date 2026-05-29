@@ -206,6 +206,8 @@ fun CameraScreen(
 
     // MediaPipe Setup
     val cameraExecutor: ExecutorService = remember { Executors.newSingleThreadExecutor() }
+    var imageAnalysisRef by remember { mutableStateOf<ImageAnalysis?>(null) }
+    var cameraProviderRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
     var landmarkerService by remember { mutableStateOf<PoseLandmarkerService?>(null) }
     var isDemoMode by rememberSaveable { mutableStateOf(false) }
     var demoBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -215,7 +217,11 @@ fun CameraScreen(
         if (uri == null) return@rememberLauncherForActivityResult
         val decodedBitmap = decodeBitmapFromUri(context, uri)
         if (decodedBitmap != null) {
-            demoBitmap = resizeBitmapLongSide(decodedBitmap, 1280)
+            val resizedBitmap = resizeBitmapLongSide(decodedBitmap, 1280)
+            if (resizedBitmap !== decodedBitmap) {
+                decodedBitmap.recycleIfNeeded()
+            }
+            demoBitmap = resizedBitmap
             isDemoMode = true
         }
     }
@@ -235,8 +241,15 @@ fun CameraScreen(
     // Clean up
     DisposableEffect(Unit) {
         onDispose {
-            cameraExecutor.shutdown()
+            imageAnalysisRef?.clearAnalyzer()
+            imageAnalysisRef = null
+            runCatching { cameraProviderRef?.unbindAll() }
+                .onFailure { Log.w("CameraScreen", "Failed to unbind camera on dispose", it) }
+            cameraProviderRef = null
             landmarkerService?.close()
+            landmarkerService = null
+            viewModel.clearCameraFrameCache(recycle = true)
+            cameraExecutor.shutdown()
             pendingTimelapseFile?.delete()
             pendingTimelapseFile = null
             timelapseRecorder.release()
@@ -256,8 +269,9 @@ fun CameraScreen(
         while (isActive && isDemoMode && demoBitmap === bitmap) {
             cameraExecutor.execute {
                 val timestampMs = SystemClock.elapsedRealtimeNanos() / 1_000_000L
+                val frameBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
                 submitFrameToPosePipeline(
-                    bitmap = bitmap,
+                    bitmap = frameBitmap,
                     viewModel = viewModel,
                     landmarkerService = landmarkerService,
                     timestampMs = timestampMs
@@ -354,6 +368,7 @@ fun CameraScreen(
                         val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                         cameraProviderFuture.addListener({
                             val cameraProvider = cameraProviderFuture.get()
+                            cameraProviderRef = cameraProvider
                             val preview = Preview.Builder().build().apply {
                                 surfaceProvider = previewView.surfaceProvider
                             }
@@ -371,39 +386,52 @@ fun CameraScreen(
                                         .build()
                                 )
                                 .build()
+                            imageAnalysisRef = imageAnalysis
 
                             imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
+                                var pipelineBitmap: Bitmap? = null
+                                var submittedToPipeline = false
                                 try {
                                     val rotation = imageProxy.imageInfo.rotationDegrees
-                                    val bitmap = imageProxy.toBitmap()
-                                    // Make sure it is rotated corrected if required
-                                    val finalBitmap = if (rotation != 0) {
-                                        rotateBitmap(bitmap, rotation)
-                                    } else {
-                                        bitmap
+                                    var currentBitmap = imageProxy.toBitmap()
+                                    if (rotation != 0) {
+                                        val rotatedBitmap = rotateBitmap(currentBitmap, rotation)
+                                        if (rotatedBitmap !== currentBitmap) {
+                                            currentBitmap.recycleIfNeeded()
+                                        }
+                                        currentBitmap = rotatedBitmap
                                     }
 
+                                    val resizedBitmap = resizeBitmapLongSide(currentBitmap, 1280)
+                                    if (resizedBitmap !== currentBitmap) {
+                                        currentBitmap.recycleIfNeeded()
+                                    }
+                                    pipelineBitmap = resizedBitmap
+
                                     val timestampMs = SystemClock.elapsedRealtimeNanos() / 1_000_000L
-                                    val analysisBitmap = resizeBitmapLongSide(finalBitmap, 1280)
-                                    Log.d("CameraScreen", "analysisBitmap=${analysisBitmap.width}x${analysisBitmap.height}")
-                                    submitFrameToPosePipeline(
-                                        bitmap = analysisBitmap,
-                                        viewModel = viewModel,
-                                        landmarkerService = landmarkerService,
-                                        timestampMs = timestampMs
-                                    )
+                                    Log.d("CameraScreen", "analysisBitmap=${pipelineBitmap.width}x${pipelineBitmap.height}")
                                     val state = currentGameState.value
                                     if (currentTimelapseRecordingEnabled.value &&
                                         (state == GameState.StartingDelay || state == GameState.HoldingPose)
                                     ) {
                                         timelapseRecorder.offerFrame(
-                                            bitmap = analysisBitmap,
+                                            bitmap = pipelineBitmap,
                                             timestampMs = timestampMs
                                         )
                                     }
+                                    submitFrameToPosePipeline(
+                                        bitmap = pipelineBitmap,
+                                        viewModel = viewModel,
+                                        landmarkerService = landmarkerService,
+                                        timestampMs = timestampMs
+                                    )
+                                    submittedToPipeline = true
                                 } catch (e: Exception) {
                                     Log.e("CameraScreen", "Frame analysis failed", e)
                                 } finally {
+                                    if (!submittedToPipeline) {
+                                        pipelineBitmap?.recycleIfNeeded()
+                                    }
                                     imageProxy.close()
                                 }
                             }
@@ -425,12 +453,16 @@ fun CameraScreen(
                         previewView
                     },
                     onRelease = { previewView ->
+                        imageAnalysisRef?.clearAnalyzer()
+                        imageAnalysisRef = null
                         runCatching {
-                            val cameraProvider = ProcessCameraProvider.getInstance(previewView.context).get()
-                            cameraProvider.unbindAll()
+                            val provider = cameraProviderRef
+                                ?: ProcessCameraProvider.getInstance(previewView.context).get()
+                            provider.unbindAll()
                         }.onFailure {
                             Log.w("CameraScreen", "Failed to unbind camera on release", it)
                         }
+                        cameraProviderRef = null
                     }
                 )
                 }
@@ -1096,7 +1128,14 @@ private fun submitFrameToPosePipeline(
     timestampMs: Long
 ) {
     viewModel.registerCameraFrame(bitmap, timestampMs)
-    landmarkerService?.detectLiveStreamFrame(bitmap, timestampMs)
+    val accepted = landmarkerService?.detectLiveStreamFrame(bitmap, timestampMs) ?: false
+    if (!accepted) {
+        viewModel.dropCameraFrame(timestampMs, recycle = true)
+    }
+}
+
+private fun Bitmap.recycleIfNeeded() {
+    if (!isRecycled) recycle()
 }
 
 private fun decodeBitmapFromUri(context: android.content.Context, uri: Uri): Bitmap? {
@@ -1120,7 +1159,11 @@ private fun normalizeSoftwareArgb8888(bitmap: Bitmap): Bitmap {
         bitmap.config == Bitmap.Config.HARDWARE
     val requiresConfigConversion = bitmap.config != Bitmap.Config.ARGB_8888
     return if (isHardwareBitmap || requiresConfigConversion) {
-        bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: bitmap
+        val normalized = bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: bitmap
+        if (normalized !== bitmap) {
+            bitmap.recycleIfNeeded()
+        }
+        normalized
     } else {
         bitmap
     }
