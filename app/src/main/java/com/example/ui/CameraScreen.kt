@@ -833,7 +833,7 @@ fun BottomHUDEngine(
     val colorScheme = MaterialTheme.colorScheme
     val canStart = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
     val displaySeconds = if (canStart) selectedDurationSeconds else timerSeconds
-    val selectedMinutes = (selectedDurationSeconds / 60).coerceIn(3, 120)
+    val selectedMinutes = (selectedDurationSeconds / 60).coerceIn(1, 120)
 
     Card(
         modifier = Modifier
@@ -936,8 +936,8 @@ fun BottomHUDEngine(
                 ) {
                     if (canStart) {
                         OutlinedIconButton(
-                            onClick = { onDurationChanged((selectedMinutes - 1).coerceAtLeast(3)) },
-                            enabled = selectedMinutes > 3,
+                            onClick = { onDurationChanged((selectedMinutes - 1).coerceAtLeast(1)) },
+                            enabled = selectedMinutes > 1,
                             modifier = Modifier.size(42.dp)
                         ) {
                             Text("−", fontSize = 24.sp, fontWeight = FontWeight.Bold)

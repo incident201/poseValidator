@@ -102,7 +102,9 @@ data class MovementGaugeState(
 
 class GameViewModel(application: Application) : AndroidViewModel(application), SensorEventListener {
     private val tag = "GameViewModel"
-    private val minimumDurationSeconds = 180
+    private val defaultDurationSeconds = 180
+    private val minimumDurationMinutes = 1
+    private val maximumDurationMinutes = 120
     private val startDelaySeconds = 10
     private val stabilizationDurationMs = 5_000L
     private val gyroscopeStillThresholdRadPerSec = 0.08f
@@ -120,9 +122,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private val _gameState = MutableStateFlow(GameState.Idle)
     val gameState: StateFlow<GameState> = _gameState.asStateFlow()
-    private val _timerSeconds = MutableStateFlow(minimumDurationSeconds)
+    private val _timerSeconds = MutableStateFlow(defaultDurationSeconds)
     val timerSeconds: StateFlow<Int> = _timerSeconds.asStateFlow()
-    private val _selectedDurationSeconds = MutableStateFlow(minimumDurationSeconds)
+    private val _selectedDurationSeconds = MutableStateFlow(defaultDurationSeconds)
     val selectedDurationSeconds: StateFlow<Int> = _selectedDurationSeconds.asStateFlow()
     private val _statusMessage = MutableStateFlow("")
     val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
@@ -282,8 +284,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         prefs.edit().putInt(prefKey, normalized).apply()
     }
 
-    fun updateSelectedDurationMinutes(minutes: Int) { /* unchanged behavior */
-        val normalizedMinutes = minutes.coerceAtLeast(3)
+    fun updateSelectedDurationMinutes(minutes: Int) {
+        val normalizedMinutes = minutes.coerceIn(minimumDurationMinutes, maximumDurationMinutes)
         _selectedDurationSeconds.value = normalizedMinutes * 60
         if (_gameState.value == GameState.Idle || _gameState.value == GameState.Failed || _gameState.value == GameState.Success) _timerSeconds.value = _selectedDurationSeconds.value
     }
