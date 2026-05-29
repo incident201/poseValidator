@@ -224,7 +224,11 @@ fun CameraScreen(
             if (resizedBitmap !== decodedBitmap) {
                 decodedBitmap.recycleIfNeeded()
             }
+            val oldDemoBitmap = demoBitmap
             demoBitmap = resizedBitmap
+            if (oldDemoBitmap != null && oldDemoBitmap !== resizedBitmap) {
+                oldDemoBitmap.recycleIfNeeded()
+            }
             isDemoMode = true
         }
     }
@@ -253,6 +257,8 @@ fun CameraScreen(
             landmarkerService = null
             viewModel.clearCameraFrameCache(recycle = true)
             cameraExecutor.shutdown()
+            demoBitmap?.recycleIfNeeded()
+            demoBitmap = null
             pendingTimelapseFile?.delete()
             pendingTimelapseFile = null
             timelapseRecorder.release()
@@ -270,13 +276,18 @@ fun CameraScreen(
         val bitmap = demoBitmap
         if (!isDemoMode || bitmap == null) return@LaunchedEffect
         while (isActive && isDemoMode && demoBitmap === bitmap) {
+            val frameBitmap = try {
+                bitmap.copy(Bitmap.Config.ARGB_8888, false)
+            } catch (t: Throwable) {
+                Log.e("CameraScreen", "Failed to copy demo frame", t)
+                break
+            }
             try {
                 cameraExecutor.execute {
                     val timestampMs = nextFrameTimestampMs(
                         lastPoseTimestampMs,
                         SystemClock.elapsedRealtimeNanos() / 1_000_000L
                     )
-                    val frameBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
                     submitFrameToPosePipeline(
                         bitmap = frameBitmap,
                         viewModel = viewModel,
@@ -285,6 +296,7 @@ fun CameraScreen(
                     )
                 }
             } catch (e: RejectedExecutionException) {
+                frameBitmap.recycleIfNeeded()
                 Log.w("CameraScreen", "Dropping demo frame after camera executor shutdown", e)
                 break
             }

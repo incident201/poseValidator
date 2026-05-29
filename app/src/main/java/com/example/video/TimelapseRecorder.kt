@@ -56,31 +56,27 @@ class TimelapseRecorder(
     private val pendingPresentationTimesUs = ArrayDeque<Long>()
 
     fun start(startTimestampMs: Long) {
-        val startGeneration = synchronized(lock) {
+        synchronized(lock) {
             if (isReleased) return
             recordingGeneration += 1
             isRecording = false
             recordingStartTimestampMs = startTimestampMs
             timerStartTimestampMs = null
             nextCaptureTimestampMs = startTimestampMs
-            recordingGeneration
-        }
-        try {
-            frameExecutor.execute {
-                releaseCodecResources(deleteTempFile = true)
-                hadEncodingError = false
-                videoWidth = 0
-                videoHeight = 0
-                outputFile = null
-                synchronized(lock) {
-                    if (!isReleased && recordingGeneration == startGeneration) {
-                        isRecording = true
-                    }
+            val startGeneration = recordingGeneration
+            try {
+                frameExecutor.execute {
+                    releaseCodecResources(deleteTempFile = true)
+                    hadEncodingError = false
+                    videoWidth = 0
+                    videoHeight = 0
+                    outputFile = null
                 }
-            }
-        } catch (e: RejectedExecutionException) {
-            Log.w(TAG, "Ignoring timelapse start after executor shutdown", e)
-            synchronized(lock) {
+                if (!isReleased && recordingGeneration == startGeneration) {
+                    isRecording = true
+                }
+            } catch (e: RejectedExecutionException) {
+                Log.w(TAG, "Ignoring timelapse start after executor shutdown", e)
                 if (recordingGeneration == startGeneration) {
                     isRecording = false
                 }
