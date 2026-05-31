@@ -156,12 +156,11 @@ class MovementTrackerTest {
     @Test
     fun `drift with brief dip below threshold still breaches after grace period`() {
         val tracker = MovementTracker().apply {
-            driftThresholdFactor = 0.1f
             motionThresholdFactor = 1f
         }
         val reference = referencePose()
         val changedPose = reference.translated(dx = 0.06f)
-        val nearReferencePose = reference.translated(dx = 0.046f)
+        val nearReferencePose = reference.translated(dx = 0.054f)
 
         tracker.startTracking(reference)
         tracker.trackFrame(changedPose, currentTime = 0L)
