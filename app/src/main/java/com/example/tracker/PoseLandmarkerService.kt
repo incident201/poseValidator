@@ -40,6 +40,10 @@ class PoseLandmarkerService(
             val options = PoseLandmarker.PoseLandmarkerOptions.builder()
                 .setBaseOptions(baseOptions)
                 .setRunningMode(RunningMode.LIVE_STREAM)
+                .setNumPoses(1)
+                .setMinPoseDetectionConfidence(0.70f)
+                .setMinPosePresenceConfidence(0.70f)
+                .setMinTrackingConfidence(0.75f)
                 .setResultListener { result, image ->
                     if (!isClosed) {
                         processResult(result, image.width, image.height, result.timestampMs())
@@ -93,20 +97,31 @@ class PoseLandmarkerService(
             return
         }
 
-        val allLandmarks = firstLandmarks.map { landmark ->
-            Point3D(landmark.x(), landmark.y(), landmark.z())
+        fun toPosePoint(index: Int): Point3D {
+            val landmark = firstLandmarks[index]
+            return Point3D(
+                x = landmark.x(),
+                y = landmark.y(),
+                z = landmark.z(),
+                visibility = landmark.visibility().orElse(null),
+                presence = landmark.presence().orElse(null)
+            )
+        }
+
+        val allLandmarks = firstLandmarks.indices.map { index ->
+            toPosePoint(index)
         }
         Log.d(TAG, "MediaPipe returned allLandmarks=${allLandmarks.size}")
 
         val pose = PoseLandmarks(
-            leftShoulder = Point3D(firstLandmarks[11].x(), firstLandmarks[11].y(), firstLandmarks[11].z()),
-            rightShoulder = Point3D(firstLandmarks[12].x(), firstLandmarks[12].y(), firstLandmarks[12].z()),
-            leftElbow = Point3D(firstLandmarks[13].x(), firstLandmarks[13].y(), firstLandmarks[13].z()),
-            rightElbow = Point3D(firstLandmarks[14].x(), firstLandmarks[14].y(), firstLandmarks[14].z()),
-            leftHip = Point3D(firstLandmarks[23].x(), firstLandmarks[23].y(), firstLandmarks[23].z()),
-            rightHip = Point3D(firstLandmarks[24].x(), firstLandmarks[24].y(), firstLandmarks[24].z()),
-            leftKnee = Point3D(firstLandmarks[25].x(), firstLandmarks[25].y(), firstLandmarks[25].z()),
-            rightKnee = Point3D(firstLandmarks[26].x(), firstLandmarks[26].y(), firstLandmarks[26].z()),
+            leftShoulder = allLandmarks[11],
+            rightShoulder = allLandmarks[12],
+            leftElbow = allLandmarks[13],
+            rightElbow = allLandmarks[14],
+            leftHip = allLandmarks[23],
+            rightHip = allLandmarks[24],
+            leftKnee = allLandmarks[25],
+            rightKnee = allLandmarks[26],
             allLandmarks = allLandmarks
         )
 
