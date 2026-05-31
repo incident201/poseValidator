@@ -1,16 +1,19 @@
 package com.example.tracker
 
-import kotlin.math.exp
+import kotlin.math.PI
+import kotlin.math.abs
 
-class PoseSmoother(
-    private val tauMs: Float = 250f,
-    private val resetAfterGapMs: Long = 1200L
-) {
-    private var previousPose: PoseLandmarks? = null
+class PoseSmoother {
+    private val minCutoff = 0.35f
+    private val beta = 0.025f
+    private val derivativeCutoff = 1.0f
+    private val resetAfterGapMs = 1200L
+
+    private val landmarkFilters = mutableMapOf<Int, LandmarkFilter>()
     private var previousTimestampMs: Long? = null
 
     fun reset() {
-        previousPose = null
+        landmarkFilters.clear()
         previousTimestampMs = null
     }
 
@@ -20,37 +23,111 @@ class PoseSmoother(
             return raw
         }
 
-        val previous = previousPose
         val previousTs = previousTimestampMs
-
-        if (previous == null || previousTs == null || timestampMs - previousTs > resetAfterGapMs) {
-            previousPose = raw
+        if (previousTs == null) {
+            val initializedAll = initializeFilters(raw)
             previousTimestampMs = timestampMs
-            return raw
+            return PoseLandmarks.fromAllLandmarks(initializedAll)
         }
 
-        val dtMs = (timestampMs - previousTs).coerceAtLeast(1L).toFloat()
-        val alpha = (1f - exp(-dtMs / tauMs)).coerceIn(0.05f, 1f)
-
-        val count = minOf(raw.allLandmarks.size, previous.allLandmarks.size)
-        val smoothedAll = raw.allLandmarks.mapIndexed { index, current ->
-            if (index >= count) {
-                current
-            } else {
-                val old = previous.allLandmarks[index]
-                Point3D(
-                    x = old.x + alpha * (current.x - old.x),
-                    y = old.y + alpha * (current.y - old.y),
-                    z = old.z + alpha * (current.z - old.z),
-                    visibility = current.visibility,
-                    presence = current.presence
-                )
-            }
+        if (timestampMs - previousTs > resetAfterGapMs) {
+            reset()
+            val initializedAll = initializeFilters(raw)
+            previousTimestampMs = timestampMs
+            return PoseLandmarks.fromAllLandmarks(initializedAll)
         }
 
-        val smoothed = PoseLandmarks.fromAllLandmarks(smoothedAll)
-        previousPose = smoothed
+        val dtSeconds = ((timestampMs - previousTs).coerceAtLeast(1L) / 1000f)
+            .coerceIn(1f / 120f, 0.25f)
+        val smoothedAll = raw.allLandmarks.mapIndexed { index, point ->
+            landmarkFilters.getOrPut(index) { newLandmarkFilter() }.filter(point, dtSeconds)
+        }
+
         previousTimestampMs = timestampMs
-        return smoothed
+        return PoseLandmarks.fromAllLandmarks(smoothedAll)
+    }
+
+    private fun initializeFilters(raw: PoseLandmarks): List<Point3D> {
+        return raw.allLandmarks.mapIndexed { index, point ->
+            landmarkFilters.getOrPut(index) { newLandmarkFilter() }.filter(point, 1f / 120f)
+        }
+    }
+
+    private fun newLandmarkFilter(): LandmarkFilter {
+        return LandmarkFilter(
+            minCutoff = minCutoff,
+            beta = beta,
+            derivativeCutoff = derivativeCutoff
+        )
+    }
+
+    private class LowPassFilter {
+        private var previousValue: Float? = null
+
+        fun filter(value: Float, alpha: Float): Float {
+            val previous = previousValue
+            val filtered = if (previous == null) {
+                value
+            } else {
+                alpha * value + (1f - alpha) * previous
+            }
+            previousValue = filtered
+            return filtered
+        }
+    }
+
+    private class OneEuroFilter(
+        private val minCutoff: Float,
+        private val beta: Float,
+        private val derivativeCutoff: Float
+    ) {
+        private val valueFilter = LowPassFilter()
+        private val derivativeFilter = LowPassFilter()
+        private var previousRawValue: Float? = null
+
+        fun filter(value: Float, dtSeconds: Float): Float {
+            val previousRaw = previousRawValue
+            val derivative = if (previousRaw == null) {
+                0f
+            } else {
+                (value - previousRaw) / dtSeconds
+            }
+            previousRawValue = value
+
+            val smoothedDerivative = derivativeFilter.filter(
+                value = derivative,
+                alpha = alpha(cutoff = derivativeCutoff, dtSeconds = dtSeconds)
+            )
+            val cutoff = minCutoff + beta * abs(smoothedDerivative)
+            return valueFilter.filter(
+                value = value,
+                alpha = alpha(cutoff = cutoff, dtSeconds = dtSeconds)
+            )
+        }
+
+        private fun alpha(cutoff: Float, dtSeconds: Float): Float {
+            val tau = 1f / (2f * PI.toFloat() * cutoff)
+            return 1f / (1f + tau / dtSeconds)
+        }
+    }
+
+    private class LandmarkFilter(
+        minCutoff: Float,
+        beta: Float,
+        derivativeCutoff: Float
+    ) {
+        private val xFilter = OneEuroFilter(minCutoff, beta, derivativeCutoff)
+        private val yFilter = OneEuroFilter(minCutoff, beta, derivativeCutoff)
+        private val zFilter = OneEuroFilter(minCutoff, beta, derivativeCutoff)
+
+        fun filter(point: Point3D, dtSeconds: Float): Point3D {
+            return Point3D(
+                x = xFilter.filter(point.x, dtSeconds),
+                y = yFilter.filter(point.y, dtSeconds),
+                z = zFilter.filter(point.z, dtSeconds),
+                visibility = point.visibility,
+                presence = point.presence
+            )
+        }
     }
 }
