@@ -80,4 +80,5 @@
     <string name="record_timelapse_video">Record Timelapse video</string>
     <string name="movement_gauge_drift">Drift</string>
     <string name="movement_gauge_motion">Motion</string>
+    <string name="violation_count_face">Face</string>
 </resources>

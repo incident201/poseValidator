@@ -102,7 +102,8 @@ data class MovementGaugeState(
 
 data class RuleViolationCounts(
     val drift: Int = 0,
-    val motion: Int = 0
+    val motion: Int = 0,
+    val face: Int = 0
 )
 
 class GameViewModel(application: Application) : AndroidViewModel(application), SensorEventListener {
@@ -474,8 +475,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _ruleViolationCounts.value = when (type) {
             RuleViolationType.Drift -> _ruleViolationCounts.value.copy(drift = _ruleViolationCounts.value.drift + 1)
             RuleViolationType.Motion -> _ruleViolationCounts.value.copy(motion = _ruleViolationCounts.value.motion + 1)
-            RuleViolationType.PersonDisappeared,
-            RuleViolationType.FaceNotMatchingMode -> _ruleViolationCounts.value
+            RuleViolationType.FaceNotMatchingMode -> _ruleViolationCounts.value.copy(face = _ruleViolationCounts.value.face + 1)
+            RuleViolationType.PersonDisappeared -> _ruleViolationCounts.value
         }
     }
 

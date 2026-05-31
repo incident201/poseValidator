@@ -614,6 +614,10 @@ private fun ViolationCountsOverlay(
             label = localizedString(language, R.string.movement_gauge_motion),
             count = counts.motion
         )
+        ViolationCountText(
+            label = localizedString(language, R.string.violation_count_face),
+            count = counts.face
+        )
     }
 }
 
