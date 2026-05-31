@@ -37,6 +37,7 @@
     <string name="violation_recorded">Зафиксировано нарушение</string>
     <string name="motion_violation_voice">Вы двинулись</string>
     <string name="drift_violation_voice">Вы изменили позу</string>
+    <string name="violation_counts_title">Нарушения:</string>
     <string name="violations_counter">Нарушений: %1$d</string>
     <string name="take_position">Займите позицию</string>
     <string name="place_device_still">Поставьте устройство неподвижно</string>

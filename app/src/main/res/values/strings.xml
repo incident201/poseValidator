@@ -37,6 +37,7 @@
     <string name="violation_recorded">Violation recorded</string>
     <string name="motion_violation_voice">You moved</string>
     <string name="drift_violation_voice">You changed pose</string>
+    <string name="violation_counts_title">Violations:</string>
     <string name="violations_counter">Violations: %1$d</string>
     <string name="take_position">Take position</string>
     <string name="place_device_still">Place the device still</string>
