@@ -146,11 +146,13 @@ fun CameraScreen(
     val startDelayRemainingSeconds by viewModel.startDelayRemainingSeconds.collectAsState()
     val poseOverlayState by viewModel.poseOverlayState.collectAsState()
     val movementGaugeState by viewModel.movementGaugeState.collectAsState()
+    val violationCount by viewModel.violationCount.collectAsState()
     VoiceAnnouncer(viewModel = viewModel, language = gameSettings.language)
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val canOpenSettings = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
     val currentGameState = rememberUpdatedState(gameState)
     val currentTimelapseRecordingEnabled = rememberUpdatedState(gameSettings.timelapseRecordingEnabled)
+    val currentViolationCount = rememberUpdatedState(violationCount)
     val timelapseRecorder = remember(context) { TimelapseRecorder(context.applicationContext) }
     var pendingTimelapseFile by remember { mutableStateOf<File?>(null) }
     val timelapseSaveErrorText = localizedString(gameSettings.language, R.string.timelapse_save_error)
@@ -158,6 +160,8 @@ fun CameraScreen(
     val saveTimelapseMessageText = localizedString(gameSettings.language, R.string.save_timelapse_message)
     val saveText = localizedString(gameSettings.language, R.string.save)
     val dontSaveText = localizedString(gameSettings.language, R.string.dont_save)
+    val violationsCounterText = localizedString(gameSettings.language, R.string.violations_counter)
+    val currentViolationsCounterText = rememberUpdatedState(violationsCounterText)
 
     val keepScreenOn = gameState == GameState.WaitingForStabilization ||
         gameState == GameState.StartingDelay ||
@@ -430,7 +434,9 @@ fun CameraScreen(
                                     ) {
                                         timelapseRecorder.offerFrame(
                                             bitmap = pipelineBitmap,
-                                            timestampMs = timestampMs
+                                            timestampMs = timestampMs,
+                                            violationsCount = currentViolationCount.value,
+                                            violationsText = currentViolationsCounterText.value
                                         )
                                     }
                                     submitFrameToPosePipeline(

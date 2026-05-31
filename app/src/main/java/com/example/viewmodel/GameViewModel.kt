@@ -124,6 +124,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     val gameState: StateFlow<GameState> = _gameState.asStateFlow()
     private val _timerSeconds = MutableStateFlow(defaultDurationSeconds)
     val timerSeconds: StateFlow<Int> = _timerSeconds.asStateFlow()
+    private val _violationCount = MutableStateFlow(0)
+    val violationCount: StateFlow<Int> = _violationCount.asStateFlow()
     private val _selectedDurationSeconds = MutableStateFlow(defaultDurationSeconds)
     val selectedDurationSeconds: StateFlow<Int> = _selectedDurationSeconds.asStateFlow()
     private val _statusMessage = MutableStateFlow("")
@@ -163,7 +165,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private var startDelayJob: Job? = null
     private var timerJob: Job? = null
 
-    private var violationCount = 0
+    private var currentViolationCount = 0
     private var lastPenaltyAtMs = 0L
     private var consecutiveFaceFailFrames = 0
     private val faceFailFramesThreshold = 5
@@ -440,8 +442,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             return false
         }
 
-        violationCount += 1
-        if (violationCount >= _gameSettings.value.maxViolations) {
+        currentViolationCount += 1
+        _violationCount.value = currentViolationCount
+        if (currentViolationCount >= _gameSettings.value.maxViolations) {
             val defeatReason = when (type) {
                 RuleViolationType.Drift -> tr(R.string.defeat_drift)
                 RuleViolationType.Motion -> tr(R.string.defeat_motion)
@@ -454,7 +457,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             return true
         }
 
-        applyPenalty(type, penaltyMinutesForViolation(violationCount))
+        applyPenalty(type, penaltyMinutesForViolation(currentViolationCount))
         lastPenaltyAtMs = now
         return false
     }
@@ -495,12 +498,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             return
         }
 
+        val voicePrefix = when (type) {
+            RuleViolationType.Motion -> tr(R.string.motion_violation_voice)
+            RuleViolationType.Drift -> tr(R.string.drift_violation_voice)
+            else -> tr(R.string.violation_recorded)
+        }
+
         if (_gameSettings.value.penaltiesEnabled) {
             _statusMessage.value = tr(R.string.violation_recorded_with_penalty, minutes)
-            speak("${tr(R.string.violation_recorded)}. ${tr(R.string.penalty_added_to_timer, minutes)}")
+            speak("$voicePrefix. ${tr(R.string.penalty_added_to_timer, minutes)}")
         } else {
             _statusMessage.value = tr(R.string.violation_recorded)
-            speak(tr(R.string.violation_recorded))
+            speak(voicePrefix)
         }
     }
 
@@ -612,7 +621,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             processingGeneration += 1
             movementTracker.reset()
             poseSmoother.reset()
-            violationCount = 0
+            currentViolationCount = 0
+            _violationCount.value = 0
             lastPenaltyAtMs = 0L
             consecutiveFaceFailFrames = 0
         }
@@ -652,7 +662,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             synchronized(processingLock) {
                 processingGeneration += 1
                 movementTracker.reset()
-                violationCount = 0
+                currentViolationCount = 0
+                _violationCount.value = 0
                 lastPenaltyAtMs = 0L
                 consecutiveFaceFailFrames = 0
                 movementTracker.startTracking(initialPose)
@@ -702,7 +713,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     fun triggerDefeat(reason: String, voiceMessage: String = tr(R.string.defeat_try_again)) { val alreadyFailed = _gameState.value == GameState.Failed; startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset() }; resetMovementGaugeState(); _gameState.value = GameState.Failed; _defeatReason.value = reason; _statusMessage.value = tr(R.string.check_failed); if (!alreadyFailed) speak(voiceMessage) }
     private fun speak(text: String) { _voiceEvents.tryEmit(text) }
 
-    fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset(); movementTracker.reset(); violationCount = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }; resetMovementGaugeState(); _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _timerSeconds.value = _selectedDurationSeconds.value }
+    fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset(); movementTracker.reset(); currentViolationCount = 0; _violationCount.value = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }; resetMovementGaugeState(); _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _timerSeconds.value = _selectedDurationSeconds.value }
     override fun onCleared() { isCleared = true; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
 }
 

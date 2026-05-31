@@ -35,6 +35,9 @@
     <string name="time_penalty_disabled">Time penalty is disabled</string>
     <string name="violation_recorded_with_penalty">Violation recorded: +%1$d min</string>
     <string name="violation_recorded">Violation recorded</string>
+    <string name="motion_violation_voice">You moved</string>
+    <string name="drift_violation_voice">You changed pose</string>
+    <string name="violations_counter">Violations: %1$d</string>
     <string name="take_position">Take position</string>
     <string name="place_device_still">Place the device still</string>
     <string name="start_in_pose">Start in %1$d sec. Take the pose</string>
