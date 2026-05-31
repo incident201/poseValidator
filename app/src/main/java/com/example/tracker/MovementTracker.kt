@@ -367,12 +367,12 @@ class MovementTracker {
 
         val sorted = values.sorted()
         val trimmedMean = robustMean(values)
-
-        // Ignore a single isolated outlier, but catch local limb changes
-        // where at least two landmarks move together, e.g. elbow + wrist or knee + ankle.
         val secondLargest = sorted[sorted.lastIndex - 1]
+        val largest = sorted.last()
 
-        return maxOf(trimmedMean, secondLargest)
+        // Count both distributed pose changes and single-landmark movement.
+        // One Euro landmark smoothing, deadband and temporal violation logic now protect against brief noisy outliers.
+        return maxOf(trimmedMean, secondLargest, largest)
     }
 
     private fun applyDeadband(value: Float, deadband: Float): Float {
