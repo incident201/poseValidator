@@ -50,7 +50,10 @@ class MovementTrackerTest {
 
         tracker.startTracking(reference)
         val firstResult = tracker.trackFrame(armsLowered, currentTime = 0L)
-        val sustainedResult = tracker.trackFrame(armsLowered, currentTime = 1601L)
+        var sustainedResult: TrackingResult = firstResult
+        for (time in 250L..1750L step 250L) {
+            sustainedResult = tracker.trackFrame(armsLowered, currentTime = time)
+        }
 
         assertTrue(firstResult.metrics.driftNormalizedScore > firstResult.metrics.driftThresholdFactor)
         assertTrue(sustainedResult.violation is MovementTracker.Violation.DriftLimitExceeded)
@@ -67,7 +70,10 @@ class MovementTrackerTest {
 
         tracker.startTracking(reference)
         val firstResult = tracker.trackFrame(leftArmLowered, currentTime = 0L)
-        val sustainedResult = tracker.trackFrame(leftArmLowered, currentTime = 1601L)
+        var sustainedResult: TrackingResult = firstResult
+        for (time in 250L..1750L step 250L) {
+            sustainedResult = tracker.trackFrame(leftArmLowered, currentTime = time)
+        }
 
         assertTrue(firstResult.metrics.driftNormalizedScore > firstResult.metrics.driftThresholdFactor)
         assertTrue(sustainedResult.violation is MovementTracker.Violation.DriftLimitExceeded)
@@ -116,11 +122,68 @@ class MovementTrackerTest {
         tracker.trackFrame(reference.translated(dx = 0.048f), currentTime = 1000L)
         tracker.trackFrame(reference.translated(dx = 0.064f), currentTime = 1500L)
         val driftStarted = tracker.trackFrame(reference.translated(dx = 0.088f), currentTime = 2000L)
-        val driftExceeded = tracker.trackFrame(reference.translated(dx = 0.088f), currentTime = 3601L)
+        var driftExceeded: TrackingResult = driftStarted
+        for (time in 2250L..3500L step 250L) {
+            driftExceeded = tracker.trackFrame(reference.translated(dx = 0.088f), currentTime = time)
+        }
 
         assertTrue(driftStarted.metrics.driftNormalizedScore > driftStarted.metrics.driftThresholdFactor)
         assertTrue(driftStarted.metrics.motionNormalizedScore <= driftStarted.metrics.motionThresholdFactor)
         assertTrue(driftExceeded.violation is MovementTracker.Violation.DriftLimitExceeded)
+    }
+
+
+    @Test
+    fun `drift with brief dip below threshold still breaches after grace period`() {
+        val tracker = MovementTracker().apply {
+            motionThresholdFactor = 1f
+        }
+        val reference = referencePose()
+        val changedPose = reference.translated(dx = 0.09f)
+        val nearReferencePose = reference.translated(dx = 0.073f)
+
+        tracker.startTracking(reference)
+        tracker.trackFrame(changedPose, currentTime = 0L)
+        tracker.trackFrame(changedPose, currentTime = 250L)
+        tracker.trackFrame(changedPose, currentTime = 500L)
+        val briefDip = tracker.trackFrame(nearReferencePose, currentTime = 750L)
+
+        assertTrue(briefDip.metrics.driftNormalizedScore < briefDip.metrics.driftThresholdFactor)
+        assertTrue(
+            briefDip.metrics.driftNormalizedScore >
+                briefDip.metrics.driftThresholdFactor * 0.85f
+        )
+
+        var result: TrackingResult = briefDip
+        for (time in 1000L..2000L step 250L) {
+            result = tracker.trackFrame(changedPose, currentTime = time)
+        }
+
+        assertTrue(result.violation is MovementTracker.Violation.DriftLimitExceeded)
+    }
+
+    @Test
+    fun `returning to normal pose resets drift accumulation`() {
+        val tracker = MovementTracker().apply {
+            motionThresholdFactor = 1f
+        }
+        val reference = referencePose()
+        val changedPose = reference.translated(dx = 0.09f)
+
+        tracker.startTracking(reference)
+        tracker.trackFrame(changedPose, currentTime = 0L)
+        tracker.trackFrame(changedPose, currentTime = 250L)
+        tracker.trackFrame(changedPose, currentTime = 500L)
+        tracker.trackFrame(changedPose, currentTime = 750L)
+        val resetResult = tracker.trackFrame(reference, currentTime = 1000L)
+        val restartedResult = tracker.trackFrame(changedPose, currentTime = 1250L)
+
+        assertTrue(
+            resetResult.metrics.driftNormalizedScore <
+                resetResult.metrics.driftThresholdFactor * 0.85f
+        )
+        assertTrue(resetResult.violation is MovementTracker.Violation.None)
+        assertTrue(restartedResult.violation is MovementTracker.Violation.None)
     }
 
     @Test

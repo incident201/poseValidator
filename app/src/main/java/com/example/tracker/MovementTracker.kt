@@ -115,8 +115,13 @@ class MovementTracker {
     private val motionImmediateSpikeMultiplier = 2.5f
 
     // Track state times for breaches
-    private var driftExceededSince: Long? = null
     private var motionExceededSince: Long? = null
+    private var driftBreachAccumulatedMs: Long = 0L
+    private var lastDriftCheckTimeMs: Long? = null
+
+    private val driftGraceMs = 1500L
+    private val driftResetFactor = 0.85f
+    private val driftDecayMultiplier = 0.5f
 
     sealed class Violation {
         object None : Violation()
@@ -133,7 +138,8 @@ class MovementTracker {
         previousPose = pose
         previousNormalizedPose = referenceNormalizedPose
         previousCenter = referenceCenter
-        driftExceededSince = null
+        driftBreachAccumulatedMs = 0L
+        lastDriftCheckTimeMs = null
         motionExceededSince = null
         Log.i(TAG, "Started tracking with 2D reference scale = $referenceScale")
     }
@@ -146,7 +152,8 @@ class MovementTracker {
         referenceNormalizedPose = emptyMap()
         previousNormalizedPose = null
         previousCenter = null
-        driftExceededSince = null
+        driftBreachAccumulatedMs = 0L
+        lastDriftCheckTimeMs = null
         motionExceededSince = null
     }
 
@@ -214,15 +221,33 @@ class MovementTracker {
     }
 
     private fun evaluateViolation(driftScore: Float, motionScore: Float, currentTime: Long): Violation {
-        if (driftScore > driftThresholdFactor) {
-            if (driftExceededSince == null) {
-                driftExceededSince = currentTime
-            } else if (currentTime - driftExceededSince!! > 1500) {
-                Log.w(TAG, "Drift breach! Score: $driftScore, Threshold: $driftThresholdFactor")
-                return Violation.DriftLimitExceeded(driftScore, driftThresholdFactor)
-            }
+        val previousDriftCheckTime = lastDriftCheckTimeMs
+        val driftDtMs = if (previousDriftCheckTime == null) {
+            0L
         } else {
-            driftExceededSince = null
+            (currentTime - previousDriftCheckTime).coerceIn(0L, 250L)
+        }
+        lastDriftCheckTimeMs = currentTime
+
+        val driftEnterThreshold = driftThresholdFactor
+        val driftResetThreshold = driftThresholdFactor * driftResetFactor
+
+        if (driftScore > driftEnterThreshold) {
+            driftBreachAccumulatedMs += driftDtMs
+        } else if (driftScore < driftResetThreshold) {
+            driftBreachAccumulatedMs = 0L
+        } else {
+            val decayMs = (driftDtMs * driftDecayMultiplier).toLong()
+            driftBreachAccumulatedMs = (driftBreachAccumulatedMs - decayMs).coerceAtLeast(0L)
+        }
+
+        if (driftBreachAccumulatedMs > driftGraceMs) {
+            Log.w(
+                TAG,
+                "Drift breach! Score: $driftScore, Threshold: $driftThresholdFactor, " +
+                    "AccumulatedMs: $driftBreachAccumulatedMs"
+            )
+            return Violation.DriftLimitExceeded(driftScore, driftThresholdFactor)
         }
 
         if (motionScore >= motionThresholdFactor * motionImmediateSpikeMultiplier) {
