@@ -11,6 +11,7 @@ import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.TimeUnit
 
 class PoseLandmarkerService(
     private val context: Context,
@@ -106,6 +107,7 @@ class PoseLandmarkerService(
         if (poseLandmarker == null) return false
 
         return runOnInferenceThread("detect pose frame") {
+            if (isClosed) return@runOnInferenceThread
             val landmarker = poseLandmarker ?: return@runOnInferenceThread
 
             try {
@@ -180,13 +182,18 @@ class PoseLandmarkerService(
     }
 
     fun close() {
-        synchronized(lifecycleLock) {
-            if (isClosed) return
-            isClosed = true
+        val shouldClose = synchronized(lifecycleLock) {
+            if (isClosed) {
+                false
+            } else {
+                isClosed = true
+                true
+            }
         }
+        if (!shouldClose) return
 
-        try {
-            inferenceExecutor.execute {
+        val closeFuture = try {
+            inferenceExecutor.submit {
                 try {
                     poseLandmarker?.close()
                 } catch (t: Throwable) {
@@ -194,7 +201,6 @@ class PoseLandmarkerService(
                 } finally {
                     poseLandmarker = null
                     activeDelegate = null
-                    inferenceExecutor.shutdown()
                 }
             }
         } catch (e: RejectedExecutionException) {
@@ -202,6 +208,37 @@ class PoseLandmarkerService(
             poseLandmarker = null
             activeDelegate = null
             inferenceExecutor.shutdown()
+            return
+        }
+
+        var wasInterrupted = false
+        try {
+            while (true) {
+                try {
+                    closeFuture.get()
+                    break
+                } catch (e: InterruptedException) {
+                    wasInterrupted = true
+                    Log.w(TAG, "Interrupted while waiting for Pose Landmarker close; continuing to preserve close barrier", e)
+                }
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed while closing Pose Landmarker delegate=$activeDelegate", t)
+        } finally {
+            poseLandmarker = null
+            activeDelegate = null
+            inferenceExecutor.shutdown()
+            runCatching {
+                val terminated = inferenceExecutor.awaitTermination(1, TimeUnit.SECONDS)
+                if (!terminated) {
+                    Log.w(TAG, "Pose Landmarker inference executor did not terminate cleanly")
+                }
+            }.onFailure {
+                Log.w(TAG, "Pose Landmarker inference executor did not terminate cleanly", it)
+            }
+            if (wasInterrupted) {
+                Thread.currentThread().interrupt()
+            }
         }
     }
 
