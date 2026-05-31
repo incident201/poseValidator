@@ -3,7 +3,7 @@
     <string name="settings">Настройки</string>
     <string name="back">Назад</string>
     <string name="camera">КАМЕРА</string>
-    <string name="face_detection">Определение лица</string>
+    <string name="face_detection">Требовать положение лица</string>
     <string name="face_away">Лицом от камеры</string>
     <string name="face_to_camera">Лицом в камеру</string>
     <string name="do_not_check">Не проверять</string>
@@ -57,7 +57,12 @@
     <string name="second_violation_min">Второе нарушение (мин)</string>
     <string name="third_violation_min">Третье нарушение (мин)</string>
     <string name="subsequent_violation_min">Последующие нарушения (мин)</string>
-    <string name="motion_reaction">Реакция на движение</string>
+    <string name="motion_reaction">Чувствительность</string>
+    <string name="sensitivity">Чувствительность</string>
+    <string name="sensitivity_high">Высокая</string>
+    <string name="sensitivity_normal">Обычная</string>
+    <string name="sensitivity_low">Низкая</string>
+    <string name="sensitivity_very_low">Очень низкая</string>
     <string name="drift_threshold">Порог смещения</string>
     <string name="abrupt_motion_threshold">Порог резкого движения</string>
     <string name="min_short">мин</string>

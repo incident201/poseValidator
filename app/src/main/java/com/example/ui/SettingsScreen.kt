@@ -29,7 +29,6 @@ internal fun SettingsScreen(
     settings: GameSettings,
     onClose: () -> Unit,
     onFaceModeChanged: (FaceCheckMode) -> Unit,
-    onFaceConfidenceChanged: (Float) -> Unit,
     onDriftChanged: (Float) -> Unit,
     onMotionChanged: (Float) -> Unit,
     onPenaltyIntervalChanged: (Int) -> Unit,
@@ -42,11 +41,16 @@ internal fun SettingsScreen(
     onLanguageChanged: (AppLanguage) -> Unit,
     onTimelapseRecordingEnabledChanged: (Boolean) -> Unit
  ) {
-    var faceConfidenceSlider by remember(settings.faceDetectionConfidence) {
-        mutableFloatStateOf(settings.faceDetectionConfidence)
-    }
-
     val colorScheme = MaterialTheme.colorScheme
+    val normalSensitivity = SensitivityPresets.first { it.nameRes == R.string.sensitivity_normal }
+    val selectedSensitivity = SensitivityPresets.firstOrNull { it.matches(settings) } ?: normalSensitivity
+
+    LaunchedEffect(selectedSensitivity, settings.driftThresholdFactor, settings.motionThresholdFactor) {
+        if (!selectedSensitivity.matches(settings)) {
+            onDriftChanged(normalSensitivity.driftThresholdFactor)
+            onMotionChanged(normalSensitivity.motionThresholdFactor)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -76,6 +80,12 @@ internal fun SettingsScreen(
             )
         }
         Spacer(Modifier.height(12.dp))
+        LanguageSettingsCard(
+            language = settings.language,
+            onLanguageChanged = onLanguageChanged,
+            colorScheme = colorScheme
+        )
+        Spacer(Modifier.height(12.dp))
         Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
             Column(Modifier.padding(16.dp)) {
                 Text(localizedString(settings.language, R.string.face_detection), color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
@@ -89,18 +99,6 @@ internal fun SettingsScreen(
                         Text(label, color = colorScheme.onSurfaceVariant)
                     }
                 }
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
-            Column(Modifier.padding(16.dp)) {
-                Text("${localizedString(settings.language, R.string.face_detection_threshold)}: ${"%.2f".format(faceConfidenceSlider)}", color = colorScheme.onSurfaceVariant)
-                Slider(
-                    value = faceConfidenceSlider,
-                    onValueChange = { faceConfidenceSlider = it.coerceIn(0.5f, 0.95f) },
-                    onValueChangeFinished = { onFaceConfidenceChanged(faceConfidenceSlider) },
-                    valueRange = 0.5f..0.95f
-                )
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -161,48 +159,16 @@ internal fun SettingsScreen(
         Spacer(Modifier.height(12.dp))
         Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
             Column(Modifier.padding(16.dp)) {
-                Text(localizedString(settings.language, R.string.motion_reaction), color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
-                Text("${localizedString(settings.language, R.string.drift_threshold)}: ${"%.2f".format(settings.driftThresholdFactor)}", color = colorScheme.onSurfaceVariant)
-                Slider(value = settings.driftThresholdFactor, onValueChange = onDriftChanged, valueRange = 0.05f..0.40f)
-                Text("${localizedString(settings.language, R.string.abrupt_motion_threshold)}: ${"%.2f".format(settings.motionThresholdFactor)}", color = colorScheme.onSurfaceVariant)
-                Slider(value = settings.motionThresholdFactor, onValueChange = onMotionChanged, valueRange = 0.03f..0.25f)
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
-            Column(Modifier.padding(16.dp)) {
-                Text(localizedString(settings.language, R.string.language), color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+                Text(localizedString(settings.language, R.string.sensitivity), color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onLanguageChanged(AppLanguage.English) }
-                        .padding(horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(selected = settings.language == AppLanguage.English, onClick = { onLanguageChanged(AppLanguage.English) })
-                    Text(
-                        localizedString(settings.language, R.string.language_english),
-                        color = colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onLanguageChanged(AppLanguage.Russian) }
-                        .padding(horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(selected = settings.language == AppLanguage.Russian, onClick = { onLanguageChanged(AppLanguage.Russian) })
-                    Text(
-                        localizedString(settings.language, R.string.language_russian),
-                        color = colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                SensitivityDropdown(
+                    language = settings.language,
+                    selectedPreset = selectedSensitivity,
+                    onPresetSelected = { preset ->
+                        onDriftChanged(preset.driftThresholdFactor)
+                        onMotionChanged(preset.motionThresholdFactor)
+                    }
+                )
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -263,3 +229,107 @@ private fun IntegerSettingField(
     Spacer(Modifier.height(8.dp))
 }
 
+
+private data class SensitivityPreset(
+    val nameRes: Int,
+    val driftThresholdFactor: Float,
+    val motionThresholdFactor: Float
+) {
+    fun matches(settings: GameSettings): Boolean =
+        driftThresholdFactor.nearlyEquals(settings.driftThresholdFactor) &&
+            motionThresholdFactor.nearlyEquals(settings.motionThresholdFactor)
+}
+
+private val SensitivityPresets = listOf(
+    SensitivityPreset(R.string.sensitivity_normal, 0.12f, 0.06f),
+    SensitivityPreset(R.string.sensitivity_high, 0.10f, 0.04f),
+    SensitivityPreset(R.string.sensitivity_low, 0.15f, 0.08f),
+    SensitivityPreset(R.string.sensitivity_very_low, 0.17f, 0.09f)
+)
+
+private fun Float.nearlyEquals(other: Float): Boolean = kotlin.math.abs(this - other) < 0.001f
+
+@Composable
+private fun LanguageSettingsCard(
+    language: AppLanguage,
+    onLanguageChanged: (AppLanguage) -> Unit,
+    colorScheme: ColorScheme
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp)) {
+            Text(localizedString(language, R.string.language), color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onLanguageChanged(AppLanguage.English) }
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(selected = language == AppLanguage.English, onClick = { onLanguageChanged(AppLanguage.English) })
+                Text(
+                    localizedString(language, R.string.language_english),
+                    color = colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onLanguageChanged(AppLanguage.Russian) }
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(selected = language == AppLanguage.Russian, onClick = { onLanguageChanged(AppLanguage.Russian) })
+                Text(
+                    localizedString(language, R.string.language_russian),
+                    color = colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SensitivityDropdown(
+    language: AppLanguage,
+    selectedPreset: SensitivityPreset,
+    onPresetSelected: (SensitivityPreset) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded }
+    ) {
+        OutlinedTextField(
+            value = localizedString(language, selectedPreset.nameRes),
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            SensitivityPresets.forEach { preset ->
+                DropdownMenuItem(
+                    text = { Text(localizedString(language, preset.nameRes)) },
+                    onClick = {
+                        expanded = false
+                        onPresetSelected(preset)
+                    }
+                )
+            }
+        }
+    }
+}

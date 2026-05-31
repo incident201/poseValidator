@@ -332,7 +332,6 @@ fun CameraScreen(
             settings = gameSettings,
             onClose = { showSettings = false },
             onFaceModeChanged = viewModel::updateFaceCheckMode,
-            onFaceConfidenceChanged = viewModel::updateFaceDetectionConfidence,
             onDriftChanged = viewModel::updateDriftThresholdFactor,
             onMotionChanged = viewModel::updateMotionThresholdFactor,
             onPenaltyIntervalChanged = viewModel::updateMinimumPenaltyIntervalSeconds,

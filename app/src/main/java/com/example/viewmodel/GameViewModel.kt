@@ -34,6 +34,7 @@ import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 import kotlin.math.sqrt
 
 enum class GameState {
@@ -66,7 +67,7 @@ data class GameSettings(
     val secondViolationPenaltyMinutes: Int = 3,
     val thirdViolationPenaltyMinutes: Int = 3,
     val subsequentViolationPenaltyMinutes: Int = 3,
-    val timelapseRecordingEnabled: Boolean = false
+    val timelapseRecordingEnabled: Boolean = true
 )
 
 data class FaceOverlayPoint(val x: Float, val y: Float)
@@ -198,12 +199,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         val mode = runCatching { FaceCheckMode.valueOf(prefs.getString("face_mode", FaceCheckMode.FaceAwayFromCamera.name) ?: FaceCheckMode.FaceAwayFromCamera.name) }
             .getOrDefault(FaceCheckMode.FaceAwayFromCamera)
         val language = runCatching { AppLanguage.valueOf(prefs.getString("app_language", AppLanguage.English.name) ?: AppLanguage.English.name) }.getOrDefault(AppLanguage.English)
+        val (driftThresholdFactor, motionThresholdFactor) = normalizeSensitivityThresholds(
+            drift = prefs.getFloat("pose_drift_factor_v2", 0.12f).coerceIn(0.05f, 0.40f),
+            motion = prefs.getFloat("pose_motion_factor_v2", 0.06f).coerceIn(0.03f, 0.25f)
+        )
         return GameSettings(
             language = language,
             faceCheckMode = mode,
-            faceDetectionConfidence = prefs.getFloat("face_conf", 0.8f).coerceIn(0.5f, 0.95f),
-            driftThresholdFactor = prefs.getFloat("pose_drift_factor_v2", 0.12f).coerceIn(0.05f, 0.40f),
-            motionThresholdFactor = prefs.getFloat("pose_motion_factor_v2", 0.06f).coerceIn(0.03f, 0.25f),
+            faceDetectionConfidence = 0.8f,
+            driftThresholdFactor = driftThresholdFactor,
+            motionThresholdFactor = motionThresholdFactor,
             minimumPenaltyIntervalSeconds = prefs.getInt("penalty_interval_sec", 5).coerceIn(0, 30),
             maxViolations = prefs.getInt("max_violations", 4).coerceIn(0, 9999),
             penaltiesEnabled = prefs.getBoolean("penalties_enabled", true),
@@ -211,8 +216,21 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             secondViolationPenaltyMinutes = prefs.getInt("penalty_2_min", 3).coerceIn(0, 9999),
             thirdViolationPenaltyMinutes = prefs.getInt("penalty_3_min", 3).coerceIn(0, 9999),
             subsequentViolationPenaltyMinutes = prefs.getInt("penalty_subsequent_min", 3).coerceIn(0, 9999),
-            timelapseRecordingEnabled = prefs.getBoolean("timelapse_recording_enabled", false)
+            timelapseRecordingEnabled = prefs.getBoolean("timelapse_recording_enabled", true)
         )
+    }
+
+
+    private fun normalizeSensitivityThresholds(drift: Float, motion: Float): Pair<Float, Float> {
+        val presets = listOf(
+            0.12f to 0.06f,
+            0.10f to 0.04f,
+            0.15f to 0.08f,
+            0.17f to 0.09f
+        )
+        return presets.firstOrNull { (presetDrift, presetMotion) ->
+            abs(presetDrift - drift) < 0.001f && abs(presetMotion - motion) < 0.001f
+        } ?: (0.12f to 0.06f)
     }
 
     private fun applySettingsToEngines(settings: GameSettings) {
