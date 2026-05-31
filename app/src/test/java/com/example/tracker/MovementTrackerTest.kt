@@ -80,18 +80,38 @@ class MovementTrackerTest {
     }
 
     @Test
-    fun `single landmark outlier is ignored by robust shape score`() {
+    fun `single wrist pose change contributes to drift`() {
         val tracker = MovementTracker()
         val reference = referencePose()
-        val oneWristOutlier = reference.withMovedLandmarks(
-            15 to Point3D(0.32f, 0.76f, 0f)
+        val wristMoved = reference.withMovedLandmarks(
+            15 to Point3D(0.25f, 0.78f, 0f)
         )
 
         tracker.startTracking(reference)
-        val result = tracker.trackFrame(oneWristOutlier, currentTime = 0L)
 
-        assertTrue(result.metrics.driftNormalizedScore <= result.metrics.driftThresholdFactor)
-        assertTrue(result.violation is MovementTracker.Violation.None)
+        val firstResult = tracker.trackFrame(wristMoved, currentTime = 0L)
+        var result = firstResult
+        for (time in 250L..1750L step 250L) {
+            result = tracker.trackFrame(wristMoved, currentTime = time)
+        }
+
+        assertTrue(firstResult.metrics.driftNormalizedScore > firstResult.metrics.driftThresholdFactor)
+        assertTrue(result.violation is MovementTracker.Violation.DriftLimitExceeded)
+    }
+
+    @Test
+    fun `single wrist motion contributes to motion`() {
+        val tracker = MovementTracker()
+        val reference = referencePose()
+        val wristMoved = reference.withMovedLandmarks(
+            15 to Point3D(0.25f, 0.78f, 0f)
+        )
+
+        tracker.startTracking(reference)
+
+        val result = tracker.trackFrame(wristMoved, currentTime = 250L)
+
+        assertTrue(result.metrics.motionNormalizedScore > result.metrics.motionThresholdFactor)
     }
 
     @Test
