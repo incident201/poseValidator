@@ -37,6 +37,7 @@
     <string name="violation_recorded">Зафиксировано нарушение</string>
     <string name="motion_violation_voice">Вы двинулись</string>
     <string name="drift_violation_voice">Вы изменили позу</string>
+    <string name="violation_counts_title">Нарушения:</string>
     <string name="violations_counter">Нарушений: %1$d</string>
     <string name="take_position">Займите позицию</string>
     <string name="place_device_still">Поставьте устройство неподвижно</string>
@@ -77,6 +78,7 @@
     <string name="dont_save">Не сохранять</string>
     <string name="timelapse_save_error">Не удалось сохранить timelapse-видео.</string>
     <string name="record_timelapse_video">Записывать Timelapse видео</string>
-    <string name="movement_gauge_drift">Дрейф</string>
+    <string name="movement_gauge_drift">Смещение</string>
     <string name="movement_gauge_motion">Движение</string>
+    <string name="violation_count_face">Лицо</string>
 </resources>

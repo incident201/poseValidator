@@ -66,6 +66,7 @@ import com.example.viewmodel.GameState
 import com.example.viewmodel.GameViewModel
 import com.example.viewmodel.MovementGaugeState
 import com.example.viewmodel.PoseOverlayState
+import com.example.viewmodel.RuleViolationCounts
 import com.example.video.TimelapseRecorder
 import com.example.R
 import java.io.File
@@ -147,6 +148,7 @@ fun CameraScreen(
     val poseOverlayState by viewModel.poseOverlayState.collectAsState()
     val movementGaugeState by viewModel.movementGaugeState.collectAsState()
     val violationCount by viewModel.violationCount.collectAsState()
+    val ruleViolationCounts by viewModel.ruleViolationCounts.collectAsState()
     VoiceAnnouncer(viewModel = viewModel, language = gameSettings.language)
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val canOpenSettings = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
@@ -495,6 +497,17 @@ fun CameraScreen(
                 )
             }
 
+            if (gameState == GameState.HoldingPose) {
+                ViolationCountsOverlay(
+                    counts = ruleViolationCounts,
+                    language = gameSettings.language,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 10.dp, end = 10.dp)
+                        .zIndex(1f)
+                )
+            }
+
             if (movementGaugeState.active) {
                 MovementGaugeOverlay(
                     state = movementGaugeState,
@@ -570,6 +583,59 @@ fun CameraScreen(
             onStop = { viewModel.stopSession() }
         )
     }
+}
+
+@Composable
+private fun ViolationCountsOverlay(
+    counts: RuleViolationCounts,
+    language: AppLanguage,
+    modifier: Modifier = Modifier
+) {
+    val colorScheme = MaterialTheme.colorScheme
+
+    Column(
+        modifier = modifier
+            .background(colorScheme.surface.copy(alpha = 0.72f), RoundedCornerShape(12.dp))
+            .border(1.dp, colorScheme.outlineVariant.copy(alpha = 0.38f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            text = localizedString(language, R.string.violation_counts_title),
+            color = colorScheme.onSurface.copy(alpha = 0.88f),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold
+        )
+        ViolationCountText(
+            label = localizedString(language, R.string.movement_gauge_drift),
+            count = counts.drift
+        )
+        ViolationCountText(
+            label = localizedString(language, R.string.movement_gauge_motion),
+            count = counts.motion
+        )
+        ViolationCountText(
+            label = localizedString(language, R.string.violation_count_face),
+            count = counts.face
+        )
+    }
+}
+
+@Composable
+private fun ViolationCountText(
+    label: String,
+    count: Int,
+    modifier: Modifier = Modifier
+) {
+    Text(
+        text = "$label: $count",
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f),
+        fontSize = 9.sp,
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.SemiBold,
+        lineHeight = 10.sp
+    )
 }
 
 @Composable

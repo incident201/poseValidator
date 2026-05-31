@@ -57,8 +57,8 @@ data class GameSettings(
     val language: AppLanguage = AppLanguage.English,
     val faceCheckMode: FaceCheckMode = FaceCheckMode.FaceAwayFromCamera,
     val faceDetectionConfidence: Float = 0.8f,
-    val driftThresholdFactor: Float = 0.100f,
-    val motionThresholdFactor: Float = 0.04f,
+    val driftThresholdFactor: Float = 0.12f,
+    val motionThresholdFactor: Float = 0.06f,
     val minimumPenaltyIntervalSeconds: Int = 5,
     val maxViolations: Int = 4,
     val penaltiesEnabled: Boolean = true,
@@ -100,6 +100,12 @@ data class MovementGaugeState(
     val motionThresholdFactor: Float = 0f
 )
 
+data class RuleViolationCounts(
+    val drift: Int = 0,
+    val motion: Int = 0,
+    val face: Int = 0
+)
+
 class GameViewModel(application: Application) : AndroidViewModel(application), SensorEventListener {
     private val tag = "GameViewModel"
     private val defaultDurationSeconds = 180
@@ -126,6 +132,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     val timerSeconds: StateFlow<Int> = _timerSeconds.asStateFlow()
     private val _violationCount = MutableStateFlow(0)
     val violationCount: StateFlow<Int> = _violationCount.asStateFlow()
+    private val _ruleViolationCounts = MutableStateFlow(RuleViolationCounts())
+    val ruleViolationCounts: StateFlow<RuleViolationCounts> = _ruleViolationCounts.asStateFlow()
     private val _selectedDurationSeconds = MutableStateFlow(defaultDurationSeconds)
     val selectedDurationSeconds: StateFlow<Int> = _selectedDurationSeconds.asStateFlow()
     private val _statusMessage = MutableStateFlow("")
@@ -194,8 +202,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             language = language,
             faceCheckMode = mode,
             faceDetectionConfidence = prefs.getFloat("face_conf", 0.8f).coerceIn(0.5f, 0.95f),
-            driftThresholdFactor = prefs.getFloat("pose_drift_factor_v2", 0.100f).coerceIn(0.05f, 0.40f),
-            motionThresholdFactor = prefs.getFloat("pose_motion_factor_v2", 0.04f).coerceIn(0.03f, 0.25f),
+            driftThresholdFactor = prefs.getFloat("pose_drift_factor_v2", 0.12f).coerceIn(0.05f, 0.40f),
+            motionThresholdFactor = prefs.getFloat("pose_motion_factor_v2", 0.06f).coerceIn(0.03f, 0.25f),
             minimumPenaltyIntervalSeconds = prefs.getInt("penalty_interval_sec", 5).coerceIn(0, 30),
             maxViolations = prefs.getInt("max_violations", 4).coerceIn(0, 9999),
             penaltiesEnabled = prefs.getBoolean("penalties_enabled", true),
@@ -444,6 +452,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
         currentViolationCount += 1
         _violationCount.value = currentViolationCount
+        updateRuleViolationCounts(type)
         if (currentViolationCount >= _gameSettings.value.maxViolations) {
             val defeatReason = when (type) {
                 RuleViolationType.Drift -> tr(R.string.defeat_drift)
@@ -460,6 +469,19 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         applyPenalty(type, penaltyMinutesForViolation(currentViolationCount))
         lastPenaltyAtMs = now
         return false
+    }
+
+    private fun updateRuleViolationCounts(type: RuleViolationType) {
+        _ruleViolationCounts.value = when (type) {
+            RuleViolationType.Drift -> _ruleViolationCounts.value.copy(drift = _ruleViolationCounts.value.drift + 1)
+            RuleViolationType.Motion -> _ruleViolationCounts.value.copy(motion = _ruleViolationCounts.value.motion + 1)
+            RuleViolationType.FaceNotMatchingMode -> _ruleViolationCounts.value.copy(face = _ruleViolationCounts.value.face + 1)
+            RuleViolationType.PersonDisappeared -> _ruleViolationCounts.value
+        }
+    }
+
+    private fun resetRuleViolationCounts() {
+        _ruleViolationCounts.value = RuleViolationCounts()
     }
 
     private fun penaltyMinutesForViolation(violationIndex: Int): Int {
@@ -623,6 +645,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             poseSmoother.reset()
             currentViolationCount = 0
             _violationCount.value = 0
+            resetRuleViolationCounts()
             lastPenaltyAtMs = 0L
             consecutiveFaceFailFrames = 0
         }
@@ -664,6 +687,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 movementTracker.reset()
                 currentViolationCount = 0
                 _violationCount.value = 0
+                resetRuleViolationCounts()
                 lastPenaltyAtMs = 0L
                 consecutiveFaceFailFrames = 0
                 movementTracker.startTracking(initialPose)
@@ -713,7 +737,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     fun triggerDefeat(reason: String, voiceMessage: String = tr(R.string.defeat_try_again)) { val alreadyFailed = _gameState.value == GameState.Failed; startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset() }; resetMovementGaugeState(); _gameState.value = GameState.Failed; _defeatReason.value = reason; _statusMessage.value = tr(R.string.check_failed); if (!alreadyFailed) speak(voiceMessage) }
     private fun speak(text: String) { _voiceEvents.tryEmit(text) }
 
-    fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset(); movementTracker.reset(); currentViolationCount = 0; _violationCount.value = 0; lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }; resetMovementGaugeState(); _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _timerSeconds.value = _selectedDurationSeconds.value }
+    fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset(); movementTracker.reset(); currentViolationCount = 0; _violationCount.value = 0; resetRuleViolationCounts(); lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }; resetMovementGaugeState(); _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _timerSeconds.value = _selectedDurationSeconds.value }
     override fun onCleared() { isCleared = true; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
 }
 
