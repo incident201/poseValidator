@@ -497,14 +497,16 @@ fun CameraScreen(
                 )
             }
 
-            ViolationCountsOverlay(
-                counts = ruleViolationCounts,
-                language = gameSettings.language,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 10.dp, end = 10.dp)
-                    .zIndex(1f)
-            )
+            if (gameState == GameState.HoldingPose) {
+                ViolationCountsOverlay(
+                    counts = ruleViolationCounts,
+                    language = gameSettings.language,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 10.dp, end = 10.dp)
+                        .zIndex(1f)
+                )
+            }
 
             if (movementGaugeState.active) {
                 MovementGaugeOverlay(
