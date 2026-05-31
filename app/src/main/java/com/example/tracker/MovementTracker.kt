@@ -96,8 +96,8 @@ class MovementTracker {
     private val TAG = "MovementTracker"
 
     // Thresholds are normalized relative to the fixed reference pose scale.
-    var driftThresholdFactor: Float = 0.18f
-    var motionThresholdFactor: Float = 0.10f
+    var driftThresholdFactor: Float = 0.100f
+    var motionThresholdFactor: Float = 0.04f
 
     var referencePose: PoseLandmarks? = null
     var previousPose: PoseLandmarks? = null

@@ -141,10 +141,10 @@ class MovementTrackerTest {
         tracker.trackFrame(reference.translated(dx = 0.032f), currentTime = 500L)
         tracker.trackFrame(reference.translated(dx = 0.048f), currentTime = 1000L)
         tracker.trackFrame(reference.translated(dx = 0.064f), currentTime = 1500L)
-        val driftStarted = tracker.trackFrame(reference.translated(dx = 0.088f), currentTime = 2000L)
+        val driftStarted = tracker.trackFrame(reference.translated(dx = 0.080f), currentTime = 2000L)
         var driftExceeded: TrackingResult = driftStarted
         for (time in 2250L..3500L step 250L) {
-            driftExceeded = tracker.trackFrame(reference.translated(dx = 0.088f), currentTime = time)
+            driftExceeded = tracker.trackFrame(reference.translated(dx = 0.080f), currentTime = time)
         }
 
         assertTrue(driftStarted.metrics.driftNormalizedScore > driftStarted.metrics.driftThresholdFactor)
@@ -159,8 +159,8 @@ class MovementTrackerTest {
             motionThresholdFactor = 1f
         }
         val reference = referencePose()
-        val changedPose = reference.translated(dx = 0.09f)
-        val nearReferencePose = reference.translated(dx = 0.073f)
+        val changedPose = reference.translated(dx = 0.06f)
+        val nearReferencePose = reference.translated(dx = 0.046f)
 
         tracker.startTracking(reference)
         tracker.trackFrame(changedPose, currentTime = 0L)
