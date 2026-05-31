@@ -93,7 +93,7 @@ class TimelapseRecorder(
         }
     }
 
-    fun offerFrame(bitmap: Bitmap, timestampMs: Long) {
+    fun offerFrame(bitmap: Bitmap, timestampMs: Long, violationsCount: Int, violationsText: String) {
         if (isReleased || !isRecording) return
         val (recordingStartSnapshot, frameGeneration) = synchronized(lock) {
             if (isReleased || !isRecording) return
@@ -126,7 +126,12 @@ class TimelapseRecorder(
                     } ?: 0L
                     ensureEncoder(ownedBitmap)
                     pendingPresentationTimesUs.addLast((recordingElapsedMs * 1000L) / SPEED_FACTOR)
-                    frameWithTimer = drawElapsedTimer(ownedBitmap, timerElapsedMs)
+                    frameWithTimer = drawFrameOverlays(
+                        source = ownedBitmap,
+                        elapsedMs = timerElapsedMs,
+                        violationsCount = violationsCount,
+                        violationsText = violationsText
+                    )
                     renderFrameToSurface(frameWithTimer)
                     drainEncoder(endOfStream = false)
                 } catch (t: Throwable) {
@@ -252,7 +257,7 @@ class TimelapseRecorder(
         outputFile = tempFile
     }
 
-    private fun drawElapsedTimer(source: Bitmap, elapsedMs: Long): Bitmap {
+    private fun drawFrameOverlays(source: Bitmap, elapsedMs: Long, violationsCount: Int, violationsText: String): Bitmap {
         val target = Bitmap.createBitmap(videoWidth, videoHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(target)
 
@@ -279,26 +284,63 @@ class TimelapseRecorder(
         val paddingH = textSize * 0.35f
         val paddingV = textSize * 0.25f
         val margin = textSize * 0.35f
+        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(150, 0, 0, 0) }
+        val radius = textSize * 0.3f
 
+        drawBadge(
+            canvas = canvas,
+            text = text,
+            textPaint = textPaint,
+            bgPaint = bgPaint,
+            paddingH = paddingH,
+            paddingV = paddingV,
+            radius = radius,
+            left = margin,
+            top = margin
+        )
+
+        val violationsBadgeText = String.format(Locale.US, violationsText, violationsCount.coerceAtLeast(0))
+        val violationsWidth = textPaint.measureText(violationsBadgeText) + paddingH * 2f
+        drawBadge(
+            canvas = canvas,
+            text = violationsBadgeText,
+            textPaint = textPaint,
+            bgPaint = bgPaint,
+            paddingH = paddingH,
+            paddingV = paddingV,
+            radius = radius,
+            left = videoWidth - margin - violationsWidth,
+            top = margin
+        )
+
+        return target
+    }
+
+    private fun drawBadge(
+        canvas: Canvas,
+        text: String,
+        textPaint: Paint,
+        bgPaint: Paint,
+        paddingH: Float,
+        paddingV: Float,
+        radius: Float,
+        left: Float,
+        top: Float
+    ) {
         val metrics = textPaint.fontMetrics
         val textWidth = textPaint.measureText(text)
         val textHeight = metrics.descent - metrics.ascent
         val box = RectF(
-            margin,
-            margin,
-            margin + textWidth + paddingH * 2f,
-            margin + textHeight + paddingV * 2f
+            left,
+            top,
+            left + textWidth + paddingH * 2f,
+            top + textHeight + paddingV * 2f
         )
-
-        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(150, 0, 0, 0) }
-        val radius = textSize * 0.3f
         canvas.drawRoundRect(box, radius, radius, bgPaint)
 
         val textX = box.left + paddingH
         val baseline = box.top + paddingV - metrics.ascent
         canvas.drawText(text, textX, baseline, textPaint)
-
-        return target
     }
 
     private fun renderFrameToSurface(frame: Bitmap) {
@@ -401,7 +443,7 @@ class TimelapseRecorder(
     private companion object {
         private const val TAG = "TimelapseRecorder"
         private const val OUTPUT_FPS = 30
-        private const val CAPTURE_INTERVAL_MS = 333L
+        private const val CAPTURE_INTERVAL_MS = 100L
         private const val SPEED_FACTOR = 10L
         private const val I_FRAME_INTERVAL_SEC = 1
         private const val DRAIN_TIMEOUT_US = 10_000L

@@ -35,6 +35,9 @@
     <string name="time_penalty_disabled">Штраф по времени отключен</string>
     <string name="violation_recorded_with_penalty">Зафиксировано нарушение: +%1$d мин</string>
     <string name="violation_recorded">Зафиксировано нарушение</string>
+    <string name="motion_violation_voice">Вы двинулись</string>
+    <string name="drift_violation_voice">Вы изменили позу</string>
+    <string name="violations_counter">Нарушений: %1$d</string>
     <string name="take_position">Займите позицию</string>
     <string name="place_device_still">Поставьте устройство неподвижно</string>
     <string name="start_in_pose">Старт через %1$d сек. Прими позу</string>
