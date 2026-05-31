@@ -3,7 +3,7 @@
     <string name="settings">Settings</string>
     <string name="back">Back</string>
     <string name="camera">CAMERA</string>
-    <string name="face_detection">Face detection</string>
+    <string name="face_detection">Enforce face direction</string>
     <string name="face_away">Face away from camera</string>
     <string name="face_to_camera">Face to camera</string>
     <string name="do_not_check">Do not check</string>
@@ -57,7 +57,12 @@
     <string name="second_violation_min">Second violation (min)</string>
     <string name="third_violation_min">Third violation (min)</string>
     <string name="subsequent_violation_min">Subsequent violations (min)</string>
-    <string name="motion_reaction">Motion reaction</string>
+    <string name="motion_reaction">Sensitivity</string>
+    <string name="sensitivity">Sensitivity</string>
+    <string name="sensitivity_high">High</string>
+    <string name="sensitivity_normal">Normal</string>
+    <string name="sensitivity_low">Low</string>
+    <string name="sensitivity_very_low">Very low</string>
     <string name="drift_threshold">Drift threshold</string>
     <string name="abrupt_motion_threshold">Abrupt motion threshold</string>
     <string name="min_short">min</string>
