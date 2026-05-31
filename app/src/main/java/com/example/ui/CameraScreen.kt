@@ -59,6 +59,7 @@ import androidx.compose.ui.zIndex
 import androidx.annotation.StringRes
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.example.tracker.Point3D
 import com.example.tracker.PoseLandmarkerService
 import com.example.viewmodel.AppLanguage
 import com.example.viewmodel.GameState
@@ -732,10 +733,24 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
 
     if (!SHOW_POSE_DEBUG_POINTS) return
 
+    fun shouldDrawPosePoint(point: Point3D): Boolean {
+        return point.x.isFinite() &&
+            point.y.isFinite() &&
+            point.presence?.let { it >= 0.5f } != false
+    }
+
+    fun posePointColor(point: Point3D): Color {
+        return if (point.visibility?.let { it < 0.5f } == true) {
+            Color(0xFFFF9800)
+        } else {
+            Color.Cyan
+        }
+    }
+
     POSE_CONNECTIONS.forEach { (startIndex, endIndex) ->
         val start = overlayState.landmarks.getOrNull(startIndex) ?: return@forEach
         val end = overlayState.landmarks.getOrNull(endIndex) ?: return@forEach
-        if (!start.x.isFinite() || !start.y.isFinite() || !end.x.isFinite() || !end.y.isFinite()) return@forEach
+        if (!shouldDrawPosePoint(start) || !shouldDrawPosePoint(end)) return@forEach
 
         drawLine(
             color = Color.Cyan.copy(alpha = 0.65f),
@@ -746,9 +761,9 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
     }
 
     overlayState.landmarks.forEach { point ->
-        if (!point.x.isFinite() || !point.y.isFinite()) return@forEach
+        if (!shouldDrawPosePoint(point)) return@forEach
         drawCircle(
-            color = Color.Cyan.copy(alpha = 0.85f),
+            color = posePointColor(point).copy(alpha = 0.85f),
             radius = 4f,
             center = Offset(mapX(point.x), mapY(point.y))
         )

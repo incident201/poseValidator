@@ -9,7 +9,13 @@ fun Point3D.distance2DTo(other: Point3D): Float {
     return sqrt(dx * dx + dy * dy)
 }
 
-data class Point3D(val x: Float, val y: Float, val z: Float) {
+data class PosePoint(
+    val x: Float,
+    val y: Float,
+    val z: Float,
+    val visibility: Float? = null,
+    val presence: Float? = null
+) {
     fun distanceTo(other: Point3D): Float {
         val dx = x - other.x
         val dy = y - other.y
@@ -17,6 +23,8 @@ data class Point3D(val x: Float, val y: Float, val z: Float) {
         return sqrt(dx * dx + dy * dy + dz * dz)
     }
 }
+
+typealias Point3D = PosePoint
 
 data class PoseLandmarks(
     val leftShoulder: Point3D? = null,

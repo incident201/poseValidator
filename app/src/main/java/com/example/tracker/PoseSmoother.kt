@@ -41,7 +41,9 @@ class PoseSmoother(
                 Point3D(
                     x = old.x + alpha * (current.x - old.x),
                     y = old.y + alpha * (current.y - old.y),
-                    z = old.z + alpha * (current.z - old.z)
+                    z = old.z + alpha * (current.z - old.z),
+                    visibility = current.visibility,
+                    presence = current.presence
                 )
             }
         }
