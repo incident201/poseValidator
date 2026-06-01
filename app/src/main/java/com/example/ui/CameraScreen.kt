@@ -284,9 +284,9 @@ fun CameraScreen(
             runCatching { cameraProviderRef?.unbindAll() }
                 .onFailure { Log.w("CameraScreen", "Failed to unbind camera on dispose", it) }
             cameraProviderRef = null
-            val closedCleanly = landmarkerService?.close() ?: true
+            landmarkerService?.close()
             landmarkerService = null
-            viewModel.clearCameraFrameCache(recycle = closedCleanly)
+            viewModel.clearCameraFrameCache(recycle = true)
             cameraExecutor.shutdown()
             demoBitmap?.recycleIfNeeded()
             demoBitmap = null
