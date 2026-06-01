@@ -18,7 +18,6 @@ The app uses on-device computer vision models to track the user's body position 
 - Can optionally monitor face direction and detect when the subject turns toward the camera or away from it
 - Allows sensitivity adjustment for tracking and violation detection thresholds
 - Can record a short timelapse video of the session
-- Supports **English** and **Russian**
 - Works fully offline on the device
 
 ## Privacy
