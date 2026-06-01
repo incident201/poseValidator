@@ -91,7 +91,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import kotlin.math.max
 
 private const val SHOW_POSE_DEBUG_OVERLAY = true
@@ -242,6 +244,10 @@ fun CameraScreen(
 
     // MediaPipe Setup
     val cameraExecutor: ExecutorService = remember { Executors.newSingleThreadExecutor() }
+    val isCameraScreenDisposed = remember { AtomicBoolean(false) }
+    val landmarkerInitFutureRef = remember {
+        AtomicReference<Future<PoseLandmarkerService?>?>(null)
+    }
     val lastPoseTimestampMs = remember { AtomicLong(0L) }
     var imageAnalysisRef by remember { mutableStateOf<ImageAnalysis?>(null) }
     var cameraProviderRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
@@ -273,8 +279,8 @@ fun CameraScreen(
     LaunchedEffect(context, cameraExecutor) {
         poseDelegateMode = PoseLandmarkerDelegateMode.Initializing
 
-        val future = cameraExecutor.submit<PoseLandmarkerService> {
-            PoseLandmarkerService(context, object : PoseLandmarkerService.LandmarkerListener {
+        val future = cameraExecutor.submit<PoseLandmarkerService?> {
+            val service = PoseLandmarkerService(context, object : PoseLandmarkerService.LandmarkerListener {
                 override fun onError(error: String) {
                     Log.e("CameraScreen", "MediaPipe Error: $error")
                 }
@@ -294,7 +300,15 @@ fun CameraScreen(
                     viewModel.processMediaPipeResults(result, timestampMs, imageWidth, imageHeight)
                 }
             })
+
+            if (isCameraScreenDisposed.get()) {
+                service.close()
+                null
+            } else {
+                service
+            }
         }
+        landmarkerInitFutureRef.set(future)
 
         var createdService: PoseLandmarkerService? = null
 
@@ -303,7 +317,7 @@ fun CameraScreen(
                 future.get()
             }
 
-            if (isActive) {
+            if (createdService != null && isActive && !isCameraScreenDisposed.get()) {
                 landmarkerService = createdService
                 createdService = null
             }
@@ -314,14 +328,15 @@ fun CameraScreen(
                 landmarkerService = null
             }
         } finally {
-            val orphanService = createdService
-            if (orphanService != null) {
+            val ownsFuture = landmarkerInitFutureRef.compareAndSet(future, null)
+            val unusedService = createdService
+            if (unusedService != null && ownsFuture) {
                 runCatching {
                     cameraExecutor.submit {
-                        orphanService.close()
+                        unusedService.close()
                     }.get(3, TimeUnit.SECONDS)
                 }.onFailure {
-                    Log.w("CameraScreen", "Failed to close orphan PoseLandmarkerService", it)
+                    Log.w("CameraScreen", "Failed to close unused PoseLandmarkerService", it)
                 }
             }
         }
@@ -330,26 +345,48 @@ fun CameraScreen(
     // Clean up
     DisposableEffect(Unit) {
         onDispose {
+            isCameraScreenDisposed.set(true)
             imageAnalysisRef?.clearAnalyzer()
             imageAnalysisRef = null
             runCatching { cameraProviderRef?.unbindAll() }
                 .onFailure { Log.w("CameraScreen", "Failed to unbind camera on dispose", it) }
             cameraProviderRef = null
-            val serviceToClose = landmarkerService
-            landmarkerService = null
 
-            if (serviceToClose != null) {
+            val initFuture = landmarkerInitFutureRef.getAndSet(null)
+            var serviceToClose = landmarkerService
+            landmarkerService = null
+            var shutdownNow = false
+
+            if (serviceToClose == null && initFuture != null) {
+                serviceToClose = runCatching {
+                    initFuture.get(3, TimeUnit.SECONDS)
+                }.onFailure {
+                    Log.w("CameraScreen", "Failed to wait for PoseLandmarkerService initialization", it)
+                    initFuture.cancel(true)
+                    shutdownNow = true
+                }.getOrNull()
+            }
+
+            val finalServiceToClose = serviceToClose
+            if (finalServiceToClose != null) {
                 runCatching {
                     cameraExecutor.submit {
-                        serviceToClose.close()
+                        finalServiceToClose.close()
                     }.get(3, TimeUnit.SECONDS)
                 }.onFailure {
                     Log.w("CameraScreen", "Failed to close PoseLandmarkerService on camera executor", it)
+                    if (it is TimeoutException) {
+                        shutdownNow = true
+                    }
                 }
             }
 
             viewModel.clearCameraFrameCache(recycle = true)
-            cameraExecutor.shutdown()
+            if (shutdownNow) {
+                cameraExecutor.shutdownNow()
+            } else {
+                cameraExecutor.shutdown()
+            }
             demoBitmap?.recycleIfNeeded()
             demoBitmap = null
             pendingTimelapseFile?.delete()
