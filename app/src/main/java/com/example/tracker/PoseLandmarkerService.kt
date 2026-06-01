@@ -3,10 +3,19 @@ package com.example.tracker
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
+
+enum class PoseLandmarkerDelegateMode {
+    Initializing,
+    GPU,
+    CPU,
+    Unavailable
+}
 
 class PoseLandmarkerService(
     private val context: Context,
@@ -15,10 +24,12 @@ class PoseLandmarkerService(
     private val TAG = "PoseLandmarkerService"
     private val lifecycleLock = Any()
     @Volatile private var isClosed = false
+    @Volatile private var activeDelegate: Delegate? = null
     private var poseLandmarker: PoseLandmarker? = null
 
     interface LandmarkerListener {
         fun onError(error: String)
+        fun onDelegateModeChanged(mode: PoseLandmarkerDelegateMode)
         fun onResults(result: PoseLandmarks, imageWidth: Int, imageHeight: Int, timestampMs: Long)
     }
 
@@ -31,39 +42,74 @@ class PoseLandmarkerService(
     }
 
     private fun initializeRealLandmarker() {
+        notifyDelegateMode(PoseLandmarkerDelegateMode.Initializing)
+        Log.i(TAG, "Initializing Pose Landmarker with delegate=GPU")
+
         try {
-            Log.i(TAG, "Initializing MediaPipe Pose Landmarker from assets")
-            val baseOptions = BaseOptions.builder()
-                .setModelAssetPath("pose_landmarker_heavy.task")
-                .build()
-
-            val options = PoseLandmarker.PoseLandmarkerOptions.builder()
-                .setBaseOptions(baseOptions)
-                .setRunningMode(RunningMode.LIVE_STREAM)
-                .setNumPoses(1)
-                .setMinPoseDetectionConfidence(0.70f)
-                .setMinPosePresenceConfidence(0.70f)
-                .setMinTrackingConfidence(0.75f)
-                .setResultListener { result, image ->
-                    if (!isClosed) {
-                        processResult(result, image.width, image.height, result.timestampMs())
-                    }
-                }
-                .setErrorListener { error ->
-                    Log.e(TAG, "MediaPipe error: ${error.message}")
-                    deliverError(error.message ?: "Unknown MediaPipe error")
-                }
-                .build()
-
+            val gpuLandmarker = createLandmarker(Delegate.GPU)
             synchronized(lifecycleLock) {
-                if (isClosed) return
-                poseLandmarker = PoseLandmarker.createFromOptions(context, options)
+                if (isClosed) {
+                    gpuLandmarker.close()
+                    return
+                }
+                activeDelegate = Delegate.GPU
+                poseLandmarker = gpuLandmarker
             }
-            Log.i(TAG, "MediaPipe Pose Landmarker loaded successfully from assets")
-        } catch (t: Throwable) {
-            Log.e(TAG, "Failed to initialize MediaPipe Pose Landmarker", t)
-            deliverError(t.message ?: "Failed to initialize MediaPipe")
+            notifyDelegateMode(PoseLandmarkerDelegateMode.GPU)
+            Log.i(TAG, "Pose Landmarker loaded with delegate=GPU")
+            return
+        } catch (gpuError: Throwable) {
+            Log.w(TAG, "GPU Pose Landmarker initialization failed, falling back to CPU", gpuError)
         }
+
+        try {
+            val cpuLandmarker = createLandmarker(Delegate.CPU)
+            synchronized(lifecycleLock) {
+                if (isClosed) {
+                    cpuLandmarker.close()
+                    return
+                }
+                activeDelegate = Delegate.CPU
+                poseLandmarker = cpuLandmarker
+            }
+            notifyDelegateMode(PoseLandmarkerDelegateMode.CPU)
+            Log.i(TAG, "Pose Landmarker loaded with delegate=CPU")
+        } catch (cpuError: Throwable) {
+            synchronized(lifecycleLock) {
+                poseLandmarker = null
+                activeDelegate = null
+            }
+            notifyDelegateMode(PoseLandmarkerDelegateMode.Unavailable)
+            Log.e(TAG, "Failed to initialize MediaPipe Pose Landmarker with CPU fallback", cpuError)
+            deliverError(cpuError.message ?: "Failed to initialize MediaPipe")
+        }
+    }
+
+    private fun createLandmarker(delegate: Delegate): PoseLandmarker {
+        val baseOptions = BaseOptions.builder()
+            .setModelAssetPath("pose_landmarker_heavy.task")
+            .setDelegate(delegate)
+            .build()
+
+        val options = PoseLandmarker.PoseLandmarkerOptions.builder()
+            .setBaseOptions(baseOptions)
+            .setRunningMode(RunningMode.LIVE_STREAM)
+            .setNumPoses(1)
+            .setMinPoseDetectionConfidence(0.70f)
+            .setMinPosePresenceConfidence(0.70f)
+            .setMinTrackingConfidence(0.75f)
+            .setResultListener { result, image ->
+                if (!isClosed) {
+                    processResult(result, image.width, image.height, result.timestampMs())
+                }
+            }
+            .setErrorListener { error ->
+                Log.e(TAG, "MediaPipe error delegate=$activeDelegate: ${error.message}")
+                deliverError(error.message ?: "Unknown MediaPipe error")
+            }
+            .build()
+
+        return PoseLandmarker.createFromOptions(context, options)
     }
 
     fun detectLiveStreamFrame(bitmap: Bitmap, timestamp: Long): Boolean {
@@ -72,14 +118,46 @@ class PoseLandmarkerService(
             val landmarker = poseLandmarker ?: return@synchronized false
 
             try {
-                val mpImage = com.google.mediapipe.framework.image.BitmapImageBuilder(bitmap).build()
+                val mpImage = BitmapImageBuilder(bitmap).build()
                 landmarker.detectAsync(mpImage, timestamp)
                 true
             } catch (t: Throwable) {
-                Log.e(TAG, "Error in detectLiveStreamFrame", t)
-                deliverError(t.message ?: "MediaPipe detect error")
-                false
+                Log.e(TAG, "Error in detectLiveStreamFrame delegate=$activeDelegate", t)
+
+                if (activeDelegate == Delegate.GPU) {
+                    fallbackToCpuAndRetry(bitmap, timestamp, t)
+                } else {
+                    deliverError(t.message ?: "MediaPipe detect error")
+                    false
+                }
             }
+        }
+    }
+
+    private fun fallbackToCpuAndRetry(bitmap: Bitmap, timestamp: Long, cause: Throwable): Boolean {
+        Log.w(TAG, "Runtime GPU detect failed, switching Pose Landmarker to CPU", cause)
+
+        var cpuLandmarker: PoseLandmarker? = null
+        return try {
+            val gpuLandmarker = poseLandmarker
+            poseLandmarker = null
+            gpuLandmarker?.close()
+            cpuLandmarker = createLandmarker(Delegate.CPU)
+            poseLandmarker = cpuLandmarker
+            activeDelegate = Delegate.CPU
+            notifyDelegateMode(PoseLandmarkerDelegateMode.CPU)
+
+            val mpImage = BitmapImageBuilder(bitmap).build()
+            cpuLandmarker.detectAsync(mpImage, timestamp)
+            true
+        } catch (cpuError: Throwable) {
+            runCatching { cpuLandmarker?.close() }
+            poseLandmarker = null
+            activeDelegate = null
+            notifyDelegateMode(PoseLandmarkerDelegateMode.Unavailable)
+            Log.e(TAG, "CPU fallback failed", cpuError)
+            deliverError(cpuError.message ?: "MediaPipe CPU fallback failed")
+            false
         }
     }
 
@@ -136,6 +214,10 @@ class PoseLandmarkerService(
         }
     }
 
+    private fun notifyDelegateMode(mode: PoseLandmarkerDelegateMode) {
+        listener.onDelegateModeChanged(mode)
+    }
+
     private fun deliverError(error: String) {
         synchronized(lifecycleLock) {
             if (!isClosed) {
@@ -150,6 +232,7 @@ class PoseLandmarkerService(
             isClosed = true
             val current = poseLandmarker
             poseLandmarker = null
+            activeDelegate = null
             current
         }
         landmarker?.close()

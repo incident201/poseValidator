@@ -62,6 +62,7 @@ import androidx.annotation.StringRes
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.tracker.Point3D
+import com.example.tracker.PoseLandmarkerDelegateMode
 import com.example.tracker.PoseLandmarkerService
 import com.example.viewmodel.AppLanguage
 import com.example.viewmodel.GameState
@@ -89,6 +90,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
 private const val SHOW_POSE_DEBUG_OVERLAY = true
@@ -243,6 +245,9 @@ fun CameraScreen(
     var imageAnalysisRef by remember { mutableStateOf<ImageAnalysis?>(null) }
     var cameraProviderRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
     var landmarkerService by remember { mutableStateOf<PoseLandmarkerService?>(null) }
+    var poseDelegateMode by remember {
+        mutableStateOf(PoseLandmarkerDelegateMode.Initializing)
+    }
     var isDemoMode by rememberSaveable { mutableStateOf(false) }
     var demoBitmap by remember { mutableStateOf<Bitmap?>(null) }
     val demoImagePickerLauncher = rememberLauncherForActivityResult(
@@ -264,16 +269,41 @@ fun CameraScreen(
         }
     }
 
-    LaunchedEffect(context) {
-        landmarkerService = PoseLandmarkerService(context, object : PoseLandmarkerService.LandmarkerListener {
-            override fun onError(error: String) {
-                Log.e("CameraScreen", "MediaPipe Error: $error")
-            }
+    LaunchedEffect(context, cameraExecutor) {
+        poseDelegateMode = PoseLandmarkerDelegateMode.Initializing
 
-            override fun onResults(result: com.example.tracker.PoseLandmarks, imageWidth: Int, imageHeight: Int, timestampMs: Long) {
-                viewModel.processMediaPipeResults(result, timestampMs, imageWidth, imageHeight)
+        val future = cameraExecutor.submit<PoseLandmarkerService> {
+            PoseLandmarkerService(context, object : PoseLandmarkerService.LandmarkerListener {
+                override fun onError(error: String) {
+                    Log.e("CameraScreen", "MediaPipe Error: $error")
+                }
+
+                override fun onDelegateModeChanged(mode: PoseLandmarkerDelegateMode) {
+                    coroutineScope.launch {
+                        poseDelegateMode = mode
+                    }
+                }
+
+                override fun onResults(
+                    result: com.example.tracker.PoseLandmarks,
+                    imageWidth: Int,
+                    imageHeight: Int,
+                    timestampMs: Long
+                ) {
+                    viewModel.processMediaPipeResults(result, timestampMs, imageWidth, imageHeight)
+                }
+            })
+        }
+
+        landmarkerService = try {
+            withContext(Dispatchers.IO) {
+                future.get()
             }
-        })
+        } catch (t: Throwable) {
+            Log.e("CameraScreen", "Failed to initialize PoseLandmarkerService", t)
+            poseDelegateMode = PoseLandmarkerDelegateMode.Unavailable
+            null
+        }
     }
 
     // Clean up
@@ -284,8 +314,19 @@ fun CameraScreen(
             runCatching { cameraProviderRef?.unbindAll() }
                 .onFailure { Log.w("CameraScreen", "Failed to unbind camera on dispose", it) }
             cameraProviderRef = null
-            landmarkerService?.close()
+            val serviceToClose = landmarkerService
             landmarkerService = null
+
+            if (serviceToClose != null) {
+                runCatching {
+                    cameraExecutor.submit {
+                        serviceToClose.close()
+                    }.get(3, TimeUnit.SECONDS)
+                }.onFailure {
+                    Log.w("CameraScreen", "Failed to close PoseLandmarkerService on camera executor", it)
+                }
+            }
+
             viewModel.clearCameraFrameCache(recycle = true)
             cameraExecutor.shutdown()
             demoBitmap?.recycleIfNeeded()
@@ -597,6 +638,16 @@ fun CameraScreen(
                 )
             }
 
+            if (!showFinalScreen) {
+                PoseDelegateModeBadge(
+                    mode = poseDelegateMode,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(10.dp)
+                        .zIndex(4f)
+                )
+            }
+
             if (!showFinalScreen && gameState == GameState.HoldingPose) {
                 ViolationCountsOverlay(
                     counts = ruleViolationCounts,
@@ -649,6 +700,33 @@ fun CameraScreen(
     }
 }
 
+
+@Composable
+private fun PoseDelegateModeBadge(
+    mode: PoseLandmarkerDelegateMode,
+    modifier: Modifier = Modifier
+) {
+    val text = when (mode) {
+        PoseLandmarkerDelegateMode.Initializing -> "Mode: Initializing"
+        PoseLandmarkerDelegateMode.GPU -> "Mode: GPU"
+        PoseLandmarkerDelegateMode.CPU -> "Mode: CPU"
+        PoseLandmarkerDelegateMode.Unavailable -> "Mode: Unavailable"
+    }
+
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = Color.Black.copy(alpha = 0.62f)
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
 
 @Composable
 private fun FinalSessionScreen(
