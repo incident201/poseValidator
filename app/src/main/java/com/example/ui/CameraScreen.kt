@@ -10,6 +10,9 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.os.SystemClock
 import android.provider.MediaStore
@@ -84,7 +87,6 @@ import android.util.Size
 import android.widget.Toast
 import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -92,6 +94,7 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
+import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import kotlin.math.max
@@ -243,8 +246,14 @@ fun CameraScreen(
     }
 
     // MediaPipe Setup
-    val cameraExecutor: ExecutorService = remember { Executors.newSingleThreadExecutor() }
+    val imageAnalysisExecutor: ExecutorService = remember { Executors.newSingleThreadExecutor() }
     val isCameraScreenDisposed = remember { AtomicBoolean(false) }
+    val mediaPipeThread = remember {
+        HandlerThread("MediaPipePoseThread").apply { start() }
+    }
+    val mediaPipeHandler = remember(mediaPipeThread) {
+        Handler(mediaPipeThread.looper)
+    }
     val landmarkerInitFutureRef = remember {
         AtomicReference<Future<PoseLandmarkerService?>?>(null)
     }
@@ -276,10 +285,10 @@ fun CameraScreen(
         }
     }
 
-    LaunchedEffect(context, cameraExecutor) {
+    LaunchedEffect(context, mediaPipeHandler) {
         poseDelegateMode = PoseLandmarkerDelegateMode.Initializing
 
-        val future = cameraExecutor.submit<PoseLandmarkerService?> {
+        val future = submitToHandler(mediaPipeHandler) {
             val service = PoseLandmarkerService(context, object : PoseLandmarkerService.LandmarkerListener {
                 override fun onError(error: String) {
                     Log.e("CameraScreen", "MediaPipe Error: $error")
@@ -313,8 +322,8 @@ fun CameraScreen(
         var createdService: PoseLandmarkerService? = null
 
         try {
-            createdService = withContext(Dispatchers.IO + NonCancellable) {
-                future.get()
+            createdService = withContext(Dispatchers.IO) {
+                future.get(5, TimeUnit.SECONDS)
             }
 
             if (createdService != null && isActive && !isCameraScreenDisposed.get()) {
@@ -323,6 +332,10 @@ fun CameraScreen(
             }
         } catch (t: Throwable) {
             Log.e("CameraScreen", "Failed to initialize PoseLandmarkerService", t)
+            if (t is TimeoutException) {
+                future.cancel(true)
+                mediaPipeThread.quit()
+            }
             if (isActive) {
                 poseDelegateMode = PoseLandmarkerDelegateMode.Unavailable
                 landmarkerService = null
@@ -332,7 +345,7 @@ fun CameraScreen(
             val unusedService = createdService
             if (unusedService != null && ownsFuture) {
                 runCatching {
-                    cameraExecutor.submit {
+                    submitToHandler(mediaPipeHandler) {
                         unusedService.close()
                     }.get(3, TimeUnit.SECONDS)
                 }.onFailure {
@@ -356,6 +369,7 @@ fun CameraScreen(
             var serviceToClose = landmarkerService
             landmarkerService = null
             var shutdownNow = false
+            var quitMediaPipeImmediately = false
 
             if (serviceToClose == null && initFuture != null) {
                 serviceToClose = runCatching {
@@ -364,28 +378,33 @@ fun CameraScreen(
                     Log.w("CameraScreen", "Failed to wait for PoseLandmarkerService initialization", it)
                     initFuture.cancel(true)
                     shutdownNow = true
+                    quitMediaPipeImmediately = true
                 }.getOrNull()
             }
 
             val finalServiceToClose = serviceToClose
             if (finalServiceToClose != null) {
                 runCatching {
-                    cameraExecutor.submit {
+                    submitToHandler(mediaPipeHandler) {
                         finalServiceToClose.close()
                     }.get(3, TimeUnit.SECONDS)
                 }.onFailure {
-                    Log.w("CameraScreen", "Failed to close PoseLandmarkerService on camera executor", it)
-                    if (it is TimeoutException) {
-                        shutdownNow = true
-                    }
+                    Log.w("CameraScreen", "Failed to close PoseLandmarkerService on MediaPipe thread", it)
+                    shutdownNow = true
+                    quitMediaPipeImmediately = true
                 }
             }
 
             viewModel.clearCameraFrameCache(recycle = true)
             if (shutdownNow) {
-                cameraExecutor.shutdownNow()
+                imageAnalysisExecutor.shutdownNow()
             } else {
-                cameraExecutor.shutdown()
+                imageAnalysisExecutor.shutdown()
+            }
+            if (quitMediaPipeImmediately) {
+                mediaPipeThread.quit()
+            } else {
+                mediaPipeThread.quitSafely()
             }
             demoBitmap?.recycleIfNeeded()
             demoBitmap = null
@@ -395,6 +414,7 @@ fun CameraScreen(
             timelapseRecorder.release()
         }
     }
+
 
 
     LaunchedEffect(canOpenSettings) {
@@ -414,7 +434,7 @@ fun CameraScreen(
                 break
             }
             try {
-                cameraExecutor.execute {
+                imageAnalysisExecutor.execute {
                     val timestampMs = nextFrameTimestampMs(
                         lastPoseTimestampMs,
                         SystemClock.elapsedRealtimeNanos() / 1_000_000L
@@ -423,12 +443,13 @@ fun CameraScreen(
                         bitmap = frameBitmap,
                         viewModel = viewModel,
                         landmarkerService = landmarkerService,
-                        timestampMs = timestampMs
+                        timestampMs = timestampMs,
+                        mediaPipeHandler = mediaPipeHandler
                     )
                 }
             } catch (e: RejectedExecutionException) {
                 frameBitmap.recycleIfNeeded()
-                Log.w("CameraScreen", "Dropping demo frame after camera executor shutdown", e)
+                Log.w("CameraScreen", "Dropping demo frame after image analysis executor shutdown", e)
                 break
             }
             delay(250L)
@@ -602,7 +623,7 @@ fun CameraScreen(
                                 .build()
                             imageAnalysisRef = imageAnalysis
 
-                            imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
+                            imageAnalysis.setAnalyzer(imageAnalysisExecutor) { imageProxy ->
                                 var pipelineBitmap: Bitmap? = null
                                 var submittedToPipeline = false
                                 try {
@@ -642,7 +663,8 @@ fun CameraScreen(
                                         bitmap = pipelineBitmap,
                                         viewModel = viewModel,
                                         landmarkerService = landmarkerService,
-                                        timestampMs = timestampMs
+                                        timestampMs = timestampMs,
+                                        mediaPipeHandler = mediaPipeHandler
                                     )
                                     submittedToPipeline = true
                                 } catch (e: Exception) {
@@ -1733,13 +1755,42 @@ private fun submitFrameToPosePipeline(
     bitmap: Bitmap,
     viewModel: GameViewModel,
     landmarkerService: PoseLandmarkerService?,
-    timestampMs: Long
+    timestampMs: Long,
+    mediaPipeHandler: Handler
 ) {
     viewModel.registerCameraFrame(bitmap, timestampMs)
-    val accepted = landmarkerService?.detectLiveStreamFrame(bitmap, timestampMs) ?: false
+
+    val service = landmarkerService
+    if (service == null) {
+        viewModel.dropCameraFrame(timestampMs, recycle = true)
+        return
+    }
+
+    val accepted = if (Looper.myLooper() == mediaPipeHandler.looper) {
+        service.detectLiveStreamFrame(bitmap, timestampMs)
+    } else {
+        val future = submitToHandler(mediaPipeHandler) {
+            service.detectLiveStreamFrame(bitmap, timestampMs)
+        }
+        runCatching {
+            future.get(500, TimeUnit.MILLISECONDS)
+        }.getOrDefault(false)
+    }
+
     if (!accepted) {
         viewModel.dropCameraFrame(timestampMs, recycle = true)
     }
+}
+
+private fun <T> submitToHandler(
+    handler: Handler,
+    task: () -> T
+): FutureTask<T> {
+    val future = FutureTask<T> { task() }
+    if (!handler.post(future)) {
+        future.cancel(false)
+    }
+    return future
 }
 
 private fun Bitmap.recycleIfNeeded() {
