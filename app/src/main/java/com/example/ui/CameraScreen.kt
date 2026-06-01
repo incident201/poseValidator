@@ -84,6 +84,7 @@ import android.util.Size
 import android.widget.Toast
 import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -295,14 +296,34 @@ fun CameraScreen(
             })
         }
 
-        landmarkerService = try {
-            withContext(Dispatchers.IO) {
+        var createdService: PoseLandmarkerService? = null
+
+        try {
+            createdService = withContext(Dispatchers.IO + NonCancellable) {
                 future.get()
+            }
+
+            if (isActive) {
+                landmarkerService = createdService
+                createdService = null
             }
         } catch (t: Throwable) {
             Log.e("CameraScreen", "Failed to initialize PoseLandmarkerService", t)
-            poseDelegateMode = PoseLandmarkerDelegateMode.Unavailable
-            null
+            if (isActive) {
+                poseDelegateMode = PoseLandmarkerDelegateMode.Unavailable
+                landmarkerService = null
+            }
+        } finally {
+            val orphanService = createdService
+            if (orphanService != null) {
+                runCatching {
+                    cameraExecutor.submit {
+                        orphanService.close()
+                    }.get(3, TimeUnit.SECONDS)
+                }.onFailure {
+                    Log.w("CameraScreen", "Failed to close orphan PoseLandmarkerService", it)
+                }
+            }
         }
     }
 

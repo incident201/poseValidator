@@ -56,13 +56,18 @@ class PoseLandmarkerService(
 
         try {
             val gpuLandmarker = createLandmarker(Delegate.GPU)
-            synchronized(lifecycleLock) {
+            val shouldCloseGpu = synchronized(lifecycleLock) {
                 if (isClosed) {
-                    gpuLandmarker.close()
-                    return
+                    true
+                } else {
+                    activeDelegate = Delegate.GPU
+                    poseLandmarker = gpuLandmarker
+                    false
                 }
-                activeDelegate = Delegate.GPU
-                poseLandmarker = gpuLandmarker
+            }
+            if (shouldCloseGpu) {
+                gpuLandmarker.close()
+                return
             }
             notifyDelegateMode(PoseLandmarkerDelegateMode.GPU)
             Log.i(TAG, "Pose Landmarker loaded with delegate=GPU")
@@ -73,13 +78,18 @@ class PoseLandmarkerService(
 
         try {
             val cpuLandmarker = createLandmarker(Delegate.CPU)
-            synchronized(lifecycleLock) {
+            val shouldCloseCpu = synchronized(lifecycleLock) {
                 if (isClosed) {
-                    cpuLandmarker.close()
-                    return
+                    true
+                } else {
+                    activeDelegate = Delegate.CPU
+                    poseLandmarker = cpuLandmarker
+                    false
                 }
-                activeDelegate = Delegate.CPU
-                poseLandmarker = cpuLandmarker
+            }
+            if (shouldCloseCpu) {
+                cpuLandmarker.close()
+                return
             }
             notifyDelegateMode(PoseLandmarkerDelegateMode.CPU)
             Log.i(TAG, "Pose Landmarker loaded with delegate=CPU")
@@ -134,20 +144,147 @@ class PoseLandmarkerService(
     }
 
     fun detectLiveStreamFrame(bitmap: Bitmap, timestamp: Long): Boolean {
-        return synchronized(lifecycleLock) {
-            if (isClosed) return@synchronized false
+        val fallbackReason = synchronized(lifecycleLock) {
+            if (isClosed) return false
+            if (activeDelegate == Delegate.GPU) pendingCpuFallbackReason else null
+        }
 
-            val fallbackReason = pendingCpuFallbackReason
-            if (fallbackReason != null && activeDelegate == Delegate.GPU) {
-                val switched = switchToCpu(fallbackReason)
-                if (!switched) return@synchronized false
+        if (fallbackReason != null) {
+            val switched = switchToCpu(fallbackReason)
+            if (!switched) return false
+        }
+
+        val landmarker = synchronized(lifecycleLock) {
+            if (isClosed) return false
+            poseLandmarker ?: return false
+        }
+
+        return try {
+            val mpImage = BitmapImageBuilder(bitmap).build()
+            landmarker.detectAsync(mpImage, timestamp)
+            recordSubmittedFrame()
+            true
+        } catch (t: Throwable) {
+            Log.e(TAG, "Error in detectLiveStreamFrame delegate=$activeDelegate", t)
+            handleDetectAsyncFailure(bitmap, timestamp, t)
+        }
+    }
+
+    private fun switchToCpu(reason: String): Boolean {
+        Log.w(TAG, "Switching Pose Landmarker to CPU: reason=$reason, ${fallbackCounters()}")
+
+        val oldLandmarker = synchronized(lifecycleLock) {
+            if (isClosed) return false
+            if (activeDelegate != Delegate.GPU) {
+                pendingCpuFallbackReason = null
+                return true
             }
 
-            val landmarker = poseLandmarker ?: return@synchronized false
+            val current = poseLandmarker
+            poseLandmarker = null
+            activeDelegate = null
+            current
+        }
 
-            try {
-                val mpImage = BitmapImageBuilder(bitmap).build()
-                landmarker.detectAsync(mpImage, timestamp)
+        runCatching { oldLandmarker?.close() }
+
+        val cpuLandmarker = try {
+            createLandmarker(Delegate.CPU)
+        } catch (cpuError: Throwable) {
+            val counters = fallbackCounters()
+            synchronized(lifecycleLock) {
+                poseLandmarker = null
+                activeDelegate = null
+                submittedSinceLastResult = 0
+                pendingCpuFallbackReason = null
+            }
+            notifyDelegateMode(PoseLandmarkerDelegateMode.Unavailable)
+            Log.e(TAG, "CPU fallback failed: reason=$reason, $counters", cpuError)
+            deliverError(cpuError.message ?: "MediaPipe CPU fallback failed")
+            return false
+        }
+
+        val shouldCloseCpu = synchronized(lifecycleLock) {
+            if (isClosed) {
+                true
+            } else {
+                poseLandmarker = cpuLandmarker
+                activeDelegate = Delegate.CPU
+                submittedSinceLastResult = 0
+                pendingCpuFallbackReason = null
+                false
+            }
+        }
+
+        if (shouldCloseCpu) {
+            cpuLandmarker.close()
+            return false
+        }
+
+        notifyDelegateMode(PoseLandmarkerDelegateMode.CPU)
+        return true
+    }
+
+    private fun handleDetectAsyncFailure(bitmap: Bitmap, timestamp: Long, cause: Throwable): Boolean {
+        val currentDelegate = synchronized(lifecycleLock) {
+            if (isClosed) return false
+            totalRuntimeErrors++
+            activeDelegate
+        }
+
+        if (currentDelegate != Delegate.GPU) {
+            deliverError(cause.message ?: "MediaPipe detect error")
+            return false
+        }
+
+        val reason = "detectAsync failed: ${cause.message ?: cause.javaClass.simpleName}"
+        Log.w(
+            TAG,
+            "Runtime GPU detect failed, switching Pose Landmarker to CPU: " +
+                "reason=$reason, ${fallbackCounters()}",
+            cause
+        )
+
+        val switched = switchToCpu(reason)
+        if (!switched) return false
+
+        val cpuLandmarker = synchronized(lifecycleLock) {
+            if (isClosed) return false
+            if (activeDelegate != Delegate.CPU) return false
+            poseLandmarker ?: return false
+        }
+
+        return try {
+            val mpImage = BitmapImageBuilder(bitmap).build()
+            cpuLandmarker.detectAsync(mpImage, timestamp)
+            synchronized(lifecycleLock) {
+                if (!isClosed) {
+                    totalSubmittedFrames++
+                }
+            }
+            true
+        } catch (cpuError: Throwable) {
+            val failedLandmarker = synchronized(lifecycleLock) {
+                totalRuntimeErrors++
+                val current = poseLandmarker
+                poseLandmarker = null
+                activeDelegate = null
+                val counters = fallbackCounters()
+                submittedSinceLastResult = 0
+                pendingCpuFallbackReason = null
+                current to counters
+            }
+            runCatching { failedLandmarker.first?.close() }
+            notifyDelegateMode(PoseLandmarkerDelegateMode.Unavailable)
+            Log.e(TAG, "CPU fallback failed: ${failedLandmarker.second}", cpuError)
+            deliverError(cpuError.message ?: "MediaPipe CPU fallback failed")
+            false
+        }
+    }
+
+    private fun recordSubmittedFrame() {
+        synchronized(lifecycleLock) {
+            if (!isClosed) {
                 totalSubmittedFrames++
 
                 if (activeDelegate == Delegate.GPU) {
@@ -158,95 +295,17 @@ class PoseLandmarkerService(
                             "GPU produced no result callbacks after $submittedSinceLastResult submitted frames"
                     }
                 }
-
-                true
-            } catch (t: Throwable) {
-                Log.e(TAG, "Error in detectLiveStreamFrame delegate=$activeDelegate", t)
-
-                if (activeDelegate == Delegate.GPU) {
-                    fallbackToCpuAndRetry(bitmap, timestamp, t)
-                } else {
-                    totalRuntimeErrors++
-                    deliverError(t.message ?: "MediaPipe detect error")
-                    false
-                }
             }
         }
     }
 
-    private fun switchToCpu(reason: String): Boolean {
-        Log.w(TAG, "Switching Pose Landmarker to CPU: reason=$reason, ${fallbackCounters()}")
-
-        var cpuLandmarker: PoseLandmarker? = null
-        return try {
-            val gpuLandmarker = poseLandmarker
-            poseLandmarker = null
-            gpuLandmarker?.close()
-            cpuLandmarker = createLandmarker(Delegate.CPU)
-            poseLandmarker = cpuLandmarker
-            activeDelegate = Delegate.CPU
-            submittedSinceLastResult = 0
-            pendingCpuFallbackReason = null
-            notifyDelegateMode(PoseLandmarkerDelegateMode.CPU)
-            true
-        } catch (cpuError: Throwable) {
-            val counters = fallbackCounters()
-            runCatching { cpuLandmarker?.close() }
-            poseLandmarker = null
-            activeDelegate = null
-            submittedSinceLastResult = 0
-            pendingCpuFallbackReason = null
-            notifyDelegateMode(PoseLandmarkerDelegateMode.Unavailable)
-            Log.e(TAG, "CPU fallback failed: reason=$reason, $counters", cpuError)
-            deliverError(cpuError.message ?: "MediaPipe CPU fallback failed")
-            false
-        }
-    }
-
-    private fun fallbackToCpuAndRetry(bitmap: Bitmap, timestamp: Long, cause: Throwable): Boolean {
-        totalRuntimeErrors++
-        Log.w(
-            TAG,
-            "Runtime GPU detect failed, switching Pose Landmarker to CPU: " +
-                "reason=${cause.message ?: cause.javaClass.simpleName}, ${fallbackCounters()}",
-            cause
-        )
-
-        var cpuLandmarker: PoseLandmarker? = null
-        return try {
-            val gpuLandmarker = poseLandmarker
-            poseLandmarker = null
-            gpuLandmarker?.close()
-            cpuLandmarker = createLandmarker(Delegate.CPU)
-            poseLandmarker = cpuLandmarker
-            activeDelegate = Delegate.CPU
-            submittedSinceLastResult = 0
-            pendingCpuFallbackReason = null
-            notifyDelegateMode(PoseLandmarkerDelegateMode.CPU)
-
-            val mpImage = BitmapImageBuilder(bitmap).build()
-            cpuLandmarker.detectAsync(mpImage, timestamp)
-            totalSubmittedFrames++
-            true
-        } catch (cpuError: Throwable) {
-            val counters = fallbackCounters()
-            runCatching { cpuLandmarker?.close() }
-            poseLandmarker = null
-            activeDelegate = null
-            submittedSinceLastResult = 0
-            pendingCpuFallbackReason = null
-            notifyDelegateMode(PoseLandmarkerDelegateMode.Unavailable)
-            Log.e(TAG, "CPU fallback failed: $counters", cpuError)
-            deliverError(cpuError.message ?: "MediaPipe CPU fallback failed")
-            false
-        }
-    }
-
     private fun fallbackCounters(): String {
-        return "submitted=$totalSubmittedFrames, " +
-            "results=$totalResultCallbacks, " +
-            "errors=$totalRuntimeErrors, " +
-            "framesWithoutResult=$submittedSinceLastResult"
+        return synchronized(lifecycleLock) {
+            "submitted=$totalSubmittedFrames, " +
+                "results=$totalResultCallbacks, " +
+                "errors=$totalRuntimeErrors, " +
+                "framesWithoutResult=$submittedSinceLastResult"
+        }
     }
 
     private fun processResult(result: PoseLandmarkerResult, width: Int, height: Int, timestampMs: Long) {
@@ -300,10 +359,9 @@ class PoseLandmarkerService(
     }
 
     private fun deliverResults(pose: PoseLandmarks, width: Int, height: Int, timestampMs: Long) {
-        synchronized(lifecycleLock) {
-            if (!isClosed) {
-                listener.onResults(pose, width, height, timestampMs)
-            }
+        val shouldDeliver = synchronized(lifecycleLock) { !isClosed }
+        if (shouldDeliver) {
+            listener.onResults(pose, width, height, timestampMs)
         }
     }
 
@@ -312,10 +370,9 @@ class PoseLandmarkerService(
     }
 
     private fun deliverError(error: String) {
-        synchronized(lifecycleLock) {
-            if (!isClosed) {
-                listener.onError(error)
-            }
+        val shouldDeliver = synchronized(lifecycleLock) { !isClosed }
+        if (shouldDeliver) {
+            listener.onError(error)
         }
     }
 
