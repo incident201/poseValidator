@@ -287,6 +287,7 @@ fun CameraScreen(
 
     LaunchedEffect(context, mediaPipeHandler) {
         poseDelegateMode = PoseLandmarkerDelegateMode.Initializing
+        val initCancelled = AtomicBoolean(false)
 
         val future = submitToHandler(mediaPipeHandler) {
             val service = PoseLandmarkerService(context, object : PoseLandmarkerService.LandmarkerListener {
@@ -310,7 +311,7 @@ fun CameraScreen(
                 }
             })
 
-            if (isCameraScreenDisposed.get()) {
+            if (isCameraScreenDisposed.get() || initCancelled.get()) {
                 service.close()
                 null
             } else {
@@ -333,6 +334,7 @@ fun CameraScreen(
         } catch (t: Throwable) {
             Log.e("CameraScreen", "Failed to initialize PoseLandmarkerService", t)
             if (t is TimeoutException) {
+                initCancelled.set(true)
                 future.cancel(true)
                 mediaPipeThread.quit()
             }
@@ -1773,7 +1775,7 @@ private fun submitFrameToPosePipeline(
             service.detectLiveStreamFrame(bitmap, timestampMs)
         }
         runCatching {
-            future.get(500, TimeUnit.MILLISECONDS)
+            future.get()
         }.getOrDefault(false)
     }
 
