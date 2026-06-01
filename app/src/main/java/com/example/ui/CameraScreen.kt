@@ -158,7 +158,6 @@ fun CameraScreen(
     val sessionSummary by viewModel.sessionSummary.collectAsState()
     VoiceAnnouncer(viewModel = viewModel, language = gameSettings.language)
     var showSettings by rememberSaveable { mutableStateOf(false) }
-    val canOpenSettings = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
     val currentGameState = rememberUpdatedState(gameState)
     val currentTimelapseRecordingEnabled = rememberUpdatedState(gameSettings.timelapseRecordingEnabled)
     val currentViolationCount = rememberUpdatedState(violationCount)
@@ -178,6 +177,9 @@ fun CameraScreen(
         gameSettings.timelapseRecordingEnabled
     }
     val isTimelapseSaving = timelapseUiState == TimelapseUiState.Saving
+    val canOpenSettings = (gameState == GameState.Idle ||
+        gameState == GameState.Failed ||
+        gameState == GameState.Success) && !(isFinalState && isTimelapseSaving)
     val closeFinalScreen = {
         if (!isTimelapseSaving) {
             pendingTimelapseFile?.delete()
@@ -374,8 +376,10 @@ fun CameraScreen(
         }
     }
 
-    BackHandler(enabled = !showSettings && isFinalState && sessionSummary != null && !isTimelapseSaving) {
-        closeFinalScreen()
+    BackHandler(enabled = !showSettings && isFinalState && sessionSummary != null) {
+        if (!isTimelapseSaving) {
+            closeFinalScreen()
+        }
     }
     BackHandler(enabled = showSettings) { showSettings = false }
 
