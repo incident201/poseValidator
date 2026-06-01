@@ -67,6 +67,7 @@ import androidx.core.content.ContextCompat
 import com.example.tracker.Point3D
 import com.example.tracker.PoseLandmarkerDelegateMode
 import com.example.tracker.PoseLandmarkerService
+import com.google.mediapipe.tasks.core.Delegate
 import com.example.viewmodel.AppLanguage
 import com.example.viewmodel.GameState
 import com.example.viewmodel.GameViewModel
@@ -96,13 +97,27 @@ import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 import kotlin.math.max
 
 private const val SHOW_POSE_DEBUG_OVERLAY = true
 private const val SHOW_POSE_DEBUG_POINTS = true
+private const val GPU_INIT_TIMEOUT_SECONDS = 20L
 
 private enum class TimelapseUiState { Preparing, Ready, Saving, Saved, Unavailable, Disabled }
+
+private data class PosePipeline(
+    val thread: HandlerThread,
+    val handler: Handler,
+    val service: PoseLandmarkerService,
+    val mode: PoseLandmarkerDelegateMode
+)
+
+private data class PendingPosePipelineCandidate(
+    val thread: HandlerThread,
+    val handler: Handler,
+    val future: Future<PoseLandmarkerService?>,
+    val cancelled: AtomicBoolean
+)
 
 private val POSE_CONNECTIONS = listOf(
     11 to 12,
@@ -248,19 +263,15 @@ fun CameraScreen(
     // MediaPipe Setup
     val imageAnalysisExecutor: ExecutorService = remember { Executors.newSingleThreadExecutor() }
     val isCameraScreenDisposed = remember { AtomicBoolean(false) }
-    val mediaPipeThread = remember {
-        HandlerThread("MediaPipePoseThread").apply { start() }
+    val activePosePipelineRef = remember {
+        AtomicReference<PosePipeline?>(null)
     }
-    val mediaPipeHandler = remember(mediaPipeThread) {
-        Handler(mediaPipeThread.looper)
-    }
-    val landmarkerInitFutureRef = remember {
-        AtomicReference<Future<PoseLandmarkerService?>?>(null)
+    val pendingGpuCandidateRef = remember {
+        AtomicReference<PendingPosePipelineCandidate?>(null)
     }
     val lastPoseTimestampMs = remember { AtomicLong(0L) }
     var imageAnalysisRef by remember { mutableStateOf<ImageAnalysis?>(null) }
     var cameraProviderRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
-    var landmarkerService by remember { mutableStateOf<PoseLandmarkerService?>(null) }
     var poseDelegateMode by remember {
         mutableStateOf(PoseLandmarkerDelegateMode.Initializing)
     }
@@ -285,75 +296,90 @@ fun CameraScreen(
         }
     }
 
-    LaunchedEffect(context, mediaPipeHandler) {
+    LaunchedEffect(context) {
         poseDelegateMode = PoseLandmarkerDelegateMode.Initializing
-        val initCancelled = AtomicBoolean(false)
 
-        val future = submitToHandler(mediaPipeHandler) {
-            val service = PoseLandmarkerService(context, object : PoseLandmarkerService.LandmarkerListener {
-                override fun onError(error: String) {
-                    Log.e("CameraScreen", "MediaPipe Error: $error")
-                }
+        val cpuThread = HandlerThread("MediaPipePoseCpuThread").apply { start() }
+        val cpuHandler = Handler(cpuThread.looper)
+        val cpuServiceRef = AtomicReference<PoseLandmarkerService?>(null)
+        val listener = object : PoseLandmarkerService.LandmarkerListener {
+            override fun onError(error: String) {
+                Log.e("CameraScreen", "MediaPipe Error: $error")
+            }
 
-                override fun onDelegateModeChanged(mode: PoseLandmarkerDelegateMode) {
+            override fun onDelegateModeChanged(mode: PoseLandmarkerDelegateMode) {
+                val service = cpuServiceRef.get()
+                val activePipeline = activePosePipelineRef.get()
+                if (service != null && activePipeline?.service === service) {
                     coroutineScope.launch {
                         poseDelegateMode = mode
                     }
                 }
+            }
 
-                override fun onResults(
-                    result: com.example.tracker.PoseLandmarks,
-                    imageWidth: Int,
-                    imageHeight: Int,
-                    timestampMs: Long
-                ) {
-                    viewModel.processMediaPipeResults(result, timestampMs, imageWidth, imageHeight)
-                }
-            })
-
-            if (isCameraScreenDisposed.get() || initCancelled.get()) {
-                service.close()
-                null
-            } else {
-                service
+            override fun onResults(
+                result: com.example.tracker.PoseLandmarks,
+                imageWidth: Int,
+                imageHeight: Int,
+                timestampMs: Long
+            ) {
+                viewModel.processMediaPipeResults(result, timestampMs, imageWidth, imageHeight)
             }
         }
-        landmarkerInitFutureRef.set(future)
 
-        var createdService: PoseLandmarkerService? = null
-
+        var cpuService: PoseLandmarkerService? = null
         try {
-            createdService = withContext(Dispatchers.IO) {
-                future.get(5, TimeUnit.SECONDS)
-            }
-
-            if (createdService != null && isActive && !isCameraScreenDisposed.get()) {
-                landmarkerService = createdService
-                createdService = null
+            cpuService = withContext(Dispatchers.IO) {
+                submitToHandler(cpuHandler) {
+                    PoseLandmarkerService(context, listener, Delegate.CPU).also { service ->
+                        cpuServiceRef.set(service)
+                    }
+                }.get()
             }
         } catch (t: Throwable) {
-            Log.e("CameraScreen", "Failed to initialize PoseLandmarkerService", t)
-            if (t is TimeoutException) {
-                initCancelled.set(true)
-                future.cancel(true)
-                mediaPipeThread.quit()
-            }
-            if (isActive) {
-                poseDelegateMode = PoseLandmarkerDelegateMode.Unavailable
-                landmarkerService = null
-            }
-        } finally {
-            val ownsFuture = landmarkerInitFutureRef.compareAndSet(future, null)
-            val unusedService = createdService
-            if (unusedService != null && ownsFuture) {
+            Log.e("CameraScreen", "Failed to initialize CPU PoseLandmarkerService", t)
+        }
+
+        val service = cpuService
+        if (service == null || !service.isAvailable() || !isActive || isCameraScreenDisposed.get()) {
+            if (service != null) {
                 runCatching {
-                    submitToHandler(mediaPipeHandler) {
-                        unusedService.close()
-                    }.get(3, TimeUnit.SECONDS)
+                    submitToHandler(cpuHandler) { service.close() }.get(3, TimeUnit.SECONDS)
                 }.onFailure {
-                    Log.w("CameraScreen", "Failed to close unused PoseLandmarkerService", it)
+                    Log.w("CameraScreen", "Failed to close unavailable CPU PoseLandmarkerService", it)
                 }
             }
+            cpuThread.quitSafely()
+            activePosePipelineRef.set(null)
+            if (isActive) {
+                poseDelegateMode = PoseLandmarkerDelegateMode.Unavailable
+            }
+            return@LaunchedEffect
+        }
+
+        val cpuPipeline = PosePipeline(
+            thread = cpuThread,
+            handler = cpuHandler,
+            service = service,
+            mode = PoseLandmarkerDelegateMode.CPU
+        )
+        activePosePipelineRef.set(cpuPipeline)
+        poseDelegateMode = PoseLandmarkerDelegateMode.CPU
+
+        coroutineScope.launch(Dispatchers.IO) {
+            promotePosePipelineToGpu(
+                context = context,
+                viewModel = viewModel,
+                activePosePipelineRef = activePosePipelineRef,
+                pendingGpuCandidateRef = pendingGpuCandidateRef,
+                isCameraScreenDisposed = isCameraScreenDisposed,
+                cpuPipeline = cpuPipeline,
+                onModeChanged = { mode ->
+                    coroutineScope.launch {
+                        poseDelegateMode = mode
+                    }
+                }
+            )
         }
     }
 
@@ -367,47 +393,12 @@ fun CameraScreen(
                 .onFailure { Log.w("CameraScreen", "Failed to unbind camera on dispose", it) }
             cameraProviderRef = null
 
-            val initFuture = landmarkerInitFutureRef.getAndSet(null)
-            var serviceToClose = landmarkerService
-            landmarkerService = null
-            var shutdownNow = false
-            var quitMediaPipeImmediately = false
-
-            if (serviceToClose == null && initFuture != null) {
-                serviceToClose = runCatching {
-                    initFuture.get(3, TimeUnit.SECONDS)
-                }.onFailure {
-                    Log.w("CameraScreen", "Failed to wait for PoseLandmarkerService initialization", it)
-                    initFuture.cancel(true)
-                    shutdownNow = true
-                    quitMediaPipeImmediately = true
-                }.getOrNull()
-            }
-
-            val finalServiceToClose = serviceToClose
-            if (finalServiceToClose != null) {
-                runCatching {
-                    submitToHandler(mediaPipeHandler) {
-                        finalServiceToClose.close()
-                    }.get(3, TimeUnit.SECONDS)
-                }.onFailure {
-                    Log.w("CameraScreen", "Failed to close PoseLandmarkerService on MediaPipe thread", it)
-                    shutdownNow = true
-                    quitMediaPipeImmediately = true
-                }
-            }
+            val activePipeline = activePosePipelineRef.getAndSet(null)
+            closePosePipeline(activePipeline)
+            closePendingPosePipelineCandidate(pendingGpuCandidateRef.getAndSet(null))
 
             viewModel.clearCameraFrameCache(recycle = true)
-            if (shutdownNow) {
-                imageAnalysisExecutor.shutdownNow()
-            } else {
-                imageAnalysisExecutor.shutdown()
-            }
-            if (quitMediaPipeImmediately) {
-                mediaPipeThread.quit()
-            } else {
-                mediaPipeThread.quitSafely()
-            }
+            imageAnalysisExecutor.shutdown()
             demoBitmap?.recycleIfNeeded()
             demoBitmap = null
             pendingTimelapseFile?.delete()
@@ -425,7 +416,7 @@ fun CameraScreen(
         }
     }
 
-    LaunchedEffect(isDemoMode, demoBitmap, landmarkerService) {
+    LaunchedEffect(isDemoMode, demoBitmap, poseDelegateMode) {
         val bitmap = demoBitmap
         if (!isDemoMode || bitmap == null) return@LaunchedEffect
         while (isActive && isDemoMode && demoBitmap === bitmap) {
@@ -441,12 +432,12 @@ fun CameraScreen(
                         lastPoseTimestampMs,
                         SystemClock.elapsedRealtimeNanos() / 1_000_000L
                     )
+                    val pipeline = activePosePipelineRef.get()
                     submitFrameToPosePipeline(
                         bitmap = frameBitmap,
                         viewModel = viewModel,
-                        landmarkerService = landmarkerService,
-                        timestampMs = timestampMs,
-                        mediaPipeHandler = mediaPipeHandler
+                        pipeline = pipeline,
+                        timestampMs = timestampMs
                     )
                 }
             } catch (e: RejectedExecutionException) {
@@ -661,12 +652,12 @@ fun CameraScreen(
                                             violationsText = currentViolationsCounterText.value
                                         )
                                     }
+                                    val pipeline = activePosePipelineRef.get()
                                     submitFrameToPosePipeline(
                                         bitmap = pipelineBitmap,
                                         viewModel = viewModel,
-                                        landmarkerService = landmarkerService,
-                                        timestampMs = timestampMs,
-                                        mediaPipeHandler = mediaPipeHandler
+                                        pipeline = pipeline,
+                                        timestampMs = timestampMs
                                     )
                                     submittedToPipeline = true
                                 } catch (e: Exception) {
@@ -789,10 +780,10 @@ private fun PoseDelegateModeBadge(
     modifier: Modifier = Modifier
 ) {
     val text = when (mode) {
-        PoseLandmarkerDelegateMode.Initializing -> "Pose: Initializing"
-        PoseLandmarkerDelegateMode.GPU -> "Pose: GPU"
-        PoseLandmarkerDelegateMode.CPU -> "Pose: CPU"
-        PoseLandmarkerDelegateMode.Unavailable -> "Pose: Unavailable"
+        PoseLandmarkerDelegateMode.Initializing -> "Mode: Initializing"
+        PoseLandmarkerDelegateMode.GPU -> "Mode: GPU"
+        PoseLandmarkerDelegateMode.CPU -> "Mode: CPU"
+        PoseLandmarkerDelegateMode.Unavailable -> "Mode: Unavailable"
     }
 
     Surface(
@@ -1753,27 +1744,180 @@ private fun nextFrameTimestampMs(lastTimestampMs: AtomicLong, candidateTimestamp
     }
 }
 
+private fun promotePosePipelineToGpu(
+    context: Context,
+    viewModel: GameViewModel,
+    activePosePipelineRef: AtomicReference<PosePipeline?>,
+    pendingGpuCandidateRef: AtomicReference<PendingPosePipelineCandidate?>,
+    isCameraScreenDisposed: AtomicBoolean,
+    cpuPipeline: PosePipeline,
+    onModeChanged: (PoseLandmarkerDelegateMode) -> Unit
+) {
+    if (isCameraScreenDisposed.get()) return
+
+    val gpuThread = HandlerThread("MediaPipePoseGpuThread").apply { start() }
+    val gpuHandler = Handler(gpuThread.looper)
+    val gpuInitCancelled = AtomicBoolean(false)
+    val gpuServiceRef = AtomicReference<PoseLandmarkerService?>(null)
+
+    val listener = object : PoseLandmarkerService.LandmarkerListener {
+        override fun onError(error: String) {
+            Log.e("CameraScreen", "MediaPipe GPU Error: $error")
+        }
+
+        override fun onDelegateModeChanged(mode: PoseLandmarkerDelegateMode) {
+            val service = gpuServiceRef.get()
+            val activePipeline = activePosePipelineRef.get()
+            if (service != null && activePipeline?.service === service) {
+                onModeChanged(mode)
+            }
+        }
+
+        override fun onResults(
+            result: com.example.tracker.PoseLandmarks,
+            imageWidth: Int,
+            imageHeight: Int,
+            timestampMs: Long
+        ) {
+            viewModel.processMediaPipeResults(result, timestampMs, imageWidth, imageHeight)
+        }
+    }
+
+    val future = submitToHandler(gpuHandler) {
+        val gpuService = PoseLandmarkerService(context, listener, Delegate.GPU)
+        gpuServiceRef.set(gpuService)
+
+        if (isCameraScreenDisposed.get() || gpuInitCancelled.get()) {
+            gpuService.close()
+            null
+        } else {
+            gpuService
+        }
+    }
+    val candidate = PendingPosePipelineCandidate(
+        thread = gpuThread,
+        handler = gpuHandler,
+        future = future,
+        cancelled = gpuInitCancelled
+    )
+    pendingGpuCandidateRef.set(candidate)
+
+    var createdGpuService: PoseLandmarkerService? = null
+    var promoted = false
+
+    try {
+        createdGpuService = future.get(GPU_INIT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        val gpuService = createdGpuService
+        if (gpuService != null && gpuService.isAvailable() && !isCameraScreenDisposed.get()) {
+            val gpuPipeline = PosePipeline(
+                thread = gpuThread,
+                handler = gpuHandler,
+                service = gpuService,
+                mode = PoseLandmarkerDelegateMode.GPU
+            )
+            while (true) {
+                val currentPipeline = activePosePipelineRef.get()
+                if (currentPipeline !== cpuPipeline || isCameraScreenDisposed.get()) break
+                if (activePosePipelineRef.compareAndSet(currentPipeline, gpuPipeline)) {
+                    promoted = true
+                    createdGpuService = null
+                    pendingGpuCandidateRef.compareAndSet(candidate, null)
+                    onModeChanged(PoseLandmarkerDelegateMode.GPU)
+                    closePosePipeline(currentPipeline)
+                    break
+                }
+            }
+        }
+    } catch (t: Throwable) {
+        Log.w("CameraScreen", "GPU PoseLandmarker promotion did not complete; keeping CPU pipeline", t)
+        gpuInitCancelled.set(true)
+        future.cancel(true)
+        gpuThread.quit()
+    } finally {
+        pendingGpuCandidateRef.compareAndSet(candidate, null)
+        if (!promoted) {
+            val gpuService = createdGpuService
+            if (gpuService != null) {
+                closePosePipeline(
+                    PosePipeline(
+                        thread = gpuThread,
+                        handler = gpuHandler,
+                        service = gpuService,
+                        mode = PoseLandmarkerDelegateMode.GPU
+                    )
+                )
+            } else {
+                gpuThread.quitSafely()
+            }
+            if (!isCameraScreenDisposed.get() && activePosePipelineRef.get() === cpuPipeline) {
+                onModeChanged(PoseLandmarkerDelegateMode.CPU)
+            }
+        }
+    }
+}
+
+private fun closePosePipeline(pipeline: PosePipeline?) {
+    if (pipeline == null) return
+
+    runCatching {
+        submitToHandler(pipeline.handler) {
+            pipeline.service.close()
+        }.get(3, TimeUnit.SECONDS)
+    }.onFailure {
+        Log.w("CameraScreen", "Failed to close PoseLandmarkerService", it)
+    }
+
+    pipeline.thread.quitSafely()
+}
+
+private fun closePendingPosePipelineCandidate(candidate: PendingPosePipelineCandidate?) {
+    if (candidate == null) return
+
+    candidate.cancelled.set(true)
+    var pendingService: PoseLandmarkerService? = null
+    runCatching {
+        pendingService = candidate.future.get(3, TimeUnit.SECONDS)
+    }.onFailure {
+        Log.w("CameraScreen", "Failed to wait for pending GPU PoseLandmarker candidate", it)
+        candidate.future.cancel(true)
+        candidate.thread.quit()
+    }
+
+    val service = pendingService
+    if (service != null) {
+        closePosePipeline(
+            PosePipeline(
+                thread = candidate.thread,
+                handler = candidate.handler,
+                service = service,
+                mode = PoseLandmarkerDelegateMode.GPU
+            )
+        )
+    } else {
+        candidate.thread.quitSafely()
+    }
+}
+
 private fun submitFrameToPosePipeline(
     bitmap: Bitmap,
     viewModel: GameViewModel,
-    landmarkerService: PoseLandmarkerService?,
-    timestampMs: Long,
-    mediaPipeHandler: Handler
+    pipeline: PosePipeline?,
+    timestampMs: Long
 ) {
     viewModel.registerCameraFrame(bitmap, timestampMs)
 
-    val service = landmarkerService
-    if (service == null) {
+    if (pipeline == null) {
         viewModel.dropCameraFrame(timestampMs, recycle = true)
         return
     }
 
-    val accepted = if (Looper.myLooper() == mediaPipeHandler.looper) {
-        service.detectLiveStreamFrame(bitmap, timestampMs)
+    val accepted = if (Looper.myLooper() == pipeline.handler.looper) {
+        pipeline.service.detectLiveStreamFrame(bitmap, timestampMs)
     } else {
-        val future = submitToHandler(mediaPipeHandler) {
-            service.detectLiveStreamFrame(bitmap, timestampMs)
+        val future = submitToHandler(pipeline.handler) {
+            pipeline.service.detectLiveStreamFrame(bitmap, timestampMs)
         }
+
         runCatching {
             future.get()
         }.getOrDefault(false)
