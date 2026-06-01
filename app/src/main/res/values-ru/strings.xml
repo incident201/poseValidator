@@ -95,5 +95,8 @@
     <string name="final_sensitivity">Чувствительность</string>
     <string name="final_save_timelapse">Сохранить timelapse-видео</string>
     <string name="final_timelapse_preparing">Timelapse-видео подготавливается...</string>
+    <string name="final_close">Закрыть</string>
+    <string name="final_timelapse_saving">Timelapse-видео сохраняется...</string>
+    <string name="final_timelapse_unavailable">Timelapse-видео недоступно</string>
     <string name="final_timelapse_saved">Timelapse-видео сохранено</string>
 </resources>

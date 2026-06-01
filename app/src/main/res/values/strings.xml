@@ -95,5 +95,8 @@
     <string name="final_sensitivity">Sensitivity</string>
     <string name="final_save_timelapse">Save timelapse video</string>
     <string name="final_timelapse_preparing">Timelapse video is preparing...</string>
+    <string name="final_close">Close</string>
+    <string name="final_timelapse_saving">Saving timelapse video...</string>
+    <string name="final_timelapse_unavailable">Timelapse video is unavailable</string>
     <string name="final_timelapse_saved">Timelapse video saved</string>
 </resources>

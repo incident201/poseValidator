@@ -85,6 +85,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -92,6 +93,8 @@ import kotlin.math.max
 
 private const val SHOW_POSE_DEBUG_OVERLAY = true
 private const val SHOW_POSE_DEBUG_POINTS = true
+
+private enum class TimelapseUiState { Preparing, Ready, Saving, Saved, Unavailable, Disabled }
 
 private val POSE_CONNECTIONS = listOf(
     11 to 12,
@@ -159,13 +162,27 @@ fun CameraScreen(
     val currentGameState = rememberUpdatedState(gameState)
     val currentTimelapseRecordingEnabled = rememberUpdatedState(gameSettings.timelapseRecordingEnabled)
     val currentViolationCount = rememberUpdatedState(violationCount)
+    val coroutineScope = rememberCoroutineScope()
     val timelapseRecorder = remember(context) { TimelapseRecorder(context.applicationContext) }
     var pendingTimelapseFile by remember { mutableStateOf<File?>(null) }
+    var timelapseUiState by remember { mutableStateOf(TimelapseUiState.Disabled) }
     val timelapseSaveErrorText = localizedString(gameSettings.language, R.string.timelapse_save_error)
     val timelapseSavedText = localizedString(gameSettings.language, R.string.final_timelapse_saved)
     val violationsCounterText = localizedString(gameSettings.language, R.string.violations_counter)
     val currentViolationsCounterText = rememberUpdatedState(violationsCounterText)
     val isFinalState = gameState == GameState.Success || gameState == GameState.Failed
+    val sessionTimelapseEnabled = sessionSummary?.settings?.timelapseRecordingEnabled
+    val shouldRecordTimelapse = if (isFinalState) {
+        sessionTimelapseEnabled ?: gameSettings.timelapseRecordingEnabled
+    } else {
+        gameSettings.timelapseRecordingEnabled
+    }
+    val closeFinalScreen = {
+        pendingTimelapseFile?.delete()
+        pendingTimelapseFile = null
+        timelapseUiState = TimelapseUiState.Disabled
+        viewModel.dismissFinalScreen()
+    }
 
     val keepScreenOn = gameState == GameState.WaitingForStabilization ||
         gameState == GameState.StartingDelay ||
@@ -257,6 +274,7 @@ fun CameraScreen(
             demoBitmap = null
             pendingTimelapseFile?.delete()
             pendingTimelapseFile = null
+            timelapseUiState = TimelapseUiState.Disabled
             timelapseRecorder.release()
         }
     }
@@ -300,11 +318,12 @@ fun CameraScreen(
         }
     }
 
-    LaunchedEffect(gameState, gameSettings.timelapseRecordingEnabled) {
-        if (!gameSettings.timelapseRecordingEnabled) {
+    LaunchedEffect(gameState, shouldRecordTimelapse) {
+        if (!shouldRecordTimelapse) {
             timelapseRecorder.discard()
             pendingTimelapseFile?.delete()
             pendingTimelapseFile = null
+            timelapseUiState = TimelapseUiState.Disabled
             return@LaunchedEffect
         }
 
@@ -312,25 +331,35 @@ fun CameraScreen(
             GameState.StartingDelay -> {
                 pendingTimelapseFile?.delete()
                 pendingTimelapseFile = null
+                timelapseUiState = TimelapseUiState.Disabled
                 timelapseRecorder.start(SystemClock.elapsedRealtime())
             }
             GameState.HoldingPose -> timelapseRecorder.startTimer(SystemClock.elapsedRealtime())
             GameState.Success, GameState.Failed -> {
+                timelapseUiState = TimelapseUiState.Preparing
                 val file = withContext(Dispatchers.IO) { timelapseRecorder.stop() }
                 if (file != null && file.exists() && file.length() > 0L) {
                     pendingTimelapseFile?.delete()
                     pendingTimelapseFile = file
+                    timelapseUiState = TimelapseUiState.Ready
+                } else {
+                    file?.delete()
+                    pendingTimelapseFile?.delete()
+                    pendingTimelapseFile = null
+                    timelapseUiState = TimelapseUiState.Unavailable
                 }
             }
             GameState.Idle -> {
                 timelapseRecorder.discard()
                 pendingTimelapseFile?.delete()
                 pendingTimelapseFile = null
+                timelapseUiState = TimelapseUiState.Disabled
             }
             else -> Unit
         }
     }
 
+    BackHandler(enabled = !showSettings && isFinalState && sessionSummary != null) { closeFinalScreen() }
     BackHandler(enabled = showSettings) { showSettings = false }
 
     if (showSettings) {
@@ -376,20 +405,28 @@ fun CameraScreen(
                         summary = sessionSummary!!,
                         language = gameSettings.language,
                         pendingTimelapseFile = pendingTimelapseFile,
-                        timelapseSaveErrorText = timelapseSaveErrorText,
+                        timelapseUiState = timelapseUiState,
                         onSaveTimelapse = {
                             val file = pendingTimelapseFile
-                            if (file != null) {
-                                val saved = saveTimelapseToMediaStore(context, file)
-                                Toast.makeText(
-                                    context,
-                                    if (saved) timelapseSavedText else timelapseSaveErrorText,
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                                file.delete()
-                                pendingTimelapseFile = null
+                            if (file != null && timelapseUiState != TimelapseUiState.Saving) {
+                                timelapseUiState = TimelapseUiState.Saving
+                                coroutineScope.launch {
+                                    val saved = withContext(Dispatchers.IO) {
+                                        saveTimelapseToMediaStore(context, file)
+                                    }
+                                    if (saved) {
+                                        file.delete()
+                                        pendingTimelapseFile = null
+                                        timelapseUiState = TimelapseUiState.Saved
+                                        Toast.makeText(context, timelapseSavedText, Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        timelapseUiState = TimelapseUiState.Ready
+                                        Toast.makeText(context, timelapseSaveErrorText, Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             }
                         },
+                        onClose = closeFinalScreen,
                         modifier = Modifier.matchParentSize()
                     )
                 }
@@ -581,8 +618,9 @@ private fun FinalSessionScreen(
     summary: SessionSummary,
     language: AppLanguage,
     pendingTimelapseFile: File?,
-    timelapseSaveErrorText: String,
+    timelapseUiState: TimelapseUiState,
     onSaveTimelapse: () -> Unit,
+    onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -685,31 +723,80 @@ private fun FinalSessionScreen(
 
                     if (summary.settings.timelapseRecordingEnabled) {
                         Spacer(Modifier.height(20.dp))
-                        if (pendingTimelapseFile != null) {
-                            Button(
-                                onClick = onSaveTimelapse,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(18.dp)
-                            ) {
+                        when (timelapseUiState) {
+                            TimelapseUiState.Ready -> {
+                                Button(
+                                    onClick = onSaveTimelapse,
+                                    enabled = pendingTimelapseFile != null,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(18.dp)
+                                ) {
+                                    Text(
+                                        text = localizedString(language, R.string.final_save_timelapse),
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                            TimelapseUiState.Saving -> {
+                                Button(
+                                    onClick = {},
+                                    enabled = false,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(18.dp)
+                                ) {
+                                    Text(
+                                        text = localizedString(language, R.string.final_timelapse_saving),
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                            TimelapseUiState.Saved -> {
                                 Text(
-                                    text = localizedString(language, R.string.final_save_timelapse),
+                                    text = localizedString(language, R.string.final_timelapse_saved),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = colorScheme.tertiary,
                                     fontWeight = FontWeight.Bold,
                                     textAlign = TextAlign.Center
                                 )
                             }
-                        } else {
-                            OutlinedButton(
-                                onClick = {},
-                                enabled = false,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(18.dp)
-                            ) {
+                            TimelapseUiState.Unavailable -> {
                                 Text(
-                                    text = localizedString(language, R.string.final_timelapse_preparing),
+                                    text = localizedString(language, R.string.final_timelapse_unavailable),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.SemiBold,
                                     textAlign = TextAlign.Center
                                 )
                             }
+                            TimelapseUiState.Preparing -> {
+                                OutlinedButton(
+                                    onClick = {},
+                                    enabled = false,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(18.dp)
+                                ) {
+                                    Text(
+                                        text = localizedString(language, R.string.final_timelapse_preparing),
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                            TimelapseUiState.Disabled -> Unit
                         }
+                    }
+
+                    Spacer(Modifier.height(20.dp))
+                    Button(
+                        onClick = onClose,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(18.dp)
+                    ) {
+                        Text(
+                            text = localizedString(language, R.string.final_close),
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
+                        )
                     }
                 }
             }

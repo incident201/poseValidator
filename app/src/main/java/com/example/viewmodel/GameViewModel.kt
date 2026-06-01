@@ -807,6 +807,32 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
     private fun speak(text: String) { _voiceEvents.tryEmit(text) }
 
+    fun dismissFinalScreen() {
+        if (_gameState.value != GameState.Success && _gameState.value != GameState.Failed) return
+        startDelayJob?.cancel()
+        timerJob?.cancel()
+        sensorManager.unregisterListener(this)
+        stabilizationStableSinceMs = null
+        stabilizationCompleted = false
+        _startDelayRemainingSeconds.value = 0
+        synchronized(processingLock) {
+            processingGeneration += 1
+            poseSmoother.reset()
+            movementTracker.reset()
+            currentViolationCount = 0
+            _violationCount.value = 0
+            resetRuleViolationCounts()
+            lastPenaltyAtMs = 0L
+            consecutiveFaceFailFrames = 0
+        }
+        _sessionSummary.value = null
+        resetMovementGaugeState()
+        _gameState.value = GameState.Idle
+        _statusMessage.value = tr(R.string.status_initial)
+        _defeatReason.value = ""
+        _timerSeconds.value = _selectedDurationSeconds.value
+    }
+
     fun stopSession() {
         startDelayJob?.cancel()
         timerJob?.cancel()
