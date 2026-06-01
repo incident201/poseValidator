@@ -1,7 +1,7 @@
 # poseValidator
 
 **poseValidator** is an Android application for monitoring whether a person can hold a static pose for a configured amount of time. 
-The app is particularly useful for **corner time**, posture training, and stillness enforcement in consensual D/s and power exchange dynamics. It was designed to help maintain a strict static pose for extended periods as part of disciplinary or training sessions.
+The app is particularly useful for **cornertime**, posture training, and stillness enforcement in consensual D/s and power exchange dynamics. It was designed to help maintain a strict static pose for extended periods as part of disciplinary or training sessions.
 
 The app uses on-device computer vision models to track the user's body position and detect movement during a session. It is designed for scenarios where the subject must remain still, maintain a specific posture, or avoid turning toward or away from the camera. 
 
