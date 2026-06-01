@@ -4,15 +4,9 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
 import com.google.mediapipe.tasks.core.BaseOptions
-import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.RejectedExecutionException
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 class PoseLandmarkerService(
     private val context: Context,
@@ -20,12 +14,8 @@ class PoseLandmarkerService(
 ) {
     private val TAG = "PoseLandmarkerService"
     private val lifecycleLock = Any()
-    private val inferenceExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "PoseLandmarkerInferenceThread").apply { isDaemon = true }
-    }
     @Volatile private var isClosed = false
-    @Volatile private var poseLandmarker: PoseLandmarker? = null
-    @Volatile private var activeDelegate: Delegate? = null
+    private var poseLandmarker: PoseLandmarker? = null
 
     interface LandmarkerListener {
         fun onError(error: String)
@@ -37,86 +27,58 @@ class PoseLandmarkerService(
     }
 
     private fun setupLandmarker() {
-        runOnInferenceThread("initialize Pose Landmarker") {
-            initializeRealLandmarker()
-        }
+        initializeRealLandmarker()
     }
 
     private fun initializeRealLandmarker() {
-        if (isClosed) return
+        try {
+            Log.i(TAG, "Initializing MediaPipe Pose Landmarker from assets")
+            val baseOptions = BaseOptions.builder()
+                .setModelAssetPath("pose_landmarker_heavy.task")
+                .build()
 
-        Log.i(TAG, "Initializing MediaPipe Pose Landmarker from assets with delegate=GPU")
-        val landmarker = try {
-            createLandmarker(Delegate.GPU).also {
-                activeDelegate = Delegate.GPU
-                Log.i(TAG, "Pose Landmarker loaded successfully with delegate=${Delegate.GPU}")
-            }
-        } catch (gpuError: Throwable) {
-            Log.w(TAG, "Failed to initialize Pose Landmarker with delegate=GPU, falling back to CPU", gpuError)
-            if (isClosed) return
-            try {
-                createLandmarker(Delegate.CPU).also {
-                    activeDelegate = Delegate.CPU
-                    Log.i(TAG, "Pose Landmarker loaded successfully with delegate=${Delegate.CPU}")
+            val options = PoseLandmarker.PoseLandmarkerOptions.builder()
+                .setBaseOptions(baseOptions)
+                .setRunningMode(RunningMode.LIVE_STREAM)
+                .setNumPoses(1)
+                .setMinPoseDetectionConfidence(0.70f)
+                .setMinPosePresenceConfidence(0.70f)
+                .setMinTrackingConfidence(0.75f)
+                .setResultListener { result, image ->
+                    if (!isClosed) {
+                        processResult(result, image.width, image.height, result.timestampMs())
+                    }
                 }
-            } catch (cpuError: Throwable) {
-                activeDelegate = null
-                Log.e(TAG, "Failed to initialize Pose Landmarker with delegate=CPU", cpuError)
-                deliverError(cpuError.message ?: "Failed to initialize MediaPipe")
-                return
-            }
-        }
-
-        synchronized(lifecycleLock) {
-            if (isClosed) {
-                landmarker.close()
-            } else {
-                poseLandmarker = landmarker
-            }
-        }
-    }
-
-    private fun createLandmarker(delegate: Delegate): PoseLandmarker {
-        val baseOptions = BaseOptions.builder()
-            .setModelAssetPath("pose_landmarker_heavy.task")
-            .setDelegate(delegate)
-            .build()
-
-        val options = PoseLandmarker.PoseLandmarkerOptions.builder()
-            .setBaseOptions(baseOptions)
-            .setRunningMode(RunningMode.LIVE_STREAM)
-            .setNumPoses(1)
-            .setMinPoseDetectionConfidence(0.70f)
-            .setMinPosePresenceConfidence(0.70f)
-            .setMinTrackingConfidence(0.75f)
-            .setResultListener { result, image ->
-                if (!isClosed) {
-                    processResult(result, image.width, image.height, result.timestampMs())
+                .setErrorListener { error ->
+                    Log.e(TAG, "MediaPipe error: ${error.message}")
+                    deliverError(error.message ?: "Unknown MediaPipe error")
                 }
-            }
-            .setErrorListener { error ->
-                Log.e(TAG, "MediaPipe error: ${error.message}")
-                deliverError(error.message ?: "Unknown MediaPipe error")
-            }
-            .build()
+                .build()
 
-        return PoseLandmarker.createFromOptions(context, options)
+            synchronized(lifecycleLock) {
+                if (isClosed) return
+                poseLandmarker = PoseLandmarker.createFromOptions(context, options)
+            }
+            Log.i(TAG, "MediaPipe Pose Landmarker loaded successfully from assets")
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to initialize MediaPipe Pose Landmarker", t)
+            deliverError(t.message ?: "Failed to initialize MediaPipe")
+        }
     }
 
     fun detectLiveStreamFrame(bitmap: Bitmap, timestamp: Long): Boolean {
-        if (isClosed) return false
-        if (poseLandmarker == null) return false
-
-        return runOnInferenceThread("detect pose frame") {
-            if (isClosed) return@runOnInferenceThread
-            val landmarker = poseLandmarker ?: return@runOnInferenceThread
+        return synchronized(lifecycleLock) {
+            if (isClosed) return@synchronized false
+            val landmarker = poseLandmarker ?: return@synchronized false
 
             try {
                 val mpImage = com.google.mediapipe.framework.image.BitmapImageBuilder(bitmap).build()
                 landmarker.detectAsync(mpImage, timestamp)
+                true
             } catch (t: Throwable) {
-                Log.e(TAG, "Error in detectLiveStreamFrame delegate=$activeDelegate", t)
+                Log.e(TAG, "Error in detectLiveStreamFrame", t)
                 deliverError(t.message ?: "MediaPipe detect error")
+                false
             }
         }
     }
@@ -182,66 +144,14 @@ class PoseLandmarkerService(
         }
     }
 
-    fun close(timeoutMs: Long = 3_000L): Boolean {
-        val shouldClose = synchronized(lifecycleLock) {
-            if (isClosed) {
-                false
-            } else {
-                isClosed = true
-                true
-            }
+    fun close() {
+        val landmarker = synchronized(lifecycleLock) {
+            if (isClosed && poseLandmarker == null) return
+            isClosed = true
+            val current = poseLandmarker
+            poseLandmarker = null
+            current
         }
-        if (!shouldClose) return true
-
-        val closeFuture = try {
-            inferenceExecutor.submit {
-                try {
-                    poseLandmarker?.close()
-                } catch (t: Throwable) {
-                    Log.e(TAG, "Error closing Pose Landmarker delegate=$activeDelegate", t)
-                } finally {
-                    poseLandmarker = null
-                    activeDelegate = null
-                }
-            }
-        } catch (e: RejectedExecutionException) {
-            Log.w(TAG, "Pose Landmarker inference executor rejected close", e)
-            inferenceExecutor.shutdown()
-            return false
-        }
-
-        return try {
-            closeFuture.get(timeoutMs, TimeUnit.MILLISECONDS)
-            inferenceExecutor.shutdown()
-            val terminated = inferenceExecutor.awaitTermination(1, TimeUnit.SECONDS)
-            if (!terminated) {
-                Log.w(TAG, "Pose Landmarker inference executor did not terminate cleanly")
-            }
-            true
-        } catch (e: TimeoutException) {
-            Log.w(TAG, "Timed out while closing Pose Landmarker delegate=$activeDelegate", e)
-            inferenceExecutor.shutdown()
-            false
-        } catch (e: InterruptedException) {
-            Log.w(TAG, "Interrupted while closing Pose Landmarker delegate=$activeDelegate", e)
-            Thread.currentThread().interrupt()
-            inferenceExecutor.shutdown()
-            false
-        } catch (t: Throwable) {
-            Log.w(TAG, "Failed while closing Pose Landmarker delegate=$activeDelegate", t)
-            inferenceExecutor.shutdown()
-            false
-        }
-    }
-
-    private fun runOnInferenceThread(operation: String, block: () -> Unit): Boolean {
-        if (isClosed || inferenceExecutor.isShutdown) return false
-        return try {
-            inferenceExecutor.execute(block)
-            true
-        } catch (e: RejectedExecutionException) {
-            Log.w(TAG, "Pose Landmarker inference executor rejected operation=$operation", e)
-            false
-        }
+        landmarker?.close()
     }
 }
