@@ -164,7 +164,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     val sessionSummary: StateFlow<SessionSummary?> = _sessionSummary.asStateFlow()
 
     private var sessionInitialTimerSeconds = defaultDurationSeconds
-    private var sessionActualTimerSeconds = defaultDurationSeconds
+    private var sessionHoldingStartedAtElapsedMs: Long? = null
     private var sessionSettingsSnapshot = _gameSettings.value
 
     private data class AnalyzedPoseFrame(
@@ -531,7 +531,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         val sec = minutes * 60
         if (_gameSettings.value.penaltiesEnabled && sec > 0) {
             _timerSeconds.value += sec
-            sessionActualTimerSeconds += sec
         }
 
         if (type == RuleViolationType.FaceNotMatchingMode) {
@@ -648,6 +647,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         return null
     }
 
+    private fun sessionElapsedSecondsForSummary(): Int {
+        val startedAt = sessionHoldingStartedAtElapsedMs ?: return 0
+        val elapsedSeconds = ((SystemClock.elapsedRealtime() - startedAt) / 1000L)
+            .coerceAtLeast(0L)
+        return elapsedSeconds.toInt()
+    }
+
     private fun startTimerLoop() {
         timerJob?.cancel()
         timerJob = viewModelScope.launch {
@@ -661,7 +667,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 _sessionSummary.value = SessionSummary(
                     result = GameState.Success,
                     initialTimerSeconds = sessionInitialTimerSeconds,
-                    actualTimerSeconds = sessionActualTimerSeconds,
+                    actualTimerSeconds = sessionElapsedSecondsForSummary(),
                     violationCounts = _ruleViolationCounts.value,
                     settings = sessionSettingsSnapshot
                 )
@@ -678,7 +684,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
         _sessionSummary.value = null
         sessionInitialTimerSeconds = _selectedDurationSeconds.value
-        sessionActualTimerSeconds = _selectedDurationSeconds.value
+        sessionHoldingStartedAtElapsedMs = null
         sessionSettingsSnapshot = _gameSettings.value
         _timerSeconds.value = _selectedDurationSeconds.value
         _defeatReason.value = ""
@@ -727,6 +733,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             if (analyzedFrame == null) { triggerDefeat(tr(R.string.camera_no_frame)); return@launch }
             if (initialPose == null || !initialPose.hasEnoughKeypoints()) { triggerDefeat(tr(R.string.camera_no_body)); return@launch }
             _timerSeconds.value = sessionInitialTimerSeconds
+            sessionHoldingStartedAtElapsedMs = SystemClock.elapsedRealtime()
             synchronized(processingLock) {
                 processingGeneration += 1
                 movementTracker.reset()
@@ -795,7 +802,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _sessionSummary.value = SessionSummary(
             result = GameState.Failed,
             initialTimerSeconds = sessionInitialTimerSeconds,
-            actualTimerSeconds = sessionActualTimerSeconds,
+            actualTimerSeconds = sessionElapsedSecondsForSummary(),
             violationCounts = _ruleViolationCounts.value,
             settings = sessionSettingsSnapshot,
             defeatReason = reason
@@ -827,6 +834,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         }
         _sessionSummary.value = null
         resetMovementGaugeState()
+        sessionHoldingStartedAtElapsedMs = null
         _gameState.value = GameState.Idle
         _statusMessage.value = tr(R.string.status_initial)
         _defeatReason.value = ""
@@ -852,6 +860,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         }
         _sessionSummary.value = null
         resetMovementGaugeState()
+        sessionHoldingStartedAtElapsedMs = null
         _gameState.value = GameState.Idle
         _statusMessage.value = tr(R.string.status_initial)
         _defeatReason.value = ""
