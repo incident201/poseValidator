@@ -31,6 +31,12 @@ class PoseLandmarkerService(
     private var totalResultCallbacks = 0L
     private var totalRuntimeErrors = 0L
     private var pendingCpuFallbackReason: String? = null
+    private var pendingCpuFallbackSource: PendingCpuFallbackSource? = null
+
+    private enum class PendingCpuFallbackSource {
+        Watchdog,
+        RuntimeError
+    }
 
     private companion object {
         private const val GPU_FRAMES_WITHOUT_RESULT_LIMIT = 30
@@ -97,6 +103,8 @@ class PoseLandmarkerService(
             synchronized(lifecycleLock) {
                 poseLandmarker = null
                 activeDelegate = null
+                pendingCpuFallbackReason = null
+                pendingCpuFallbackSource = null
             }
             notifyDelegateMode(PoseLandmarkerDelegateMode.Unavailable)
             Log.e(TAG, "Failed to initialize MediaPipe Pose Landmarker with CPU fallback", cpuError)
@@ -128,6 +136,7 @@ class PoseLandmarkerService(
                     totalRuntimeErrors++
                     if (!isClosed && activeDelegate == Delegate.GPU) {
                         pendingCpuFallbackReason = "MediaPipe errorListener: $message"
+                        pendingCpuFallbackSource = PendingCpuFallbackSource.RuntimeError
                         false
                     } else {
                         activeDelegate != Delegate.GPU
@@ -177,6 +186,7 @@ class PoseLandmarkerService(
             if (isClosed) return false
             if (activeDelegate != Delegate.GPU) {
                 pendingCpuFallbackReason = null
+                pendingCpuFallbackSource = null
                 return true
             }
 
@@ -197,6 +207,7 @@ class PoseLandmarkerService(
                 activeDelegate = null
                 submittedSinceLastResult = 0
                 pendingCpuFallbackReason = null
+                pendingCpuFallbackSource = null
             }
             notifyDelegateMode(PoseLandmarkerDelegateMode.Unavailable)
             Log.e(TAG, "CPU fallback failed: reason=$reason, $counters", cpuError)
@@ -212,6 +223,7 @@ class PoseLandmarkerService(
                 activeDelegate = Delegate.CPU
                 submittedSinceLastResult = 0
                 pendingCpuFallbackReason = null
+                pendingCpuFallbackSource = null
                 false
             }
         }
@@ -272,6 +284,7 @@ class PoseLandmarkerService(
                 val counters = fallbackCounters()
                 submittedSinceLastResult = 0
                 pendingCpuFallbackReason = null
+                pendingCpuFallbackSource = null
                 current to counters
             }
             runCatching { failedLandmarker.first?.close() }
@@ -290,9 +303,12 @@ class PoseLandmarkerService(
                 if (activeDelegate == Delegate.GPU) {
                     submittedSinceLastResult++
 
-                    if (submittedSinceLastResult >= GPU_FRAMES_WITHOUT_RESULT_LIMIT) {
+                    if (submittedSinceLastResult >= GPU_FRAMES_WITHOUT_RESULT_LIMIT &&
+                        pendingCpuFallbackReason == null
+                    ) {
                         pendingCpuFallbackReason =
                             "GPU produced no result callbacks after $submittedSinceLastResult submitted frames"
+                        pendingCpuFallbackSource = PendingCpuFallbackSource.Watchdog
                     }
                 }
             }
@@ -304,7 +320,8 @@ class PoseLandmarkerService(
             "submitted=$totalSubmittedFrames, " +
                 "results=$totalResultCallbacks, " +
                 "errors=$totalRuntimeErrors, " +
-                "framesWithoutResult=$submittedSinceLastResult"
+                "framesWithoutResult=$submittedSinceLastResult, " +
+                "pendingSource=$pendingCpuFallbackSource"
         }
     }
 
@@ -313,6 +330,11 @@ class PoseLandmarkerService(
             if (isClosed) return
             submittedSinceLastResult = 0
             totalResultCallbacks++
+
+            if (pendingCpuFallbackSource == PendingCpuFallbackSource.Watchdog) {
+                pendingCpuFallbackReason = null
+                pendingCpuFallbackSource = null
+            }
         }
 
         val landmarksList = result.landmarks()
@@ -385,6 +407,7 @@ class PoseLandmarkerService(
             activeDelegate = null
             submittedSinceLastResult = 0
             pendingCpuFallbackReason = null
+            pendingCpuFallbackSource = null
             current
         }
         landmarker?.close()
