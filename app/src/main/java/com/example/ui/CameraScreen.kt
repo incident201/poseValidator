@@ -707,10 +707,10 @@ private fun PoseDelegateModeBadge(
     modifier: Modifier = Modifier
 ) {
     val text = when (mode) {
-        PoseLandmarkerDelegateMode.Initializing -> "Mode: Initializing"
-        PoseLandmarkerDelegateMode.GPU -> "Mode: GPU"
-        PoseLandmarkerDelegateMode.CPU -> "Mode: CPU"
-        PoseLandmarkerDelegateMode.Unavailable -> "Mode: Unavailable"
+        PoseLandmarkerDelegateMode.Initializing -> "Pose: Initializing"
+        PoseLandmarkerDelegateMode.GPU -> "Pose: GPU"
+        PoseLandmarkerDelegateMode.CPU -> "Pose: CPU"
+        PoseLandmarkerDelegateMode.Unavailable -> "Pose: Unavailable"
     }
 
     Surface(
