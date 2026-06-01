@@ -43,7 +43,7 @@ internal fun SettingsScreen(
  ) {
     val colorScheme = MaterialTheme.colorScheme
     val normalSensitivity = SensitivityPresets.first { it.nameRes == R.string.sensitivity_normal }
-    val selectedSensitivity = SensitivityPresets.firstOrNull { it.matches(settings) } ?: normalSensitivity
+    val selectedSensitivity = sensitivityPresetFor(settings)
 
     LaunchedEffect(selectedSensitivity, settings.driftThresholdFactor, settings.motionThresholdFactor) {
         if (!selectedSensitivity.matches(settings)) {
@@ -230,7 +230,7 @@ private fun IntegerSettingField(
 }
 
 
-private data class SensitivityPreset(
+internal data class SensitivityPreset(
     val nameRes: Int,
     val driftThresholdFactor: Float,
     val motionThresholdFactor: Float
@@ -240,14 +240,22 @@ private data class SensitivityPreset(
             motionThresholdFactor.nearlyEquals(settings.motionThresholdFactor)
 }
 
-private val SensitivityPresets = listOf(
+internal val SensitivityPresets = listOf(
     SensitivityPreset(R.string.sensitivity_normal, 0.12f, 0.06f),
     SensitivityPreset(R.string.sensitivity_high, 0.10f, 0.04f),
     SensitivityPreset(R.string.sensitivity_low, 0.15f, 0.08f),
     SensitivityPreset(R.string.sensitivity_very_low, 0.17f, 0.09f)
 )
 
-private fun Float.nearlyEquals(other: Float): Boolean = kotlin.math.abs(this - other) < 0.001f
+internal fun sensitivityPresetFor(settings: GameSettings): SensitivityPreset {
+    val normal = SensitivityPresets.first { it.nameRes == R.string.sensitivity_normal }
+    return SensitivityPresets.firstOrNull { preset ->
+        preset.driftThresholdFactor.nearlyEquals(settings.driftThresholdFactor) &&
+            preset.motionThresholdFactor.nearlyEquals(settings.motionThresholdFactor)
+    } ?: normal
+}
+
+internal fun Float.nearlyEquals(other: Float): Boolean = kotlin.math.abs(this - other) < 0.001f
 
 @Composable
 private fun LanguageSettingsCard(

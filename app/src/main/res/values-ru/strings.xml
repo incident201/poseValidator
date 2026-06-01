@@ -86,4 +86,14 @@
     <string name="movement_gauge_drift">Смещение</string>
     <string name="movement_gauge_motion">Движение</string>
     <string name="violation_count_face">Лицо</string>
+    <string name="final_completed">Завершено</string>
+    <string name="final_failed">Неудача</string>
+    <string name="final_initial_timer">Начальное время таймера</string>
+    <string name="final_actual_timer">Фактическое время таймера</string>
+    <string name="final_errors">Ошибки</string>
+    <string name="final_session_settings">Настройки сессии</string>
+    <string name="final_sensitivity">Чувствительность</string>
+    <string name="final_save_timelapse">Сохранить timelapse-видео</string>
+    <string name="final_timelapse_preparing">Timelapse-видео подготавливается...</string>
+    <string name="final_timelapse_saved">Timelapse-видео сохранено</string>
 </resources>

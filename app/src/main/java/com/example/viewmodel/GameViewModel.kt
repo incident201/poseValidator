@@ -107,6 +107,15 @@ data class RuleViolationCounts(
     val face: Int = 0
 )
 
+data class SessionSummary(
+    val result: GameState,
+    val initialTimerSeconds: Int,
+    val actualTimerSeconds: Int,
+    val violationCounts: RuleViolationCounts,
+    val settings: GameSettings,
+    val defeatReason: String = ""
+)
+
 class GameViewModel(application: Application) : AndroidViewModel(application), SensorEventListener {
     private val tag = "GameViewModel"
     private val defaultDurationSeconds = 180
@@ -151,6 +160,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     val voiceEvents: SharedFlow<String> = _voiceEvents.asSharedFlow()
     private val _gameSettings = MutableStateFlow(loadSettings())
     val gameSettings: StateFlow<GameSettings> = _gameSettings.asStateFlow()
+    private val _sessionSummary = MutableStateFlow<SessionSummary?>(null)
+    val sessionSummary: StateFlow<SessionSummary?> = _sessionSummary.asStateFlow()
+
+    private var sessionInitialTimerSeconds = defaultDurationSeconds
+    private var sessionActualTimerSeconds = defaultDurationSeconds
+    private var sessionSettingsSnapshot = _gameSettings.value
 
     private data class AnalyzedPoseFrame(
         val pose: PoseLandmarks,
@@ -514,8 +529,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private fun applyPenalty(type: RuleViolationType, minutes: Int) {
         val sec = minutes * 60
-        if (_gameSettings.value.penaltiesEnabled) {
+        if (_gameSettings.value.penaltiesEnabled && sec > 0) {
             _timerSeconds.value += sec
+            sessionActualTimerSeconds += sec
         }
 
         if (type == RuleViolationType.FaceNotMatchingMode) {
@@ -642,6 +658,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 _timerSeconds.value = next
             }
             if (_gameState.value == GameState.HoldingPose && _timerSeconds.value <= 0) {
+                _sessionSummary.value = SessionSummary(
+                    result = GameState.Success,
+                    initialTimerSeconds = sessionInitialTimerSeconds,
+                    actualTimerSeconds = sessionActualTimerSeconds,
+                    violationCounts = _ruleViolationCounts.value,
+                    settings = sessionSettingsSnapshot
+                )
                 _gameState.value = GameState.Success
                 resetMovementGaugeState()
                 _statusMessage.value = tr(R.string.victory)
@@ -653,6 +676,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     fun startSession() {
         if (_gameState.value != GameState.Idle && _gameState.value != GameState.Failed && _gameState.value != GameState.Success) return
 
+        _sessionSummary.value = null
+        sessionInitialTimerSeconds = _selectedDurationSeconds.value
+        sessionActualTimerSeconds = _selectedDurationSeconds.value
+        sessionSettingsSnapshot = _gameSettings.value
         _timerSeconds.value = _selectedDurationSeconds.value
         _defeatReason.value = ""
         resetMovementGaugeState()
@@ -699,7 +726,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             val initialPose = analyzedFrame?.pose
             if (analyzedFrame == null) { triggerDefeat(tr(R.string.camera_no_frame)); return@launch }
             if (initialPose == null || !initialPose.hasEnoughKeypoints()) { triggerDefeat(tr(R.string.camera_no_body)); return@launch }
-            _timerSeconds.value = _selectedDurationSeconds.value
+            _timerSeconds.value = sessionInitialTimerSeconds
             synchronized(processingLock) {
                 processingGeneration += 1
                 movementTracker.reset()
@@ -752,10 +779,58 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private fun resetMovementGaugeState() { _movementGaugeState.value = MovementGaugeState() }
 
-    fun triggerDefeat(reason: String, voiceMessage: String = tr(R.string.defeat_try_again)) { val alreadyFailed = _gameState.value == GameState.Failed; startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset() }; resetMovementGaugeState(); _gameState.value = GameState.Failed; _defeatReason.value = reason; _statusMessage.value = tr(R.string.check_failed); if (!alreadyFailed) speak(voiceMessage) }
+    fun triggerDefeat(reason: String, voiceMessage: String = tr(R.string.defeat_try_again)) {
+        val alreadyFailed = _gameState.value == GameState.Failed
+        startDelayJob?.cancel()
+        timerJob?.cancel()
+        sensorManager.unregisterListener(this)
+        stabilizationStableSinceMs = null
+        stabilizationCompleted = false
+        _startDelayRemainingSeconds.value = 0
+        synchronized(processingLock) {
+            processingGeneration += 1
+            poseSmoother.reset()
+        }
+        resetMovementGaugeState()
+        _sessionSummary.value = SessionSummary(
+            result = GameState.Failed,
+            initialTimerSeconds = sessionInitialTimerSeconds,
+            actualTimerSeconds = sessionActualTimerSeconds,
+            violationCounts = _ruleViolationCounts.value,
+            settings = sessionSettingsSnapshot,
+            defeatReason = reason
+        )
+        _gameState.value = GameState.Failed
+        _defeatReason.value = reason
+        _statusMessage.value = tr(R.string.check_failed)
+        if (!alreadyFailed) speak(voiceMessage)
+    }
     private fun speak(text: String) { _voiceEvents.tryEmit(text) }
 
-    fun stopSession() { startDelayJob?.cancel(); timerJob?.cancel(); sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _startDelayRemainingSeconds.value = 0; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset(); movementTracker.reset(); currentViolationCount = 0; _violationCount.value = 0; resetRuleViolationCounts(); lastPenaltyAtMs = 0L; consecutiveFaceFailFrames = 0 }; resetMovementGaugeState(); _gameState.value = GameState.Idle; _statusMessage.value = tr(R.string.status_initial); _defeatReason.value = ""; _timerSeconds.value = _selectedDurationSeconds.value }
+    fun stopSession() {
+        startDelayJob?.cancel()
+        timerJob?.cancel()
+        sensorManager.unregisterListener(this)
+        stabilizationStableSinceMs = null
+        stabilizationCompleted = false
+        _startDelayRemainingSeconds.value = 0
+        synchronized(processingLock) {
+            processingGeneration += 1
+            poseSmoother.reset()
+            movementTracker.reset()
+            currentViolationCount = 0
+            _violationCount.value = 0
+            resetRuleViolationCounts()
+            lastPenaltyAtMs = 0L
+            consecutiveFaceFailFrames = 0
+        }
+        _sessionSummary.value = null
+        resetMovementGaugeState()
+        _gameState.value = GameState.Idle
+        _statusMessage.value = tr(R.string.status_initial)
+        _defeatReason.value = ""
+        _timerSeconds.value = _selectedDurationSeconds.value
+    }
     override fun onCleared() { isCleared = true; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
 }
 
