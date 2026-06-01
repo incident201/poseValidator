@@ -177,11 +177,26 @@ fun CameraScreen(
     } else {
         gameSettings.timelapseRecordingEnabled
     }
+    val isTimelapseSaving = timelapseUiState == TimelapseUiState.Saving
     val closeFinalScreen = {
-        pendingTimelapseFile?.delete()
-        pendingTimelapseFile = null
-        timelapseUiState = TimelapseUiState.Disabled
-        viewModel.dismissFinalScreen()
+        if (!isTimelapseSaving) {
+            pendingTimelapseFile?.delete()
+            pendingTimelapseFile = null
+            timelapseUiState = TimelapseUiState.Disabled
+            viewModel.dismissFinalScreen()
+        }
+    }
+    val startFromFinalScreen = {
+        if (isFinalState) {
+            if (!isTimelapseSaving) {
+                pendingTimelapseFile?.delete()
+                pendingTimelapseFile = null
+                timelapseUiState = TimelapseUiState.Disabled
+                viewModel.startSession()
+            }
+        } else {
+            viewModel.startSession()
+        }
     }
 
     val keepScreenOn = gameState == GameState.WaitingForStabilization ||
@@ -359,7 +374,9 @@ fun CameraScreen(
         }
     }
 
-    BackHandler(enabled = !showSettings && isFinalState && sessionSummary != null) { closeFinalScreen() }
+    BackHandler(enabled = !showSettings && isFinalState && sessionSummary != null && !isTimelapseSaving) {
+        closeFinalScreen()
+    }
     BackHandler(enabled = showSettings) { showSettings = false }
 
     if (showSettings) {
@@ -407,15 +424,20 @@ fun CameraScreen(
                         pendingTimelapseFile = pendingTimelapseFile,
                         timelapseUiState = timelapseUiState,
                         onSaveTimelapse = {
-                            val file = pendingTimelapseFile
-                            if (file != null && timelapseUiState != TimelapseUiState.Saving) {
+                            val savingFile = pendingTimelapseFile
+                            if (savingFile != null && timelapseUiState != TimelapseUiState.Saving) {
                                 timelapseUiState = TimelapseUiState.Saving
                                 coroutineScope.launch {
                                     val saved = withContext(Dispatchers.IO) {
-                                        saveTimelapseToMediaStore(context, file)
+                                        saveTimelapseToMediaStore(context, savingFile)
+                                    }
+                                    if (pendingTimelapseFile != savingFile ||
+                                        timelapseUiState != TimelapseUiState.Saving
+                                    ) {
+                                        return@launch
                                     }
                                     if (saved) {
-                                        file.delete()
+                                        savingFile.delete()
                                         pendingTimelapseFile = null
                                         timelapseUiState = TimelapseUiState.Saved
                                         Toast.makeText(context, timelapseSavedText, Toast.LENGTH_SHORT).show()
@@ -606,7 +628,8 @@ fun CameraScreen(
             },
             canOpenSettings = canOpenSettings,
             onSettingsClick = { if (canOpenSettings) showSettings = true },
-            onStart = { viewModel.startSession() },
+            startEnabled = !(isFinalState && isTimelapseSaving),
+            onStart = startFromFinalScreen,
             onStop = { viewModel.stopSession() }
         )
     }
@@ -789,6 +812,7 @@ private fun FinalSessionScreen(
                     Spacer(Modifier.height(20.dp))
                     Button(
                         onClick = onClose,
+                        enabled = timelapseUiState != TimelapseUiState.Saving,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(18.dp)
                     ) {
@@ -1267,6 +1291,7 @@ fun BottomHUDEngine(
     onDemoClick: () -> Unit,
     canOpenSettings: Boolean,
     onSettingsClick: () -> Unit,
+    startEnabled: Boolean = true,
     onStart: () -> Unit,
     onStop: () -> Unit
 ) {
@@ -1412,6 +1437,7 @@ fun BottomHUDEngine(
                 if (canStart) {
                     Button(
                         onClick = onStart,
+                        enabled = startEnabled,
                         modifier = Modifier
                             .height(72.dp)
                             .weight(1.05f)
