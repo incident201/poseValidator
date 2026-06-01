@@ -86,4 +86,17 @@
     <string name="movement_gauge_drift">Drift</string>
     <string name="movement_gauge_motion">Motion</string>
     <string name="violation_count_face">Face</string>
+    <string name="final_completed">Completed</string>
+    <string name="final_failed">Failure</string>
+    <string name="final_initial_timer">Initial timer</string>
+    <string name="final_actual_timer">Actual timer</string>
+    <string name="final_errors">Errors</string>
+    <string name="final_session_settings">Session settings</string>
+    <string name="final_sensitivity">Sensitivity</string>
+    <string name="final_save_timelapse">Save timelapse video</string>
+    <string name="final_timelapse_preparing">Timelapse video is preparing...</string>
+    <string name="final_close">Close</string>
+    <string name="final_timelapse_saving">Saving timelapse video...</string>
+    <string name="final_timelapse_unavailable">Timelapse video is unavailable</string>
+    <string name="final_timelapse_saved">Timelapse video saved</string>
 </resources>
