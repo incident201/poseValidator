@@ -92,11 +92,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.CancellationException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import kotlin.math.max
 
 private const val SHOW_POSE_DEBUG_OVERLAY = true
@@ -112,11 +114,28 @@ private data class PosePipeline(
     val mode: PoseLandmarkerDelegateMode
 )
 
+private enum class GpuPromotionState {
+    NotStarted,
+    Starting,
+    Active,
+    Timeout,
+    Failed,
+    Unavailable,
+    Cancelled
+}
+
+private data class GpuPromotionDebugState(
+    val state: GpuPromotionState = GpuPromotionState.NotStarted,
+    val message: String? = null,
+    val elapsedMs: Long? = null
+)
+
 private data class PendingPosePipelineCandidate(
     val thread: HandlerThread,
     val handler: Handler,
     val future: Future<PoseLandmarkerService?>,
-    val cancelled: AtomicBoolean
+    val cancelled: AtomicBoolean,
+    val startedAtMs: Long
 )
 
 private val POSE_CONNECTIONS = listOf(
@@ -275,6 +294,9 @@ fun CameraScreen(
     var poseDelegateMode by remember {
         mutableStateOf(PoseLandmarkerDelegateMode.Initializing)
     }
+    var gpuPromotionDebugState by remember {
+        mutableStateOf(GpuPromotionDebugState())
+    }
     var isDemoMode by rememberSaveable { mutableStateOf(false) }
     var demoBitmap by remember { mutableStateOf<Bitmap?>(null) }
     val demoImagePickerLauncher = rememberLauncherForActivityResult(
@@ -298,6 +320,8 @@ fun CameraScreen(
 
     LaunchedEffect(context) {
         poseDelegateMode = PoseLandmarkerDelegateMode.Initializing
+        val cpuStartupStartedAt = SystemClock.elapsedRealtime()
+        Log.i("CameraScreen", "CPU pipeline startup started on ${Thread.currentThread().name}")
 
         val cpuThread = HandlerThread("MediaPipePoseCpuThread").apply { start() }
         val cpuHandler = Handler(cpuThread.looper)
@@ -337,11 +361,19 @@ fun CameraScreen(
                 }.get()
             }
         } catch (t: Throwable) {
-            Log.e("CameraScreen", "Failed to initialize CPU PoseLandmarkerService", t)
+            val elapsedMs = SystemClock.elapsedRealtime() - cpuStartupStartedAt
+            Log.e("CameraScreen", "CPU pipeline startup failed after ${elapsedMs}ms on ${Thread.currentThread().name}", t)
         }
 
         val service = cpuService
         if (service == null || !service.isAvailable() || !isActive || isCameraScreenDisposed.get()) {
+            val elapsedMs = SystemClock.elapsedRealtime() - cpuStartupStartedAt
+            Log.w("CameraScreen", "CPU pipeline startup failed after ${elapsedMs}ms on ${Thread.currentThread().name}; serviceAvailable=${service?.isAvailable() == true}, coroutineActive=$isActive, disposed=${isCameraScreenDisposed.get()}")
+            gpuPromotionDebugState = GpuPromotionDebugState(
+                state = GpuPromotionState.NotStarted,
+                message = "CPU pipeline unavailable",
+                elapsedMs = null
+            )
             if (service != null) {
                 runCatching {
                     submitToHandler(cpuHandler) { service.close() }.get(3, TimeUnit.SECONDS)
@@ -365,6 +397,16 @@ fun CameraScreen(
         )
         activePosePipelineRef.set(cpuPipeline)
         poseDelegateMode = PoseLandmarkerDelegateMode.CPU
+        val cpuElapsedMs = SystemClock.elapsedRealtime() - cpuStartupStartedAt
+        Log.i("CameraScreen", "CPU pipeline startup succeeded in ${cpuElapsedMs}ms on ${Thread.currentThread().name}")
+
+        gpuPromotionDebugState = GpuPromotionDebugState(
+            state = GpuPromotionState.Starting,
+            message = "GPU promotion starting",
+            elapsedMs = null
+        )
+        val gpuPromotionStartedAt = SystemClock.elapsedRealtime()
+        Log.i("CameraScreen", "GPU promotion started on ${Thread.currentThread().name}")
 
         coroutineScope.launch(Dispatchers.IO) {
             promotePosePipelineToGpu(
@@ -374,9 +416,15 @@ fun CameraScreen(
                 pendingGpuCandidateRef = pendingGpuCandidateRef,
                 isCameraScreenDisposed = isCameraScreenDisposed,
                 cpuPipeline = cpuPipeline,
+                gpuPromotionStartedAt = gpuPromotionStartedAt,
                 onModeChanged = { mode ->
                     coroutineScope.launch {
                         poseDelegateMode = mode
+                    }
+                },
+                onGpuDebugStateChanged = { state ->
+                    coroutineScope.launch {
+                        gpuPromotionDebugState = state
                     }
                 }
             )
@@ -714,6 +762,7 @@ fun CameraScreen(
             if (!showFinalScreen) {
                 PoseDelegateModeBadge(
                     mode = poseDelegateMode,
+                    gpuDebugState = gpuPromotionDebugState,
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(10.dp)
@@ -777,14 +826,25 @@ fun CameraScreen(
 @Composable
 private fun PoseDelegateModeBadge(
     mode: PoseLandmarkerDelegateMode,
+    gpuDebugState: GpuPromotionDebugState,
     modifier: Modifier = Modifier
 ) {
-    val text = when (mode) {
+    val modeText = when (mode) {
         PoseLandmarkerDelegateMode.Initializing -> "Mode: Initializing"
         PoseLandmarkerDelegateMode.GPU -> "Mode: GPU"
         PoseLandmarkerDelegateMode.CPU -> "Mode: CPU"
         PoseLandmarkerDelegateMode.Unavailable -> "Mode: Unavailable"
     }
+    val gpuText = when (gpuDebugState.state) {
+        GpuPromotionState.NotStarted -> "GPU: not started"
+        GpuPromotionState.Starting -> "GPU: starting"
+        GpuPromotionState.Active -> "GPU: active in ${gpuDebugState.elapsedMs ?: 0}ms"
+        GpuPromotionState.Timeout -> "GPU: timeout after ${gpuDebugState.elapsedMs ?: 0}ms"
+        GpuPromotionState.Failed -> "GPU: failed: ${gpuDebugState.message ?: "unknown"}"
+        GpuPromotionState.Unavailable -> "GPU: unavailable"
+        GpuPromotionState.Cancelled -> "GPU: cancelled"
+    }
+    val text = "$modeText\n$gpuText"
 
     Surface(
         modifier = modifier,
@@ -793,7 +853,7 @@ private fun PoseDelegateModeBadge(
     ) {
         Text(
             text = text,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
             color = Color.White,
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold
@@ -1751,10 +1811,30 @@ private fun promotePosePipelineToGpu(
     pendingGpuCandidateRef: AtomicReference<PendingPosePipelineCandidate?>,
     isCameraScreenDisposed: AtomicBoolean,
     cpuPipeline: PosePipeline,
-    onModeChanged: (PoseLandmarkerDelegateMode) -> Unit
+    gpuPromotionStartedAt: Long,
+    onModeChanged: (PoseLandmarkerDelegateMode) -> Unit,
+    onGpuDebugStateChanged: (GpuPromotionDebugState) -> Unit
 ) {
-    if (isCameraScreenDisposed.get()) return
+    fun elapsedMs(): Long = SystemClock.elapsedRealtime() - gpuPromotionStartedAt
 
+    fun markCancelled() {
+        val elapsed = elapsedMs()
+        onGpuDebugStateChanged(
+            GpuPromotionDebugState(
+                state = GpuPromotionState.Cancelled,
+                message = "GPU promotion cancelled",
+                elapsedMs = elapsed
+            )
+        )
+        Log.i("CameraScreen", "GPU promotion cancelled after ${elapsed}ms on ${Thread.currentThread().name}")
+    }
+
+    if (isCameraScreenDisposed.get()) {
+        markCancelled()
+        return
+    }
+
+    Log.i("CameraScreen", "GPU promotion started on ${Thread.currentThread().name}")
     val gpuThread = HandlerThread("MediaPipePoseGpuThread").apply { start() }
     val gpuHandler = Handler(gpuThread.looper)
     val gpuInitCancelled = AtomicBoolean(false)
@@ -1798,46 +1878,124 @@ private fun promotePosePipelineToGpu(
         thread = gpuThread,
         handler = gpuHandler,
         future = future,
-        cancelled = gpuInitCancelled
+        cancelled = gpuInitCancelled,
+        startedAtMs = gpuPromotionStartedAt
     )
     pendingGpuCandidateRef.set(candidate)
 
     var createdGpuService: PoseLandmarkerService? = null
     var promoted = false
+    var closeCandidateLogged = false
+
+    fun closeGpuCandidateAfterFailure(reason: String) {
+        if (!closeCandidateLogged) {
+            closeCandidateLogged = true
+            Log.i("CameraScreen", "closing GPU candidate after $reason on ${Thread.currentThread().name}")
+        }
+    }
 
     try {
         createdGpuService = future.get(GPU_INIT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         val gpuService = createdGpuService
-        if (gpuService != null && gpuService.isAvailable() && !isCameraScreenDisposed.get()) {
-            val gpuPipeline = PosePipeline(
-                thread = gpuThread,
-                handler = gpuHandler,
-                service = gpuService,
-                mode = PoseLandmarkerDelegateMode.GPU
-            )
-            while (true) {
-                val currentPipeline = activePosePipelineRef.get()
-                if (currentPipeline !== cpuPipeline || isCameraScreenDisposed.get()) break
-                if (activePosePipelineRef.compareAndSet(currentPipeline, gpuPipeline)) {
-                    promoted = true
-                    createdGpuService = null
-                    pendingGpuCandidateRef.compareAndSet(candidate, null)
-                    onModeChanged(PoseLandmarkerDelegateMode.GPU)
-                    closePosePipeline(currentPipeline)
-                    break
+        when {
+            gpuService == null -> {
+                markCancelled()
+                closeGpuCandidateAfterFailure("cancellation")
+            }
+            isCameraScreenDisposed.get() || gpuInitCancelled.get() -> {
+                markCancelled()
+                closeGpuCandidateAfterFailure("cancellation")
+            }
+            !gpuService.isAvailable() -> {
+                val elapsed = elapsedMs()
+                onGpuDebugStateChanged(
+                    GpuPromotionDebugState(
+                        state = GpuPromotionState.Unavailable,
+                        message = "GPU service created but unavailable",
+                        elapsedMs = elapsed
+                    )
+                )
+                Log.w("CameraScreen", "GPU promotion produced unavailable service after ${elapsed}ms on ${Thread.currentThread().name}")
+                closeGpuCandidateAfterFailure("unavailable service")
+            }
+            else -> {
+                val gpuPipeline = PosePipeline(
+                    thread = gpuThread,
+                    handler = gpuHandler,
+                    service = gpuService,
+                    mode = PoseLandmarkerDelegateMode.GPU
+                )
+                while (true) {
+                    val currentPipeline = activePosePipelineRef.get()
+                    if (currentPipeline !== cpuPipeline || isCameraScreenDisposed.get()) {
+                        markCancelled()
+                        closeGpuCandidateAfterFailure("cancellation")
+                        break
+                    }
+                    if (activePosePipelineRef.compareAndSet(currentPipeline, gpuPipeline)) {
+                        promoted = true
+                        createdGpuService = null
+                        pendingGpuCandidateRef.compareAndSet(candidate, null)
+                        val elapsed = elapsedMs()
+                        onModeChanged(PoseLandmarkerDelegateMode.GPU)
+                        onGpuDebugStateChanged(
+                            GpuPromotionDebugState(
+                                state = GpuPromotionState.Active,
+                                message = "GPU active",
+                                elapsedMs = elapsed
+                            )
+                        )
+                        Log.i("CameraScreen", "active pipeline switched CPU -> GPU after ${elapsed}ms on ${Thread.currentThread().name}")
+                        Log.i("CameraScreen", "GPU promotion succeeded in ${elapsed}ms on ${Thread.currentThread().name}")
+                        Log.i("CameraScreen", "closing old CPU pipeline after GPU promotion")
+                        closePosePipeline(currentPipeline)
+                        break
+                    }
                 }
             }
         }
-    } catch (t: Throwable) {
-        Log.w("CameraScreen", "GPU PoseLandmarker promotion did not complete; keeping CPU pipeline", t)
+    } catch (t: TimeoutException) {
+        val elapsed = elapsedMs()
+        onGpuDebugStateChanged(
+            GpuPromotionDebugState(
+                state = GpuPromotionState.Timeout,
+                message = "GPU initialization timeout",
+                elapsedMs = elapsed
+            )
+        )
+        Log.w("CameraScreen", "GPU promotion timed out after ${elapsed}ms on ${Thread.currentThread().name}", t)
         gpuInitCancelled.set(true)
         future.cancel(true)
         gpuThread.quit()
+        closeGpuCandidateAfterFailure("timeout")
+    } catch (t: CancellationException) {
+        markCancelled()
+        gpuInitCancelled.set(true)
+        future.cancel(true)
+        gpuThread.quit()
+        closeGpuCandidateAfterFailure("cancellation")
+    } catch (t: Throwable) {
+        val elapsed = elapsedMs()
+        val root = t.cause ?: t
+        val shortMessage = root.message ?: root::class.java.simpleName
+        onGpuDebugStateChanged(
+            GpuPromotionDebugState(
+                state = GpuPromotionState.Failed,
+                message = shortMessage,
+                elapsedMs = elapsed
+            )
+        )
+        Log.e("CameraScreen", "GPU promotion failed after ${elapsed}ms on ${Thread.currentThread().name}", root)
+        gpuInitCancelled.set(true)
+        future.cancel(true)
+        gpuThread.quit()
+        closeGpuCandidateAfterFailure("failure")
     } finally {
         pendingGpuCandidateRef.compareAndSet(candidate, null)
         if (!promoted) {
             val gpuService = createdGpuService
             if (gpuService != null) {
+                closeGpuCandidateAfterFailure("failure/timeout")
                 closePosePipeline(
                     PosePipeline(
                         thread = gpuThread,
@@ -1874,6 +2032,8 @@ private fun closePendingPosePipelineCandidate(candidate: PendingPosePipelineCand
     if (candidate == null) return
 
     candidate.cancelled.set(true)
+    val elapsedMs = SystemClock.elapsedRealtime() - candidate.startedAtMs
+    Log.i("CameraScreen", "GPU promotion cancelled after ${elapsedMs}ms on ${Thread.currentThread().name}")
     var pendingService: PoseLandmarkerService? = null
     runCatching {
         pendingService = candidate.future.get(3, TimeUnit.SECONDS)
@@ -1885,6 +2045,7 @@ private fun closePendingPosePipelineCandidate(candidate: PendingPosePipelineCand
 
     val service = pendingService
     if (service != null) {
+        Log.i("CameraScreen", "closing GPU candidate after cancellation on ${Thread.currentThread().name}")
         closePosePipeline(
             PosePipeline(
                 thread = candidate.thread,
@@ -1894,6 +2055,7 @@ private fun closePendingPosePipelineCandidate(candidate: PendingPosePipelineCand
             )
         )
     } else {
+        Log.i("CameraScreen", "closing GPU candidate after cancellation on ${Thread.currentThread().name}")
         candidate.thread.quitSafely()
     }
 }
