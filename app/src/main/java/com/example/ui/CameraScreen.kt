@@ -170,6 +170,7 @@ fun CameraScreen(
     val violationsCounterText = localizedString(gameSettings.language, R.string.violations_counter)
     val currentViolationsCounterText = rememberUpdatedState(violationsCounterText)
     val isFinalState = gameState == GameState.Success || gameState == GameState.Failed
+    val showFinalScreen = isFinalState && sessionSummary != null
     val sessionTimelapseEnabled = sessionSummary?.settings?.timelapseRecordingEnabled
     val shouldRecordTimelapse = if (isFinalState) {
         sessionTimelapseEnabled ?: gameSettings.timelapseRecordingEnabled
@@ -376,7 +377,7 @@ fun CameraScreen(
         }
     }
 
-    BackHandler(enabled = !showSettings && isFinalState && sessionSummary != null) {
+    BackHandler(enabled = !showSettings && showFinalScreen) {
         if (!isTimelapseSaving) {
             closeFinalScreen()
         }
@@ -421,7 +422,7 @@ fun CameraScreen(
                 .testTag("camera_preview_container")
         ) {
             when {
-                isFinalState && sessionSummary != null -> {
+                showFinalScreen -> {
                     FinalSessionScreen(
                         summary = sessionSummary!!,
                         language = gameSettings.language,
@@ -453,24 +454,31 @@ fun CameraScreen(
                             }
                         },
                         onClose = closeFinalScreen,
-                        modifier = Modifier.matchParentSize()
+                        modifier = Modifier
+                            .matchParentSize()
+                            .zIndex(5f)
                     )
                 }
                 isDemoMode && demoBitmap != null -> {
                     Image(
                         bitmap = demoBitmap!!.asImageBitmap(),
                         contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(0f),
                         contentScale = ContentScale.Crop
                     )
                 }
                 hasCameraPermission -> {
                 // Initialize CameraX Process
                 AndroidView(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(0f),
                     factory = { ctx ->
                         val previewView = PreviewView(ctx).apply {
                             scaleType = PreviewView.ScaleType.FILL_CENTER
+                            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                         }
                         val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                         cameraProviderFuture.addListener({
@@ -580,25 +588,27 @@ fun CameraScreen(
                 }
             }
 
-            if (!isFinalState && SHOW_POSE_DEBUG_OVERLAY) {
+            if (!showFinalScreen && SHOW_POSE_DEBUG_OVERLAY) {
                 PoseDebugOverlay(
                     overlayState = poseOverlayState,
-                    modifier = Modifier.matchParentSize()
+                    modifier = Modifier
+                        .matchParentSize()
+                        .zIndex(2f)
                 )
             }
 
-            if (!isFinalState && gameState == GameState.HoldingPose) {
+            if (!showFinalScreen && gameState == GameState.HoldingPose) {
                 ViolationCountsOverlay(
                     counts = ruleViolationCounts,
                     language = gameSettings.language,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(top = 10.dp, end = 10.dp)
-                        .zIndex(1f)
+                        .zIndex(3f)
                 )
             }
 
-            if (!isFinalState && movementGaugeState.active) {
+            if (!showFinalScreen && movementGaugeState.active) {
                 MovementGaugeOverlay(
                     state = movementGaugeState,
                     language = gameSettings.language,
@@ -606,7 +616,7 @@ fun CameraScreen(
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 12.dp)
-                        .zIndex(1f)
+                        .zIndex(3f)
                 )
             }
         }
@@ -660,25 +670,16 @@ private fun FinalSessionScreen(
     val sensitivity = sensitivityPresetFor(summary.settings)
 
     Surface(
-        modifier = modifier,
+        modifier = modifier.fillMaxSize(),
         color = colorScheme.surface
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant.copy(alpha = 0.86f))
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
                     Text(
                         text = title,
                         color = titleColor,
@@ -826,8 +827,6 @@ private fun FinalSessionScreen(
                             textAlign = TextAlign.Center
                         )
                     }
-                }
-            }
         }
     }
 }
