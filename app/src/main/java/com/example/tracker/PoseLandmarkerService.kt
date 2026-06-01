@@ -19,7 +19,8 @@ enum class PoseLandmarkerDelegateMode {
 
 class PoseLandmarkerService(
     private val context: Context,
-    private val listener: LandmarkerListener
+    private val listener: LandmarkerListener,
+    private val delegate: Delegate
 ) {
     private val TAG = "PoseLandmarkerService"
     private val lifecycleLock = Any()
@@ -57,58 +58,50 @@ class PoseLandmarkerService(
     }
 
     private fun initializeRealLandmarker() {
-        notifyDelegateMode(PoseLandmarkerDelegateMode.Initializing)
-        Log.i(TAG, "Initializing Pose Landmarker with delegate=GPU")
+        notifyDelegateMode(
+            when (delegate) {
+                Delegate.GPU -> PoseLandmarkerDelegateMode.GPU
+                Delegate.CPU -> PoseLandmarkerDelegateMode.CPU
+            }
+        )
 
         try {
-            val gpuLandmarker = createLandmarker(Delegate.GPU)
-            val shouldCloseGpu = synchronized(lifecycleLock) {
+            val landmarker = createLandmarker(delegate)
+
+            val shouldClose = synchronized(lifecycleLock) {
                 if (isClosed) {
                     true
                 } else {
-                    activeDelegate = Delegate.GPU
-                    poseLandmarker = gpuLandmarker
+                    activeDelegate = delegate
+                    poseLandmarker = landmarker
                     false
                 }
             }
-            if (shouldCloseGpu) {
-                gpuLandmarker.close()
-                return
-            }
-            notifyDelegateMode(PoseLandmarkerDelegateMode.GPU)
-            Log.i(TAG, "Pose Landmarker loaded with delegate=GPU")
-            return
-        } catch (gpuError: Throwable) {
-            Log.w(TAG, "GPU Pose Landmarker initialization failed, falling back to CPU", gpuError)
-        }
 
-        try {
-            val cpuLandmarker = createLandmarker(Delegate.CPU)
-            val shouldCloseCpu = synchronized(lifecycleLock) {
-                if (isClosed) {
-                    true
-                } else {
-                    activeDelegate = Delegate.CPU
-                    poseLandmarker = cpuLandmarker
-                    false
-                }
-            }
-            if (shouldCloseCpu) {
-                cpuLandmarker.close()
+            if (shouldClose) {
+                landmarker.close()
                 return
             }
-            notifyDelegateMode(PoseLandmarkerDelegateMode.CPU)
-            Log.i(TAG, "Pose Landmarker loaded with delegate=CPU")
-        } catch (cpuError: Throwable) {
+
+            notifyDelegateMode(
+                when (delegate) {
+                    Delegate.GPU -> PoseLandmarkerDelegateMode.GPU
+                    Delegate.CPU -> PoseLandmarkerDelegateMode.CPU
+                }
+            )
+
+            Log.i(TAG, "Pose Landmarker loaded with delegate=$delegate")
+        } catch (error: Throwable) {
             synchronized(lifecycleLock) {
                 poseLandmarker = null
                 activeDelegate = null
                 pendingCpuFallbackReason = null
                 pendingCpuFallbackSource = null
             }
+
             notifyDelegateMode(PoseLandmarkerDelegateMode.Unavailable)
-            Log.e(TAG, "Failed to initialize MediaPipe Pose Landmarker with CPU fallback", cpuError)
-            deliverError(cpuError.message ?: "Failed to initialize MediaPipe")
+            Log.e(TAG, "Failed to initialize Pose Landmarker with delegate=$delegate", error)
+            deliverError(error.message ?: "Failed to initialize MediaPipe")
         }
     }
 
@@ -395,6 +388,12 @@ class PoseLandmarkerService(
         val shouldDeliver = synchronized(lifecycleLock) { !isClosed }
         if (shouldDeliver) {
             listener.onError(error)
+        }
+    }
+
+    fun isAvailable(): Boolean {
+        return synchronized(lifecycleLock) {
+            !isClosed && poseLandmarker != null
         }
     }
 
