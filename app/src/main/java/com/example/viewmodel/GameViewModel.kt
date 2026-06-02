@@ -20,6 +20,7 @@ import com.example.tracker.MovementTracker
 import com.example.tracker.Point3D
 import com.example.tracker.PoseFrameCropper
 import com.example.tracker.PoseLandmarks
+import com.example.tracker.PoseOcclusionGuard
 import com.example.tracker.PoseSmoother
 import com.example.tracker.landmark
 import kotlinx.coroutines.Job
@@ -181,6 +182,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private val faceDetectorService = FaceDetectorService(application.applicationContext, _gameSettings.value.faceDetectionConfidence)
     private val movementTracker = MovementTracker()
     private val poseSmoother = PoseSmoother()
+    private val poseOcclusionGuard = PoseOcclusionGuard()
 
     private val frameLock = Any()
     private val processingLock = Any()
@@ -421,7 +423,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private fun processMediaPipeResultsInternal(rawPose: PoseLandmarks, timestamp: Long, imageWidth: Int, imageHeight: Int) {
         if (isCleared) return
         val (frameGeneration, pose) = synchronized(processingLock) {
-            processingGeneration to poseSmoother.smooth(rawPose, timestamp)
+            val smoothedPose = poseSmoother.smooth(rawPose, timestamp)
+            if (_gameState.value == GameState.StartingDelay) {
+                poseOcclusionGuard.addCalibrationFrame(smoothedPose, timestamp)
+            }
+            processingGeneration to smoothedPose
         }
         if (isCleared) return
         Log.v(tag, "MediaPipe frame ts=$timestamp size=${imageWidth}x$imageHeight landmarks=${pose.allLandmarks.size}")
@@ -448,16 +454,17 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             }
             _poseOverlayState.value = nextOverlayState
             if (_gameState.value != GameState.HoldingPose) return
+            val trackingPose = poseOcclusionGuard.applyForTracking(pose, timestamp)
 
             if (!pose.hasEnoughKeypoints()) {
                 resetMovementGaugeState()
-                val trackingResult = movementTracker.trackFrame(pose, timestamp)
+                val trackingResult = movementTracker.trackFrame(trackingPose, timestamp)
                 if (handleMovementViolation(trackingResult.violation, pose)) return
                 processFaceRule(nextOverlayState.face.status, pose)
                 return
             }
 
-            val trackingResult = movementTracker.trackFrame(pose, timestamp)
+            val trackingResult = movementTracker.trackFrame(trackingPose, timestamp)
             _movementGaugeState.value = MovementGaugeState(
                 active = trackingResult.metrics.active,
                 driftNormalizedScore = trackingResult.metrics.driftNormalizedScore,
@@ -722,6 +729,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             processingGeneration += 1
             movementTracker.reset()
             poseSmoother.reset()
+            poseOcclusionGuard.reset()
             currentViolationCount = 0
             _violationCount.value = 0
             resetRuleViolationCounts()
@@ -747,6 +755,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private fun startPoseCountdownAfterDeviceStabilized() {
         speak(tr(R.string.take_position))
+        synchronized(processingLock) {
+            poseOcclusionGuard.reset()
+        }
         _gameState.value = GameState.StartingDelay
         startDelayJob?.cancel()
         startDelayJob = viewModelScope.launch {
@@ -770,7 +781,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 resetRuleViolationCounts()
                 lastPenaltyAtMs = 0L
                 consecutiveFaceFailFrames = 0
-                movementTracker.startTracking(initialPose)
+                poseOcclusionGuard.finishCalibration(initialPose)
+                val guardedInitialPose = poseOcclusionGuard.buildReferencePose(initialPose)
+                movementTracker.startTracking(guardedInitialPose)
             }
             _gameState.value = GameState.HoldingPose
             _statusMessage.value = tr(R.string.time_started_hold_position)
@@ -825,6 +838,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         synchronized(processingLock) {
             processingGeneration += 1
             poseSmoother.reset()
+            movementTracker.reset()
+            poseOcclusionGuard.reset()
         }
         resetMovementGaugeState()
         _sessionSummary.value = SessionSummary(
@@ -854,6 +869,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             processingGeneration += 1
             poseSmoother.reset()
             movementTracker.reset()
+            poseOcclusionGuard.reset()
             currentViolationCount = 0
             _violationCount.value = 0
             resetRuleViolationCounts()
@@ -880,6 +896,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             processingGeneration += 1
             poseSmoother.reset()
             movementTracker.reset()
+            poseOcclusionGuard.reset()
             currentViolationCount = 0
             _violationCount.value = 0
             resetRuleViolationCounts()
@@ -894,7 +911,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _defeatReason.value = ""
         _timerSeconds.value = _selectedDurationSeconds.value
     }
-    override fun onCleared() { isCleared = true; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
+    override fun onCleared() { isCleared = true; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset(); movementTracker.reset(); poseOcclusionGuard.reset() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
 }
 
 private fun Bitmap.recycleIfNeeded() {
