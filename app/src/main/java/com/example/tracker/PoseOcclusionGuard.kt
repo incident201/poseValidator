@@ -54,9 +54,13 @@ class PoseOcclusionGuard {
         }
     }
 
-    fun finishCalibration(referencePose: PoseLandmarks) {
+    fun finishCalibration(referencePose: PoseLandmarks, referenceTimestampMs: Long) {
         frozenLandmarks.clear()
-        val frames = calibrationFrames.map { it.pose }.ifEmpty { listOf(referencePose) }
+        val minTimestampMs = referenceTimestampMs - CALIBRATION_WINDOW_MS
+        val frames = calibrationFrames
+            .filter { it.timestampMs in minTimestampMs..referenceTimestampMs }
+            .map { it.pose }
+            .ifEmpty { listOf(referencePose) }
 
         guardedIndices.forEach { index ->
             val samples = frames.mapNotNull { pose -> pose.localSample(index) }

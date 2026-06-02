@@ -126,6 +126,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private val minimumDurationMinutes = 1
     private val maximumDurationMinutes = 120
     private val startDelaySeconds = 10
+    private val poseOcclusionCalibrationSeconds = 2
     private val stabilizationDurationMs = 5_000L
     private val gyroscopeStillThresholdRadPerSec = 0.08f
 
@@ -424,7 +425,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         if (isCleared) return
         val (frameGeneration, pose) = synchronized(processingLock) {
             val smoothedPose = poseSmoother.smooth(rawPose, timestamp)
-            if (_gameState.value == GameState.StartingDelay) {
+            val shouldCollectOcclusionCalibration =
+                _gameState.value == GameState.StartingDelay &&
+                    _startDelayRemainingSeconds.value in 1..poseOcclusionCalibrationSeconds
+            if (shouldCollectOcclusionCalibration) {
                 poseOcclusionGuard.addCalibrationFrame(smoothedPose, timestamp)
             }
             processingGeneration to smoothedPose
@@ -781,7 +785,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 resetRuleViolationCounts()
                 lastPenaltyAtMs = 0L
                 consecutiveFaceFailFrames = 0
-                poseOcclusionGuard.finishCalibration(initialPose)
+                poseOcclusionGuard.finishCalibration(
+                    referencePose = initialPose,
+                    referenceTimestampMs = analyzedFrame.timestampMs
+                )
                 val guardedInitialPose = poseOcclusionGuard.buildReferencePose(initialPose)
                 movementTracker.startTracking(guardedInitialPose)
             }
