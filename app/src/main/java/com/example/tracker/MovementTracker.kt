@@ -95,6 +95,34 @@ data class TrackingResult(
 class MovementTracker {
     private val TAG = "MovementTracker"
 
+    companion object {
+        val TRAINING_POSE_LANDMARK_INDICES = listOf(
+            11, 12, // shoulders
+            13, 14, // elbows
+            15, 16, // wrists
+            23, 24, // hips
+            25, 26, // knees
+            27, 28 // ankles
+        )
+
+        private val poseLandmarkNames = mapOf(
+            11 to "left shoulder",
+            12 to "right shoulder",
+            13 to "left elbow",
+            14 to "right elbow",
+            15 to "left wrist",
+            16 to "right wrist",
+            23 to "left hip",
+            24 to "right hip",
+            25 to "left knee",
+            26 to "right knee",
+            27 to "left ankle",
+            28 to "right ankle"
+        )
+
+        fun poseLandmarkName(index: Int): String = poseLandmarkNames[index] ?: "landmark $index"
+    }
+
     // Thresholds are normalized relative to the fixed reference pose scale.
     var driftThresholdFactor: Float = 0.12f
     var motionThresholdFactor: Float = 0.06f
@@ -108,14 +136,7 @@ class MovementTracker {
     private var previousNormalizedPose: Map<Int, Point3D>? = null
     private var previousCenter: Point3D? = null
 
-    private val trackedPoseIndices = listOf(
-        11, 12, // shoulders
-        13, 14, // elbows
-        15, 16, // wrists
-        23, 24, // hips
-        25, 26, // knees
-        27, 28 // ankles
-    )
+    private val trackedPoseIndices = TRAINING_POSE_LANDMARK_INDICES
 
     private val driftDeadband = 0.025f
     private val motionDeadband = 0.015f
