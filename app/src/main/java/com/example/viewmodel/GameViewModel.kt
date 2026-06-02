@@ -21,6 +21,7 @@ import com.example.tracker.Point3D
 import com.example.tracker.PoseFrameCropper
 import com.example.tracker.PoseLandmarks
 import com.example.tracker.PoseSmoother
+import com.example.tracker.landmark
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -30,6 +31,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
@@ -377,6 +380,31 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             values
         }
         if (recycle) bitmaps.forEach { it.recycleIfNeeded() }
+    }
+
+
+    fun buildPoseDebugSnapshotJson(): String? {
+        val frame = synchronized(frameLock) { latestAnalyzedFrame } ?: return null
+        val landmarks = JSONArray()
+        MovementTracker.TRAINING_POSE_LANDMARK_INDICES.forEach { index ->
+            val point = frame.pose.landmark(index)
+            landmarks.put(
+                JSONObject()
+                    .put("index", index)
+                    .put("position", index)
+                    .put("name", MovementTracker.poseLandmarkName(index))
+                    .put("x", point?.x ?: JSONObject.NULL)
+                    .put("y", point?.y ?: JSONObject.NULL)
+                    .put("z", point?.z ?: JSONObject.NULL)
+                    .put("visibility", point?.visibility ?: JSONObject.NULL)
+            )
+        }
+        return JSONObject()
+            .put("timestampMs", frame.timestampMs)
+            .put("imageWidth", frame.imageWidth)
+            .put("imageHeight", frame.imageHeight)
+            .put("landmarks", landmarks)
+            .toString(2)
     }
 
     fun processMediaPipeResults(rawPose: PoseLandmarks, timestamp: Long, imageWidth: Int, imageHeight: Int) {

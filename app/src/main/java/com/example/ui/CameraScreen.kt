@@ -73,12 +73,14 @@ import com.example.viewmodel.SessionSummary
 import com.example.video.TimelapseRecorder
 import com.example.R
 import java.io.File
+import java.text.SimpleDateFormat
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicLong
 import java.util.Locale
+import java.util.Date
 import android.util.Size
 import android.widget.Toast
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -165,6 +167,22 @@ fun CameraScreen(
     val timelapseRecorder = remember(context) { TimelapseRecorder(context.applicationContext) }
     var pendingTimelapseFile by remember { mutableStateOf<File?>(null) }
     var timelapseUiState by remember { mutableStateOf(TimelapseUiState.Disabled) }
+    var pendingPoseDebugJson by remember { mutableStateOf<String?>(null) }
+    val poseDebugSaveLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        val json = pendingPoseDebugJson
+        pendingPoseDebugJson = null
+        if (uri == null || json == null) return@rememberLauncherForActivityResult
+        coroutineScope.launch {
+            val saved = withContext(Dispatchers.IO) { savePoseDebugJson(context, uri, json) }
+            Toast.makeText(
+                context,
+                if (saved) "Pose debug JSON saved" else "Failed to save pose debug JSON",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
     val timelapseSaveErrorText = localizedString(gameSettings.language, R.string.timelapse_save_error)
     val timelapseSavedText = localizedString(gameSettings.language, R.string.final_timelapse_saved)
     val violationsCounterText = localizedString(gameSettings.language, R.string.violations_counter)
@@ -588,6 +606,24 @@ fun CameraScreen(
                 }
             }
 
+            if (!showFinalScreen) {
+                PoseDebugSaveButton(
+                    onClick = {
+                        val json = viewModel.buildPoseDebugSnapshotJson()
+                        if (json == null) {
+                            Toast.makeText(context, "No pose data to save", Toast.LENGTH_SHORT).show()
+                        } else {
+                            pendingPoseDebugJson = json
+                            poseDebugSaveLauncher.launch(poseDebugFileName())
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(10.dp)
+                        .zIndex(4f)
+                )
+            }
+
             if (!showFinalScreen && SHOW_POSE_DEBUG_OVERLAY) {
                 PoseDebugOverlay(
                     overlayState = poseOverlayState,
@@ -649,6 +685,31 @@ fun CameraScreen(
     }
 }
 
+
+
+@Composable
+private fun PoseDebugSaveButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    FilledTonalIconButton(
+        onClick = onClick,
+        modifier = modifier.size(44.dp),
+        colors = IconButtonDefaults.filledTonalIconButtonColors(
+            containerColor = Color.Black.copy(alpha = 0.58f),
+            contentColor = Color.White
+        )
+    ) {
+        Text(
+            text = "json",
+            fontSize = 10.sp,
+            lineHeight = 10.sp,
+            fontWeight = FontWeight.ExtraBold,
+            fontFamily = FontFamily.Monospace,
+            textAlign = TextAlign.Center
+        )
+    }
+}
 
 @Composable
 private fun FinalSessionScreen(
@@ -1517,6 +1578,24 @@ private fun TimerStepButton(
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
+    }
+}
+
+
+private fun poseDebugFileName(): String {
+    val formatter = SimpleDateFormat("ddMMyyyyHHmmss", Locale.US)
+    return "pose_${formatter.format(Date())}.json"
+}
+
+private fun savePoseDebugJson(context: Context, uri: Uri, json: String): Boolean {
+    return runCatching {
+        context.contentResolver.openOutputStream(uri)?.use { output ->
+            output.write(json.toByteArray(Charsets.UTF_8))
+        } ?: error("Failed to open output stream for pose debug JSON")
+        true
+    }.getOrElse {
+        Log.e("CameraScreen", "Failed to save pose debug JSON", it)
+        false
     }
 }
 
