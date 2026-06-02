@@ -18,9 +18,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalMirrorMode
 import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.MirrorMode
 import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
@@ -416,7 +414,6 @@ fun CameraScreen(
         }
     }
 
-    @OptIn(ExperimentalMirrorMode::class)
     fun bindCamera(previewView: PreviewView, requestedLensFacing: Int) {
         fun bindWithProvider(cameraProvider: ProcessCameraProvider) {
             cameraProviderRef = cameraProvider
@@ -448,7 +445,6 @@ fun CameraScreen(
             cameraProvider.unbindAll()
 
             val preview = Preview.Builder()
-                .setMirrorMode(MirrorMode.MIRROR_MODE_OFF)
                 .build()
                 .apply {
                     surfaceProvider = previewView.surfaceProvider
@@ -725,6 +721,7 @@ fun CameraScreen(
             if (!showFinalScreen && SHOW_POSE_DEBUG_OVERLAY) {
                 PoseDebugOverlay(
                     overlayState = poseOverlayState,
+                    mirrorX = selectedLensFacing == CameraSelector.LENS_FACING_FRONT,
                     modifier = Modifier
                         .matchParentSize()
                         .zIndex(2f)
@@ -1275,14 +1272,18 @@ private fun MovementGaugeRow(
 @Composable
 private fun PoseDebugOverlay(
     overlayState: PoseOverlayState,
+    mirrorX: Boolean,
     modifier: Modifier = Modifier
 ) {
     Canvas(modifier = modifier) {
-        drawPoseDebugOverlay(overlayState)
+        drawPoseDebugOverlay(overlayState, mirrorX)
     }
 }
 
-private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
+private fun DrawScope.drawPoseDebugOverlay(
+    overlayState: PoseOverlayState,
+    mirrorX: Boolean
+) {
     val imageWidth = overlayState.imageWidth
     val imageHeight = overlayState.imageHeight
     if (imageWidth <= 0 || imageHeight <= 0) return
@@ -1296,17 +1297,22 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
     val offsetX = (canvasWidth - imageWidth * scale) / 2f
     val offsetY = (canvasHeight - imageHeight * scale) / 2f
 
-    fun mapX(normalizedX: Float): Float =
-        offsetX + normalizedX.coerceIn(0f, 1f) * imageWidth * scale
+    fun mapX(normalizedX: Float): Float {
+        val clampedX = normalizedX.coerceIn(0f, 1f)
+        val x = if (mirrorX) 1f - clampedX else clampedX
+        return offsetX + x * imageWidth * scale
+    }
 
     fun mapY(normalizedY: Float): Float =
         offsetY + normalizedY.coerceIn(0f, 1f) * imageHeight * scale
 
     val rect = overlayState.cropRect
     if (rect != null) {
-        val left = mapX(rect.left)
+        val x1 = mapX(rect.left)
+        val x2 = mapX(rect.right)
+        val left = minOf(x1, x2)
+        val right = maxOf(x1, x2)
         val top = mapY(rect.top)
-        val right = mapX(rect.right)
         val bottom = mapY(rect.bottom)
         if (right > left && bottom > top) {
             drawRect(
@@ -1321,9 +1327,11 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
     val face = overlayState.face
     val detectorInputRect = face.detectorInputRect
     if (detectorInputRect != null) {
-        val left = mapX(detectorInputRect.left)
+        val x1 = mapX(detectorInputRect.left)
+        val x2 = mapX(detectorInputRect.right)
+        val left = minOf(x1, x2)
+        val right = maxOf(x1, x2)
         val top = mapY(detectorInputRect.top)
-        val right = mapX(detectorInputRect.right)
         val bottom = mapY(detectorInputRect.bottom)
         if (right > left && bottom > top) {
             drawRect(
@@ -1337,9 +1345,11 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
 
     val faceRect = face.faceRect
     if (faceRect != null) {
-        val left = mapX(faceRect.left)
+        val x1 = mapX(faceRect.left)
+        val x2 = mapX(faceRect.right)
+        val left = minOf(x1, x2)
+        val right = maxOf(x1, x2)
         val top = mapY(faceRect.top)
-        val right = mapX(faceRect.right)
         val bottom = mapY(faceRect.bottom)
         if (right > left && bottom > top) {
             drawRect(
