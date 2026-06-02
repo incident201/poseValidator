@@ -417,7 +417,12 @@ fun CameraScreen(
             onThirdViolationPenaltyChanged = viewModel::updateThirdViolationPenaltyMinutes,
             onSubsequentViolationPenaltyChanged = viewModel::updateSubsequentViolationPenaltyMinutes,
             onLanguageChanged = viewModel::updateLanguage,
-            onTimelapseRecordingEnabledChanged = viewModel::updateTimelapseRecordingEnabled
+            onTimelapseRecordingEnabledChanged = viewModel::updateTimelapseRecordingEnabled,
+            onOcclusionFreezeVisibilityAlwaysChanged = viewModel::updateOcclusionFreezeVisibilityAlways,
+            onOcclusionFreezeVisibilityP10AlwaysChanged = viewModel::updateOcclusionFreezeVisibilityP10Always,
+            onOcclusionFreezeVisibilityHardChanged = viewModel::updateOcclusionFreezeVisibilityHard,
+            onOcclusionFreezeVisibilitySoftChanged = viewModel::updateOcclusionFreezeVisibilitySoft,
+            onOcclusionJitterFreezeThresholdChanged = viewModel::updateOcclusionJitterFreezeThreshold
         )
         return
     }
@@ -1249,8 +1254,8 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
             point.presence?.let { it >= 0.5f } != false
     }
 
-    fun posePointColor(point: Point3D): Color {
-        return if (point.visibility?.let { it < 0.5f } == true) {
+    fun posePointColor(index: Int): Color {
+        return if (index in overlayState.frozenLandmarkIndices) {
             Color(0xFFFF9800)
         } else {
             Color.Cyan
@@ -1270,10 +1275,10 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
         )
     }
 
-    overlayState.landmarks.forEach { point ->
-        if (!shouldDrawPosePoint(point)) return@forEach
+    overlayState.landmarks.forEachIndexed { index, point ->
+        if (!shouldDrawPosePoint(point)) return@forEachIndexed
         drawCircle(
-            color = posePointColor(point).copy(alpha = 0.85f),
+            color = posePointColor(index).copy(alpha = 0.85f),
             radius = 4f,
             center = Offset(mapX(point.x), mapY(point.y))
         )
