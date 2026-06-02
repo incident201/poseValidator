@@ -417,7 +417,12 @@ fun CameraScreen(
             onThirdViolationPenaltyChanged = viewModel::updateThirdViolationPenaltyMinutes,
             onSubsequentViolationPenaltyChanged = viewModel::updateSubsequentViolationPenaltyMinutes,
             onLanguageChanged = viewModel::updateLanguage,
-            onTimelapseRecordingEnabledChanged = viewModel::updateTimelapseRecordingEnabled
+            onTimelapseRecordingEnabledChanged = viewModel::updateTimelapseRecordingEnabled,
+            onOcclusionFreezeVisibilityAlwaysChanged = viewModel::updateOcclusionFreezeVisibilityAlways,
+            onOcclusionFreezeVisibilityP10AlwaysChanged = viewModel::updateOcclusionFreezeVisibilityP10Always,
+            onOcclusionFreezeVisibilityHardChanged = viewModel::updateOcclusionFreezeVisibilityHard,
+            onOcclusionFreezeVisibilitySoftChanged = viewModel::updateOcclusionFreezeVisibilitySoft,
+            onOcclusionJitterFreezeThresholdChanged = viewModel::updateOcclusionJitterFreezeThreshold
         )
         return
     }

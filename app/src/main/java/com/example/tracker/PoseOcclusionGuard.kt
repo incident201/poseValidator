@@ -7,21 +7,25 @@ import kotlin.math.sqrt
 
 private const val CALIBRATION_WINDOW_MS = 2_000L
 
-private const val FREEZE_VISIBILITY_ALWAYS = 0.005f
-private const val FREEZE_VISIBILITY_P10_ALWAYS = 0.002f
-private const val FREEZE_VISIBILITY_HARD = 0.01f
-private const val FREEZE_VISIBILITY_SOFT = 0.03f
-
 private const val REACQUIRE_VISIBILITY = 0.12f
 private const val DROP_BACK_TO_FROZEN_VISIBILITY = 0.03f
 
-private const val JITTER_FREEZE_THRESHOLD = 0.06f
 private const val REACQUIRE_STABILITY_DELTA = 0.04f
 private const val REACQUIRE_STABLE_FRAMES = 5
 private const val REACQUIRE_HANDOFF_FRAMES = 8
 private const val REACQUIRE_MAX_SNAP_DISTANCE = 0.03f
 
-class PoseOcclusionGuard {
+data class PoseOcclusionGuardConfig(
+    val freezeVisibilityAlways: Float = 0.005f,
+    val freezeVisibilityP10Always: Float = 0.002f,
+    val freezeVisibilityHard: Float = 0.01f,
+    val freezeVisibilitySoft: Float = 0.03f,
+    val jitterFreezeThreshold: Float = 0.06f
+)
+
+class PoseOcclusionGuard(
+    private var config: PoseOcclusionGuardConfig = PoseOcclusionGuardConfig()
+) {
     private val tag = "PoseOcclusionGuard"
 
     private val guardedIndices = listOf(
@@ -48,6 +52,10 @@ class PoseOcclusionGuard {
         var handoffStartLocalX: Float? = null,
         var handoffStartLocalY: Float? = null
     )
+
+    fun updateConfig(config: PoseOcclusionGuardConfig) {
+        this.config = config
+    }
 
     fun reset() {
         calibrationFrames.clear()
@@ -84,11 +92,13 @@ class PoseOcclusionGuard {
                 .percentile(0.90f)
 
             val effectivelyInvisible =
-                medianVisibility < FREEZE_VISIBILITY_ALWAYS ||
-                    p10Visibility < FREEZE_VISIBILITY_P10_ALWAYS
-            val veryLowVisibility = medianVisibility < FREEZE_VISIBILITY_HARD
-            val lowVisibility = medianVisibility < FREEZE_VISIBILITY_SOFT || p10Visibility < FREEZE_VISIBILITY_HARD
-            val unstable = jitter > JITTER_FREEZE_THRESHOLD
+                medianVisibility < config.freezeVisibilityAlways ||
+                    p10Visibility < config.freezeVisibilityP10Always
+            val veryLowVisibility = medianVisibility < config.freezeVisibilityHard
+            val lowVisibility =
+                medianVisibility < config.freezeVisibilitySoft ||
+                    p10Visibility < config.freezeVisibilityHard
+            val unstable = jitter > config.jitterFreezeThreshold
             val shouldFreeze = effectivelyInvisible || (unstable && (veryLowVisibility || lowVisibility))
 
             if (shouldFreeze) {
@@ -101,7 +111,12 @@ class PoseOcclusionGuard {
                 Log.i(
                     tag,
                     "frozen index=$index medianVis=${medianVisibility.format(4)} " +
-                        "p10Vis=${p10Visibility.format(4)} jitter=${jitter.format(3)}"
+                        "p10Vis=${p10Visibility.format(4)} jitter=${jitter.format(3)} " +
+                        "cfgAlways=${config.freezeVisibilityAlways.format(4)} " +
+                        "cfgP10Always=${config.freezeVisibilityP10Always.format(4)} " +
+                        "cfgHard=${config.freezeVisibilityHard.format(4)} " +
+                        "cfgSoft=${config.freezeVisibilitySoft.format(4)} " +
+                        "cfgJitter=${config.jitterFreezeThreshold.format(3)}"
                 )
             }
         }

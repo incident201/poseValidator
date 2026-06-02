@@ -23,6 +23,7 @@ import com.example.R
 import com.example.viewmodel.AppLanguage
 import com.example.viewmodel.FaceCheckMode
 import com.example.viewmodel.GameSettings
+import java.util.Locale
 
 @Composable
 internal fun SettingsScreen(
@@ -39,7 +40,12 @@ internal fun SettingsScreen(
     onThirdViolationPenaltyChanged: (Int) -> Unit,
     onSubsequentViolationPenaltyChanged: (Int) -> Unit,
     onLanguageChanged: (AppLanguage) -> Unit,
-    onTimelapseRecordingEnabledChanged: (Boolean) -> Unit
+    onTimelapseRecordingEnabledChanged: (Boolean) -> Unit,
+    onOcclusionFreezeVisibilityAlwaysChanged: (Float) -> Unit,
+    onOcclusionFreezeVisibilityP10AlwaysChanged: (Float) -> Unit,
+    onOcclusionFreezeVisibilityHardChanged: (Float) -> Unit,
+    onOcclusionFreezeVisibilitySoftChanged: (Float) -> Unit,
+    onOcclusionJitterFreezeThresholdChanged: (Float) -> Unit
  ) {
     val colorScheme = MaterialTheme.colorScheme
     val normalSensitivity = SensitivityPresets.first { it.nameRes == R.string.sensitivity_normal }
@@ -174,6 +180,53 @@ internal fun SettingsScreen(
         Spacer(Modifier.height(12.dp))
         Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
             Column(Modifier.padding(16.dp)) {
+                Text("Pose Occlusion Guard Debug", color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                FloatSettingField(
+                    label = "visibility always freeze 0.000–0.050",
+                    value = settings.occlusionFreezeVisibilityAlways,
+                    onValueChanged = onOcclusionFreezeVisibilityAlwaysChanged,
+                    min = 0f,
+                    max = 0.05f,
+                    decimals = 4
+                )
+                FloatSettingField(
+                    label = "p10 visibility always freeze 0.000–0.050",
+                    value = settings.occlusionFreezeVisibilityP10Always,
+                    onValueChanged = onOcclusionFreezeVisibilityP10AlwaysChanged,
+                    min = 0f,
+                    max = 0.05f,
+                    decimals = 4
+                )
+                FloatSettingField(
+                    label = "hard visibility 0.000–0.100",
+                    value = settings.occlusionFreezeVisibilityHard,
+                    onValueChanged = onOcclusionFreezeVisibilityHardChanged,
+                    min = 0f,
+                    max = 0.10f,
+                    decimals = 4
+                )
+                FloatSettingField(
+                    label = "soft visibility 0.000–0.200",
+                    value = settings.occlusionFreezeVisibilitySoft,
+                    onValueChanged = onOcclusionFreezeVisibilitySoftChanged,
+                    min = 0f,
+                    max = 0.20f,
+                    decimals = 4
+                )
+                FloatSettingField(
+                    label = "jitter freeze threshold 0.000–0.300",
+                    value = settings.occlusionJitterFreezeThreshold,
+                    onValueChanged = onOcclusionJitterFreezeThresholdChanged,
+                    min = 0f,
+                    max = 0.30f,
+                    decimals = 3
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
+            Column(Modifier.padding(16.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -224,6 +277,45 @@ private fun IntegerSettingField(
         label = { Text(label) },
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = Modifier.fillMaxWidth()
+    )
+    Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun FloatSettingField(
+    label: String,
+    value: Float,
+    onValueChanged: (Float) -> Unit,
+    min: Float,
+    max: Float,
+    decimals: Int,
+    enabled: Boolean = true
+) {
+    var text by remember(value) {
+        mutableStateOf("%.${decimals}f".format(Locale.US, value))
+    }
+
+    OutlinedTextField(
+        value = text,
+        enabled = enabled,
+        onValueChange = { input ->
+            val dottedInput = input.replace(',', '.')
+            val normalizedInput = dottedInput
+                .filterIndexed { index, char ->
+                    char.isDigit() || (char == '.' && dottedInput.indexOf('.') == index)
+                }
+
+            text = normalizedInput
+
+            val parsed = normalizedInput.toFloatOrNull()
+            if (enabled && parsed != null) {
+                onValueChanged(parsed.coerceIn(min, max))
+            }
+        },
+        label = { Text(label) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
         modifier = Modifier.fillMaxWidth()
     )
     Spacer(Modifier.height(8.dp))
