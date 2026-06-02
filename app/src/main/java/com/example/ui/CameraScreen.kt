@@ -177,6 +177,7 @@ fun CameraScreen(
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val currentGameState = rememberUpdatedState(gameState)
     val currentTimelapseRecordingEnabled = rememberUpdatedState(gameSettings.timelapseRecordingEnabled)
+    val debugModeEnabled = gameSettings.debugModeEnabled
     val currentViolationCount = rememberUpdatedState(violationCount)
     val coroutineScope = rememberCoroutineScope()
     val timelapseRecorder = remember(context) { TimelapseRecorder(context.applicationContext) }
@@ -338,6 +339,12 @@ fun CameraScreen(
     LaunchedEffect(canOpenSettings) {
         if (!canOpenSettings && showSettings) {
             showSettings = false
+        }
+    }
+
+    LaunchedEffect(debugModeEnabled) {
+        if (!debugModeEnabled) {
+            isDemoMode = false
         }
     }
 
@@ -578,6 +585,7 @@ fun CameraScreen(
             onSubsequentViolationPenaltyChanged = viewModel::updateSubsequentViolationPenaltyMinutes,
             onLanguageChanged = viewModel::updateLanguage,
             onTimelapseRecordingEnabledChanged = viewModel::updateTimelapseRecordingEnabled,
+            onDebugModeEnabledChanged = viewModel::updateDebugModeEnabled,
             onOcclusionFreezeVisibilityAlwaysChanged = viewModel::updateOcclusionFreezeVisibilityAlways,
             onOcclusionFreezeVisibilityP10AlwaysChanged = viewModel::updateOcclusionFreezeVisibilityP10Always,
             onOcclusionFreezeVisibilityHardChanged = viewModel::updateOcclusionFreezeVisibilityHard,
@@ -700,7 +708,7 @@ fun CameraScreen(
                 )
             }
 
-            if (!showFinalScreen) {
+            if (!showFinalScreen && debugModeEnabled) {
                 PoseDebugSaveButton(
                     onClick = {
                         val json = viewModel.buildPoseDebugSnapshotJson()
@@ -722,6 +730,7 @@ fun CameraScreen(
                 PoseDebugOverlay(
                     overlayState = poseOverlayState,
                     mirrorX = selectedLensFacing == CameraSelector.LENS_FACING_FRONT,
+                    debugModeEnabled = debugModeEnabled,
                     modifier = Modifier
                         .matchParentSize()
                         .zIndex(2f)
@@ -764,6 +773,7 @@ fun CameraScreen(
             startDelayRemainingSeconds = startDelayRemainingSeconds,
             onDurationChanged = { viewModel.updateSelectedDurationMinutes(it) },
             isDemoMode = isDemoMode,
+            debugModeEnabled = debugModeEnabled,
             onDemoClick = {
                 if (isDemoMode) {
                     isDemoMode = false
@@ -1273,16 +1283,18 @@ private fun MovementGaugeRow(
 private fun PoseDebugOverlay(
     overlayState: PoseOverlayState,
     mirrorX: Boolean,
+    debugModeEnabled: Boolean,
     modifier: Modifier = Modifier
 ) {
     Canvas(modifier = modifier) {
-        drawPoseDebugOverlay(overlayState, mirrorX)
+        drawPoseDebugOverlay(overlayState, mirrorX, debugModeEnabled)
     }
 }
 
 private fun DrawScope.drawPoseDebugOverlay(
     overlayState: PoseOverlayState,
-    mirrorX: Boolean
+    mirrorX: Boolean,
+    debugModeEnabled: Boolean
 ) {
     val imageWidth = overlayState.imageWidth
     val imageHeight = overlayState.imageHeight
@@ -1307,7 +1319,7 @@ private fun DrawScope.drawPoseDebugOverlay(
         offsetY + normalizedY.coerceIn(0f, 1f) * imageHeight * scale
 
     val rect = overlayState.cropRect
-    if (rect != null) {
+    if (debugModeEnabled && rect != null) {
         val x1 = mapX(rect.left)
         val x2 = mapX(rect.right)
         val left = minOf(x1, x2)
@@ -1326,7 +1338,7 @@ private fun DrawScope.drawPoseDebugOverlay(
 
     val face = overlayState.face
     val detectorInputRect = face.detectorInputRect
-    if (detectorInputRect != null) {
+    if (debugModeEnabled && detectorInputRect != null) {
         val x1 = mapX(detectorInputRect.left)
         val x2 = mapX(detectorInputRect.right)
         val left = minOf(x1, x2)
@@ -1361,13 +1373,15 @@ private fun DrawScope.drawPoseDebugOverlay(
         }
     }
 
-    face.keypoints.forEach { point ->
-        if (!point.x.isFinite() || !point.y.isFinite()) return@forEach
-        drawCircle(
-            color = Color.Red.copy(alpha = 0.95f),
-            radius = 5f,
-            center = Offset(mapX(point.x), mapY(point.y))
-        )
+    if (debugModeEnabled) {
+        face.keypoints.forEach { point ->
+            if (!point.x.isFinite() || !point.y.isFinite()) return@forEach
+            drawCircle(
+                color = Color.Red.copy(alpha = 0.95f),
+                radius = 5f,
+                center = Offset(mapX(point.x), mapY(point.y))
+            )
+        }
     }
 
     if (!SHOW_POSE_DEBUG_POINTS) return
@@ -1481,6 +1495,7 @@ fun BottomHUDEngine(
     startDelayRemainingSeconds: Int,
     onDurationChanged: (Int) -> Unit,
     isDemoMode: Boolean,
+    debugModeEnabled: Boolean,
     onDemoClick: () -> Unit,
     canOpenSettings: Boolean,
     onSettingsClick: () -> Unit,
@@ -1554,16 +1569,18 @@ fun BottomHUDEngine(
                     }
                 }
 
-                FilledTonalButton(
-                    onClick = onDemoClick,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                    modifier = Modifier.height(40.dp)
-                ) {
-                    Text(
-                        text = if (isDemoMode) localizedString(language, R.string.camera) else localizedString(language, R.string.demo),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                if (debugModeEnabled) {
+                    FilledTonalButton(
+                        onClick = onDemoClick,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                        modifier = Modifier.height(40.dp)
+                    ) {
+                        Text(
+                            text = if (isDemoMode) localizedString(language, R.string.camera) else localizedString(language, R.string.demo),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
                 FilledTonalIconButton(
                     onClick = onSettingsClick,
