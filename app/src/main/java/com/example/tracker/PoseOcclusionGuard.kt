@@ -7,6 +7,8 @@ import kotlin.math.sqrt
 
 private const val CALIBRATION_WINDOW_MS = 2_000L
 
+private const val FREEZE_VISIBILITY_ALWAYS = 0.005f
+private const val FREEZE_VISIBILITY_P10_ALWAYS = 0.002f
 private const val FREEZE_VISIBILITY_HARD = 0.01f
 private const val FREEZE_VISIBILITY_SOFT = 0.03f
 
@@ -16,6 +18,8 @@ private const val DROP_BACK_TO_FROZEN_VISIBILITY = 0.03f
 private const val JITTER_FREEZE_THRESHOLD = 0.06f
 private const val REACQUIRE_STABILITY_DELTA = 0.04f
 private const val REACQUIRE_STABLE_FRAMES = 5
+private const val REACQUIRE_HANDOFF_FRAMES = 8
+private const val REACQUIRE_MAX_SNAP_DISTANCE = 0.03f
 
 class PoseOcclusionGuard {
     private val tag = "PoseOcclusionGuard"
@@ -38,7 +42,11 @@ class PoseOcclusionGuard {
         var stableVisibleFrames: Int = 0,
         var lastVisibleLocalX: Float? = null,
         var lastVisibleLocalY: Float? = null,
-        var useRawTracking: Boolean = false
+        var useRawTracking: Boolean = false,
+        var handoffFramesRemaining: Int = 0,
+        var handoffTotalFrames: Int = 0,
+        var handoffStartLocalX: Float? = null,
+        var handoffStartLocalY: Float? = null
     )
 
     fun reset() {
@@ -75,10 +83,13 @@ class PoseOcclusionGuard {
                 .map { distance2D(it.localX, it.localY, medianLocalX, medianLocalY) }
                 .percentile(0.90f)
 
+            val effectivelyInvisible =
+                medianVisibility < FREEZE_VISIBILITY_ALWAYS ||
+                    p10Visibility < FREEZE_VISIBILITY_P10_ALWAYS
             val veryLowVisibility = medianVisibility < FREEZE_VISIBILITY_HARD
             val lowVisibility = medianVisibility < FREEZE_VISIBILITY_SOFT || p10Visibility < FREEZE_VISIBILITY_HARD
             val unstable = jitter > JITTER_FREEZE_THRESHOLD
-            val shouldFreeze = unstable && (veryLowVisibility || lowVisibility)
+            val shouldFreeze = effectivelyInvisible || (unstable && (veryLowVisibility || lowVisibility))
 
             if (shouldFreeze) {
                 frozenLandmarks[index] = FrozenLandmark(
@@ -117,9 +128,8 @@ class PoseOcclusionGuard {
             if (frozen.useRawTracking) {
                 if (rawVisibility < DROP_BACK_TO_FROZEN_VISIBILITY) {
                     frozen.useRawTracking = false
-                    frozen.stableVisibleFrames = 0
-                    frozen.lastVisibleLocalX = null
-                    frozen.lastVisibleLocalY = null
+                    frozen.resetReacquireState()
+                    Log.i(tag, "index=${frozen.index} dropped back to frozen visibility=${rawVisibility.format(2)}")
                     updatedLandmarks.setProjectedFrozen(frozen.index, frozen.project(center, scale, rawPoint))
                     changed = true
                 }
@@ -127,9 +137,11 @@ class PoseOcclusionGuard {
             }
 
             if (rawPoint == null || rawVisibility < REACQUIRE_VISIBILITY) {
-                frozen.stableVisibleFrames = 0
-                frozen.lastVisibleLocalX = null
-                frozen.lastVisibleLocalY = null
+                val wasReacquiring = frozen.isReacquiring()
+                frozen.resetReacquireState()
+                if (wasReacquiring) {
+                    Log.i(tag, "index=${frozen.index} dropped back to frozen visibility=${rawVisibility.format(2)}")
+                }
                 updatedLandmarks.setProjectedFrozen(frozen.index, frozen.project(center, scale, rawPoint))
                 changed = true
                 return@forEach
@@ -137,6 +149,23 @@ class PoseOcclusionGuard {
 
             val rawLocalX = (rawPoint.x - center.x) / scale
             val rawLocalY = (rawPoint.y - center.y) / scale
+
+            if (frozen.handoffFramesRemaining > 0) {
+                updatedLandmarks.setProjectedFrozen(
+                    frozen.index,
+                    frozen.blendedHandoffPoint(center, scale, rawPoint, rawLocalX, rawLocalY)
+                )
+                frozen.handoffFramesRemaining -= 1
+                if (frozen.handoffFramesRemaining <= 0) {
+                    frozen.useRawTracking = true
+                    frozen.resetHandoffState()
+                    Log.i(tag, "index=${frozen.index} handoff completed")
+                }
+                changed = true
+                return@forEach
+            }
+
+            val wasStartingReacquire = frozen.stableVisibleFrames == 0 && frozen.lastVisibleLocalX == null
             val previousLocalX = frozen.lastVisibleLocalX
             val previousLocalY = frozen.lastVisibleLocalY
             if (previousLocalX != null && previousLocalY != null &&
@@ -148,9 +177,31 @@ class PoseOcclusionGuard {
             }
             frozen.lastVisibleLocalX = rawLocalX
             frozen.lastVisibleLocalY = rawLocalY
+            if (wasStartingReacquire) {
+                Log.i(tag, "index=${frozen.index} reacquire started visibility=${rawVisibility.format(2)}")
+            }
 
             if (frozen.stableVisibleFrames >= REACQUIRE_STABLE_FRAMES) {
-                frozen.useRawTracking = true
+                val distanceFromFrozen = distance2D(rawLocalX, rawLocalY, frozen.localX, frozen.localY)
+                if (distanceFromFrozen <= REACQUIRE_MAX_SNAP_DISTANCE) {
+                    frozen.useRawTracking = true
+                } else {
+                    frozen.handoffFramesRemaining = REACQUIRE_HANDOFF_FRAMES
+                    frozen.handoffTotalFrames = REACQUIRE_HANDOFF_FRAMES
+                    frozen.handoffStartLocalX = frozen.localX
+                    frozen.handoffStartLocalY = frozen.localY
+                    Log.i(
+                        tag,
+                        "index=${frozen.index} handoff started " +
+                            "distanceFromFrozen=${distanceFromFrozen.format(3)} visibility=${rawVisibility.format(2)}"
+                    )
+                    updatedLandmarks.setProjectedFrozen(
+                        frozen.index,
+                        frozen.blendedHandoffPoint(center, scale, rawPoint, rawLocalX, rawLocalY)
+                    )
+                    frozen.handoffFramesRemaining -= 1
+                    changed = true
+                }
             } else {
                 updatedLandmarks.setProjectedFrozen(frozen.index, frozen.project(center, scale, rawPoint))
                 changed = true
@@ -190,6 +241,51 @@ class PoseOcclusionGuard {
             visibility = originalPoint?.visibility ?: 0f,
             presence = originalPoint?.presence ?: 0f
         )
+    }
+
+    private fun FrozenLandmark.blendedHandoffPoint(
+        center: Point3D,
+        scale: Float,
+        rawPoint: Point3D,
+        rawLocalX: Float,
+        rawLocalY: Float
+    ): Point3D {
+        val remainingAfterThisFrame = (handoffFramesRemaining - 1).coerceAtLeast(0)
+        val progress =
+            1f - (remainingAfterThisFrame.toFloat() / handoffTotalFrames.coerceAtLeast(1).toFloat())
+        val startX = handoffStartLocalX ?: localX
+        val startY = handoffStartLocalY ?: localY
+        val blendedLocalX = startX + (rawLocalX - startX) * progress
+        val blendedLocalY = startY + (rawLocalY - startY) * progress
+        return Point3D(
+            x = center.x + blendedLocalX * scale,
+            y = center.y + blendedLocalY * scale,
+            z = rawPoint.z,
+            visibility = rawPoint.visibility,
+            presence = rawPoint.presence
+        )
+    }
+
+    private fun FrozenLandmark.resetReacquireState() {
+        stableVisibleFrames = 0
+        lastVisibleLocalX = null
+        lastVisibleLocalY = null
+        resetHandoffState()
+    }
+
+    private fun FrozenLandmark.resetHandoffState() {
+        handoffFramesRemaining = 0
+        handoffTotalFrames = 0
+        handoffStartLocalX = null
+        handoffStartLocalY = null
+    }
+
+    private fun FrozenLandmark.isReacquiring(): Boolean {
+        return stableVisibleFrames > 0 ||
+            lastVisibleLocalX != null ||
+            lastVisibleLocalY != null ||
+            handoffFramesRemaining > 0 ||
+            handoffTotalFrames > 0
     }
 
     private fun PoseLandmarks.localSample(index: Int): LocalSample? {
