@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -135,6 +136,20 @@ internal fun localizedString(language: AppLanguage, @StringRes id: Int): String 
     val config = android.content.res.Configuration(context.resources.configuration)
     config.setLocale(locale)
     return context.createConfigurationContext(config).resources.getString(id)
+}
+
+private fun cameraSelectorFor(lensFacing: Int): CameraSelector {
+    return when (lensFacing) {
+        CameraSelector.LENS_FACING_FRONT -> CameraSelector.DEFAULT_FRONT_CAMERA
+        else -> CameraSelector.DEFAULT_BACK_CAMERA
+    }
+}
+
+private fun oppositeLensFacing(lensFacing: Int): Int {
+    return when (lensFacing) {
+        CameraSelector.LENS_FACING_FRONT -> CameraSelector.LENS_FACING_BACK
+        else -> CameraSelector.LENS_FACING_FRONT
+    }
 }
 
 @Composable
@@ -260,6 +275,9 @@ fun CameraScreen(
     val lastPoseTimestampMs = remember { AtomicLong(0L) }
     var imageAnalysisRef by remember { mutableStateOf<ImageAnalysis?>(null) }
     var cameraProviderRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
+    var boundLensFacing by remember { mutableStateOf<Int?>(null) }
+    var availableLensFacings by remember { mutableStateOf<List<Int>>(emptyList()) }
+    var selectedLensFacing by rememberSaveable { mutableStateOf(CameraSelector.LENS_FACING_BACK) }
     var landmarkerService by remember { mutableStateOf<PoseLandmarkerService?>(null) }
     var isDemoMode by rememberSaveable { mutableStateOf(false) }
     var demoBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -302,6 +320,7 @@ fun CameraScreen(
             runCatching { cameraProviderRef?.unbindAll() }
                 .onFailure { Log.w("CameraScreen", "Failed to unbind camera on dispose", it) }
             cameraProviderRef = null
+            boundLensFacing = null
             landmarkerService?.close()
             landmarkerService = null
             viewModel.clearCameraFrameCache(recycle = true)
@@ -394,6 +413,147 @@ fun CameraScreen(
             else -> Unit
         }
     }
+
+    fun bindCamera(previewView: PreviewView, requestedLensFacing: Int) {
+        fun bindWithProvider(cameraProvider: ProcessCameraProvider) {
+            cameraProviderRef = cameraProvider
+
+            val backCameraAvailable = runCatching {
+                cameraProvider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)
+            }.getOrDefault(false)
+            val frontCameraAvailable = runCatching {
+                cameraProvider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA)
+            }.getOrDefault(false)
+            val available = buildList {
+                if (backCameraAvailable) add(CameraSelector.LENS_FACING_BACK)
+                if (frontCameraAvailable) add(CameraSelector.LENS_FACING_FRONT)
+            }
+            availableLensFacings = available
+
+            val lensFacing = when {
+                requestedLensFacing in available -> requestedLensFacing
+                CameraSelector.LENS_FACING_BACK in available -> CameraSelector.LENS_FACING_BACK
+                CameraSelector.LENS_FACING_FRONT in available -> CameraSelector.LENS_FACING_FRONT
+                else -> {
+                    Log.w("CameraScreen", "No available cameras to bind")
+                    return
+                }
+            }
+            val cameraSelector = cameraSelectorFor(lensFacing)
+
+            imageAnalysisRef?.clearAnalyzer()
+            cameraProvider.unbindAll()
+
+            val preview = Preview.Builder()
+                .build()
+                .apply {
+                    surfaceProvider = previewView.surfaceProvider
+                }
+
+            val imageAnalysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setResolutionSelector(
+                    ResolutionSelector.Builder()
+                        .setResolutionStrategy(
+                            ResolutionStrategy(
+                                Size(1280, 720),
+                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                            )
+                        )
+                        .build()
+                )
+                .build()
+            imageAnalysisRef = imageAnalysis
+
+            imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
+                var pipelineBitmap: Bitmap? = null
+                var submittedToPipeline = false
+                try {
+                    val rotation = imageProxy.imageInfo.rotationDegrees
+                    var currentBitmap = imageProxy.toBitmap()
+                    if (rotation != 0) {
+                        val rotatedBitmap = rotateBitmap(currentBitmap, rotation)
+                        if (rotatedBitmap !== currentBitmap) {
+                            currentBitmap.recycleIfNeeded()
+                        }
+                        currentBitmap = rotatedBitmap
+                    }
+
+                    val resizedBitmap = resizeBitmapLongSide(currentBitmap, 1280)
+                    if (resizedBitmap !== currentBitmap) {
+                        currentBitmap.recycleIfNeeded()
+                    }
+                    pipelineBitmap = resizedBitmap
+
+                    val timestampMs = nextFrameTimestampMs(
+                        lastPoseTimestampMs,
+                        SystemClock.elapsedRealtimeNanos() / 1_000_000L
+                    )
+                    Log.d("CameraScreen", "analysisBitmap=${pipelineBitmap.width}x${pipelineBitmap.height}")
+                    val state = currentGameState.value
+                    if (currentTimelapseRecordingEnabled.value &&
+                        (state == GameState.StartingDelay || state == GameState.HoldingPose)
+                    ) {
+                        timelapseRecorder.offerFrame(
+                            bitmap = pipelineBitmap,
+                            timestampMs = timestampMs,
+                            violationsCount = currentViolationCount.value,
+                            violationsText = currentViolationsCounterText.value
+                        )
+                    }
+                    submitFrameToPosePipeline(
+                        bitmap = pipelineBitmap,
+                        viewModel = viewModel,
+                        landmarkerService = landmarkerService,
+                        timestampMs = timestampMs
+                    )
+                    submittedToPipeline = true
+                } catch (e: Exception) {
+                    Log.e("CameraScreen", "Frame analysis failed", e)
+                } finally {
+                    if (!submittedToPipeline) {
+                        pipelineBitmap?.recycleIfNeeded()
+                    }
+                    imageProxy.close()
+                }
+            }
+
+            try {
+                cameraProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    cameraSelector,
+                    preview,
+                    imageAnalysis
+                )
+                selectedLensFacing = lensFacing
+                boundLensFacing = lensFacing
+            } catch (e: Exception) {
+                Log.e("CameraScreen", "CameraX binding failed", e)
+                imageAnalysis.clearAnalyzer()
+                if (imageAnalysisRef === imageAnalysis) {
+                    imageAnalysisRef = null
+                }
+                boundLensFacing = null
+            }
+        }
+
+        val existingProvider = cameraProviderRef
+        if (existingProvider != null) {
+            bindWithProvider(existingProvider)
+            return
+        }
+
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(previewView.context)
+        cameraProviderFuture.addListener({
+            runCatching { bindWithProvider(cameraProviderFuture.get()) }
+                .onFailure { Log.e("CameraScreen", "Failed to initialize CameraX", it) }
+        }, ContextCompat.getMainExecutor(previewView.context))
+    }
+
+    val canSwitchCamera = gameState == GameState.Idle &&
+        !showFinalScreen &&
+        !isDemoMode &&
+        availableLensFacings.size > 1
 
     BackHandler(enabled = !showSettings && showFinalScreen) {
         if (!isTimelapseSaving) {
@@ -493,122 +653,51 @@ fun CameraScreen(
                     )
                 }
                 hasCameraPermission -> {
-                // Initialize CameraX Process
-                AndroidView(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .zIndex(0f),
-                    factory = { ctx ->
-                        val previewView = PreviewView(ctx).apply {
-                            scaleType = PreviewView.ScaleType.FILL_CENTER
-                            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                    AndroidView(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(0f),
+                        factory = { ctx ->
+                            PreviewView(ctx).apply {
+                                scaleType = PreviewView.ScaleType.FILL_CENTER
+                                implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                            }
+                        },
+                        update = { previewView ->
+                            if (boundLensFacing != selectedLensFacing) {
+                                bindCamera(previewView, selectedLensFacing)
+                            }
+                        },
+                        onRelease = { previewView ->
+                            imageAnalysisRef?.clearAnalyzer()
+                            imageAnalysisRef = null
+                            runCatching {
+                                val provider = cameraProviderRef
+                                    ?: ProcessCameraProvider.getInstance(previewView.context).get()
+                                provider.unbindAll()
+                            }.onFailure {
+                                Log.w("CameraScreen", "Failed to unbind camera on release", it)
+                            }
+                            cameraProviderRef = null
+                            boundLensFacing = null
                         }
-                        val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                        cameraProviderFuture.addListener({
-                            val cameraProvider = cameraProviderFuture.get()
-                            cameraProviderRef = cameraProvider
-                            val preview = Preview.Builder().build().apply {
-                                surfaceProvider = previewView.surfaceProvider
-                            }
-
-                            val imageAnalysis = ImageAnalysis.Builder()
-                                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                                .setResolutionSelector(
-                                    ResolutionSelector.Builder()
-                                        .setResolutionStrategy(
-                                            ResolutionStrategy(
-                                                Size(1280, 720),
-                                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
-                                            )
-                                        )
-                                        .build()
-                                )
-                                .build()
-                            imageAnalysisRef = imageAnalysis
-
-                            imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
-                                var pipelineBitmap: Bitmap? = null
-                                var submittedToPipeline = false
-                                try {
-                                    val rotation = imageProxy.imageInfo.rotationDegrees
-                                    var currentBitmap = imageProxy.toBitmap()
-                                    if (rotation != 0) {
-                                        val rotatedBitmap = rotateBitmap(currentBitmap, rotation)
-                                        if (rotatedBitmap !== currentBitmap) {
-                                            currentBitmap.recycleIfNeeded()
-                                        }
-                                        currentBitmap = rotatedBitmap
-                                    }
-
-                                    val resizedBitmap = resizeBitmapLongSide(currentBitmap, 1280)
-                                    if (resizedBitmap !== currentBitmap) {
-                                        currentBitmap.recycleIfNeeded()
-                                    }
-                                    pipelineBitmap = resizedBitmap
-
-                                    val timestampMs = nextFrameTimestampMs(
-                                        lastPoseTimestampMs,
-                                        SystemClock.elapsedRealtimeNanos() / 1_000_000L
-                                    )
-                                    Log.d("CameraScreen", "analysisBitmap=${pipelineBitmap.width}x${pipelineBitmap.height}")
-                                    val state = currentGameState.value
-                                    if (currentTimelapseRecordingEnabled.value &&
-                                        (state == GameState.StartingDelay || state == GameState.HoldingPose)
-                                    ) {
-                                        timelapseRecorder.offerFrame(
-                                            bitmap = pipelineBitmap,
-                                            timestampMs = timestampMs,
-                                            violationsCount = currentViolationCount.value,
-                                            violationsText = currentViolationsCounterText.value
-                                        )
-                                    }
-                                    submitFrameToPosePipeline(
-                                        bitmap = pipelineBitmap,
-                                        viewModel = viewModel,
-                                        landmarkerService = landmarkerService,
-                                        timestampMs = timestampMs
-                                    )
-                                    submittedToPipeline = true
-                                } catch (e: Exception) {
-                                    Log.e("CameraScreen", "Frame analysis failed", e)
-                                } finally {
-                                    if (!submittedToPipeline) {
-                                        pipelineBitmap?.recycleIfNeeded()
-                                    }
-                                    imageProxy.close()
-                                }
-                            }
-
-                            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-                            try {
-                                cameraProvider.unbindAll()
-                                cameraProvider.bindToLifecycle(
-                                    lifecycleOwner,
-                                    cameraSelector,
-                                    preview,
-                                    imageAnalysis
-                                )
-                            } catch (e: Exception) {
-                                Log.e("CameraScreen", "CameraX binding failed", e)
-                            }
-                        }, ContextCompat.getMainExecutor(ctx))
-                        previewView
-                    },
-                    onRelease = { previewView ->
-                        imageAnalysisRef?.clearAnalyzer()
-                        imageAnalysisRef = null
-                        runCatching {
-                            val provider = cameraProviderRef
-                                ?: ProcessCameraProvider.getInstance(previewView.context).get()
-                            provider.unbindAll()
-                        }.onFailure {
-                            Log.w("CameraScreen", "Failed to unbind camera on release", it)
-                        }
-                        cameraProviderRef = null
-                    }
-                )
+                    )
                 }
+            }
+
+            if (canSwitchCamera) {
+                SwitchCameraButton(
+                    onClick = {
+                        if (canSwitchCamera) {
+                            selectedLensFacing = oppositeLensFacing(selectedLensFacing)
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp)
+                        .zIndex(4f),
+                    contentDescription = localizedString(gameSettings.language, R.string.switch_camera)
+                )
             }
 
             if (!showFinalScreen) {
@@ -632,6 +721,7 @@ fun CameraScreen(
             if (!showFinalScreen && SHOW_POSE_DEBUG_OVERLAY) {
                 PoseDebugOverlay(
                     overlayState = poseOverlayState,
+                    mirrorX = selectedLensFacing == CameraSelector.LENS_FACING_FRONT,
                     modifier = Modifier
                         .matchParentSize()
                         .zIndex(2f)
@@ -691,6 +781,27 @@ fun CameraScreen(
 }
 
 
+
+@Composable
+private fun SwitchCameraButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    contentDescription: String
+) {
+    FilledTonalIconButton(
+        onClick = onClick,
+        modifier = modifier.size(44.dp),
+        colors = IconButtonDefaults.filledTonalIconButtonColors(
+            containerColor = Color.Black.copy(alpha = 0.58f),
+            contentColor = Color.White
+        )
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Cameraswitch,
+            contentDescription = contentDescription
+        )
+    }
+}
 
 @Composable
 private fun PoseDebugSaveButton(
@@ -1161,14 +1272,18 @@ private fun MovementGaugeRow(
 @Composable
 private fun PoseDebugOverlay(
     overlayState: PoseOverlayState,
+    mirrorX: Boolean,
     modifier: Modifier = Modifier
 ) {
     Canvas(modifier = modifier) {
-        drawPoseDebugOverlay(overlayState)
+        drawPoseDebugOverlay(overlayState, mirrorX)
     }
 }
 
-private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
+private fun DrawScope.drawPoseDebugOverlay(
+    overlayState: PoseOverlayState,
+    mirrorX: Boolean
+) {
     val imageWidth = overlayState.imageWidth
     val imageHeight = overlayState.imageHeight
     if (imageWidth <= 0 || imageHeight <= 0) return
@@ -1182,17 +1297,22 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
     val offsetX = (canvasWidth - imageWidth * scale) / 2f
     val offsetY = (canvasHeight - imageHeight * scale) / 2f
 
-    fun mapX(normalizedX: Float): Float =
-        offsetX + normalizedX.coerceIn(0f, 1f) * imageWidth * scale
+    fun mapX(normalizedX: Float): Float {
+        val clampedX = normalizedX.coerceIn(0f, 1f)
+        val x = if (mirrorX) 1f - clampedX else clampedX
+        return offsetX + x * imageWidth * scale
+    }
 
     fun mapY(normalizedY: Float): Float =
         offsetY + normalizedY.coerceIn(0f, 1f) * imageHeight * scale
 
     val rect = overlayState.cropRect
     if (rect != null) {
-        val left = mapX(rect.left)
+        val x1 = mapX(rect.left)
+        val x2 = mapX(rect.right)
+        val left = minOf(x1, x2)
+        val right = maxOf(x1, x2)
         val top = mapY(rect.top)
-        val right = mapX(rect.right)
         val bottom = mapY(rect.bottom)
         if (right > left && bottom > top) {
             drawRect(
@@ -1207,9 +1327,11 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
     val face = overlayState.face
     val detectorInputRect = face.detectorInputRect
     if (detectorInputRect != null) {
-        val left = mapX(detectorInputRect.left)
+        val x1 = mapX(detectorInputRect.left)
+        val x2 = mapX(detectorInputRect.right)
+        val left = minOf(x1, x2)
+        val right = maxOf(x1, x2)
         val top = mapY(detectorInputRect.top)
-        val right = mapX(detectorInputRect.right)
         val bottom = mapY(detectorInputRect.bottom)
         if (right > left && bottom > top) {
             drawRect(
@@ -1223,9 +1345,11 @@ private fun DrawScope.drawPoseDebugOverlay(overlayState: PoseOverlayState) {
 
     val faceRect = face.faceRect
     if (faceRect != null) {
-        val left = mapX(faceRect.left)
+        val x1 = mapX(faceRect.left)
+        val x2 = mapX(faceRect.right)
+        val left = minOf(x1, x2)
+        val right = maxOf(x1, x2)
         val top = mapY(faceRect.top)
-        val right = mapX(faceRect.right)
         val bottom = mapY(faceRect.bottom)
         if (right > left && bottom > top) {
             drawRect(
