@@ -112,6 +112,13 @@ class PoseOcclusionGuard {
         return referencePose.withProjectedFrozenLandmarks(frozenLandmarks.values)
     }
 
+    fun activeFrozenIndices(): Set<Int> {
+        return frozenLandmarks.values
+            .filter { !it.useRawTracking }
+            .map { it.index }
+            .toSet()
+    }
+
     @Suppress("UNUSED_PARAMETER")
     fun applyForTracking(pose: PoseLandmarks, timestampMs: Long): PoseLandmarks {
         if (frozenLandmarks.isEmpty()) return pose

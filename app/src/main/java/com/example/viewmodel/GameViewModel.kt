@@ -92,7 +92,8 @@ data class PoseOverlayState(
     val imageHeight: Int = 0,
     val landmarks: List<Point3D> = emptyList(),
     val cropRect: PoseOverlayRect? = null,
-    val face: FaceOverlayState = FaceOverlayState()
+    val face: FaceOverlayState = FaceOverlayState(),
+    val frozenLandmarkIndices: Set<Int> = emptySet()
 )
 
 data class PoseOverlayRect(val left: Float, val top: Float, val right: Float, val bottom: Float)
@@ -456,9 +457,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                     face = nextOverlayState.face
                 )
             }
-            _poseOverlayState.value = nextOverlayState
-            if (_gameState.value != GameState.HoldingPose) return
+            val isHoldingPose = _gameState.value == GameState.HoldingPose
+            if (!isHoldingPose) {
+                _poseOverlayState.value = nextOverlayState.copy(frozenLandmarkIndices = emptySet())
+                return
+            }
+
             val trackingPose = poseOcclusionGuard.applyForTracking(pose, timestamp)
+            _poseOverlayState.value = nextOverlayState.copy(
+                frozenLandmarkIndices = poseOcclusionGuard.activeFrozenIndices()
+            )
 
             if (!pose.hasEnoughKeypoints()) {
                 resetMovementGaugeState()
