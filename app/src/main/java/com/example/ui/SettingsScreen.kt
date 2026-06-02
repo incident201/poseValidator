@@ -41,6 +41,7 @@ internal fun SettingsScreen(
     onSubsequentViolationPenaltyChanged: (Int) -> Unit,
     onLanguageChanged: (AppLanguage) -> Unit,
     onTimelapseRecordingEnabledChanged: (Boolean) -> Unit,
+    onDebugModeEnabledChanged: (Boolean) -> Unit,
     onOcclusionFreezeVisibilityAlwaysChanged: (Float) -> Unit,
     onOcclusionFreezeVisibilityP10AlwaysChanged: (Float) -> Unit,
     onOcclusionFreezeVisibilityHardChanged: (Float) -> Unit,
@@ -177,51 +178,53 @@ internal fun SettingsScreen(
                 )
             }
         }
-        Spacer(Modifier.height(12.dp))
-        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
-            Column(Modifier.padding(16.dp)) {
-                Text("Pose Occlusion Guard Debug", color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(8.dp))
-                FloatSettingField(
-                    label = "visibility always freeze 0.000–0.050",
-                    value = settings.occlusionFreezeVisibilityAlways,
-                    onValueChanged = onOcclusionFreezeVisibilityAlwaysChanged,
-                    min = 0f,
-                    max = 0.05f,
-                    decimals = 4
-                )
-                FloatSettingField(
-                    label = "p10 visibility always freeze 0.000–0.050",
-                    value = settings.occlusionFreezeVisibilityP10Always,
-                    onValueChanged = onOcclusionFreezeVisibilityP10AlwaysChanged,
-                    min = 0f,
-                    max = 0.05f,
-                    decimals = 4
-                )
-                FloatSettingField(
-                    label = "hard visibility 0.000–0.100",
-                    value = settings.occlusionFreezeVisibilityHard,
-                    onValueChanged = onOcclusionFreezeVisibilityHardChanged,
-                    min = 0f,
-                    max = 0.10f,
-                    decimals = 4
-                )
-                FloatSettingField(
-                    label = "soft visibility 0.000–0.200",
-                    value = settings.occlusionFreezeVisibilitySoft,
-                    onValueChanged = onOcclusionFreezeVisibilitySoftChanged,
-                    min = 0f,
-                    max = 0.20f,
-                    decimals = 4
-                )
-                FloatSettingField(
-                    label = "jitter freeze threshold 0.000–0.300",
-                    value = settings.occlusionJitterFreezeThreshold,
-                    onValueChanged = onOcclusionJitterFreezeThresholdChanged,
-                    min = 0f,
-                    max = 0.30f,
-                    decimals = 3
-                )
+        if (settings.debugModeEnabled) {
+            Spacer(Modifier.height(12.dp))
+            Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Pose Occlusion Guard Debug", color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(8.dp))
+                    FloatSettingField(
+                        label = "visibility always freeze 0.000–0.050",
+                        value = settings.occlusionFreezeVisibilityAlways,
+                        onValueChanged = onOcclusionFreezeVisibilityAlwaysChanged,
+                        min = 0f,
+                        max = 0.05f,
+                        decimals = 4
+                    )
+                    FloatSettingField(
+                        label = "p10 visibility always freeze 0.000–0.050",
+                        value = settings.occlusionFreezeVisibilityP10Always,
+                        onValueChanged = onOcclusionFreezeVisibilityP10AlwaysChanged,
+                        min = 0f,
+                        max = 0.05f,
+                        decimals = 4
+                    )
+                    FloatSettingField(
+                        label = "hard visibility 0.000–0.100",
+                        value = settings.occlusionFreezeVisibilityHard,
+                        onValueChanged = onOcclusionFreezeVisibilityHardChanged,
+                        min = 0f,
+                        max = 0.10f,
+                        decimals = 4
+                    )
+                    FloatSettingField(
+                        label = "soft visibility 0.000–0.200",
+                        value = settings.occlusionFreezeVisibilitySoft,
+                        onValueChanged = onOcclusionFreezeVisibilitySoftChanged,
+                        min = 0f,
+                        max = 0.20f,
+                        decimals = 4
+                    )
+                    FloatSettingField(
+                        label = "jitter freeze threshold 0.000–0.300",
+                        value = settings.occlusionJitterFreezeThreshold,
+                        onValueChanged = onOcclusionJitterFreezeThresholdChanged,
+                        min = 0f,
+                        max = 0.30f,
+                        decimals = 3
+                    )
+                }
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -246,6 +249,33 @@ internal fun SettingsScreen(
                         Switch(
                             checked = settings.timelapseRecordingEnabled,
                             onCheckedChange = onTimelapseRecordingEnabledChanged
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
+            Column(Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        localizedString(settings.language, R.string.debug_mode),
+                        color = colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (settings.debugModeEnabled) localizedString(settings.language, R.string.on) else localizedString(settings.language, R.string.off),
+                            color = colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Switch(
+                            checked = settings.debugModeEnabled,
+                            onCheckedChange = onDebugModeEnabledChanged
                         )
                     }
                 }

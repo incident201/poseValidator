@@ -47,6 +47,7 @@ private const val PREF_OCCLUSION_FREEZE_VIS_P10_ALWAYS = "occlusion_freeze_visib
 private const val PREF_OCCLUSION_FREEZE_VIS_HARD = "occlusion_freeze_visibility_hard"
 private const val PREF_OCCLUSION_FREEZE_VIS_SOFT = "occlusion_freeze_visibility_soft"
 private const val PREF_OCCLUSION_JITTER_FREEZE_THRESHOLD = "occlusion_jitter_freeze_threshold"
+private const val PREF_DEBUG_MODE_ENABLED = "debug_mode_enabled"
 
 enum class GameState {
     Idle,
@@ -83,7 +84,8 @@ data class GameSettings(
     val occlusionFreezeVisibilityP10Always: Float = 0.002f,
     val occlusionFreezeVisibilityHard: Float = 0.03f,
     val occlusionFreezeVisibilitySoft: Float = 0.08f,
-    val occlusionJitterFreezeThreshold: Float = 0.02f
+    val occlusionJitterFreezeThreshold: Float = 0.02f,
+    val debugModeEnabled: Boolean = false
 )
 
 private fun GameSettings.toPoseOcclusionGuardConfig(): PoseOcclusionGuardConfig {
@@ -275,7 +277,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             occlusionFreezeVisibilityP10Always = occlusionFreezeVisibilityP10Always,
             occlusionFreezeVisibilityHard = occlusionFreezeVisibilityHard,
             occlusionFreezeVisibilitySoft = occlusionFreezeVisibilitySoft,
-            occlusionJitterFreezeThreshold = occlusionJitterFreezeThreshold
+            occlusionJitterFreezeThreshold = occlusionJitterFreezeThreshold,
+            debugModeEnabled = prefs.getBoolean(PREF_DEBUG_MODE_ENABLED, false)
         )
     }
 
@@ -407,6 +410,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     fun updateTimelapseRecordingEnabled(enabled: Boolean) {
         _gameSettings.value = _gameSettings.value.copy(timelapseRecordingEnabled = enabled)
         prefs.edit().putBoolean("timelapse_recording_enabled", enabled).apply()
+    }
+
+    fun updateDebugModeEnabled(enabled: Boolean) {
+        _gameSettings.value = _gameSettings.value.copy(debugModeEnabled = enabled)
+        prefs.edit().putBoolean(PREF_DEBUG_MODE_ENABLED, enabled).apply()
     }
 
     fun updateFirstViolationPenaltyMinutes(value: Int) = updatePenaltyMinutes("penalty_1_min", value) { copy(firstViolationPenaltyMinutes = it) }
