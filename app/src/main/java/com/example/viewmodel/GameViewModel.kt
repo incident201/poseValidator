@@ -81,9 +81,9 @@ data class GameSettings(
     val timelapseRecordingEnabled: Boolean = true,
     val occlusionFreezeVisibilityAlways: Float = 0.005f,
     val occlusionFreezeVisibilityP10Always: Float = 0.002f,
-    val occlusionFreezeVisibilityHard: Float = 0.01f,
-    val occlusionFreezeVisibilitySoft: Float = 0.03f,
-    val occlusionJitterFreezeThreshold: Float = 0.06f
+    val occlusionFreezeVisibilityHard: Float = 0.03f,
+    val occlusionFreezeVisibilitySoft: Float = 0.08f,
+    val occlusionJitterFreezeThreshold: Float = 0.02f
 )
 
 private fun GameSettings.toPoseOcclusionGuardConfig(): PoseOcclusionGuardConfig {
@@ -252,11 +252,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         val occlusionFreezeVisibilityP10Always =
             prefs.getFloat(PREF_OCCLUSION_FREEZE_VIS_P10_ALWAYS, 0.002f).coerceIn(0f, 0.05f)
         val occlusionFreezeVisibilityHard =
-            prefs.getFloat(PREF_OCCLUSION_FREEZE_VIS_HARD, 0.01f).coerceIn(0f, 0.10f)
+            prefs.getFloat(PREF_OCCLUSION_FREEZE_VIS_HARD, 0.03f).coerceIn(0f, 0.10f)
         val occlusionFreezeVisibilitySoft =
-            prefs.getFloat(PREF_OCCLUSION_FREEZE_VIS_SOFT, 0.03f).coerceIn(0f, 0.20f)
+            prefs.getFloat(PREF_OCCLUSION_FREEZE_VIS_SOFT, 0.08f).coerceIn(0f, 0.20f)
         val occlusionJitterFreezeThreshold =
-            prefs.getFloat(PREF_OCCLUSION_JITTER_FREEZE_THRESHOLD, 0.06f).coerceIn(0f, 0.30f)
+            prefs.getFloat(PREF_OCCLUSION_JITTER_FREEZE_THRESHOLD, 0.02f).coerceIn(0f, 0.30f)
         return GameSettings(
             language = language,
             faceCheckMode = mode,
