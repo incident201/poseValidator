@@ -18,7 +18,9 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalMirrorMode
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.MirrorMode
 import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
@@ -414,6 +416,7 @@ fun CameraScreen(
         }
     }
 
+    @OptIn(ExperimentalMirrorMode::class)
     fun bindCamera(previewView: PreviewView, requestedLensFacing: Int) {
         fun bindWithProvider(cameraProvider: ProcessCameraProvider) {
             cameraProviderRef = cameraProvider
@@ -444,9 +447,12 @@ fun CameraScreen(
             imageAnalysisRef?.clearAnalyzer()
             cameraProvider.unbindAll()
 
-            val preview = Preview.Builder().build().apply {
-                surfaceProvider = previewView.surfaceProvider
-            }
+            val preview = Preview.Builder()
+                .setMirrorMode(MirrorMode.MIRROR_MODE_OFF)
+                .build()
+                .apply {
+                    surfaceProvider = previewView.surfaceProvider
+                }
 
             val imageAnalysis = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
