@@ -16,11 +16,11 @@ private const val REACQUIRE_HANDOFF_FRAMES = 8
 private const val REACQUIRE_MAX_SNAP_DISTANCE = 0.03f
 
 data class PoseOcclusionGuardConfig(
-    val freezeVisibilityAlways: Float = 0.005f,
-    val freezeVisibilityP10Always: Float = 0.002f,
-    val freezeVisibilityHard: Float = 0.03f,
-    val freezeVisibilitySoft: Float = 0.08f,
-    val jitterFreezeThreshold: Float = 0.02f
+    val freezeVisibilityAlways: Float = 0.05f,
+    val freezeVisibilityP10Always: Float = 0.02f,
+    val freezeVisibilityHard: Float = 0.08f,
+    val freezeVisibilitySoft: Float = 0.1f,
+    val jitterFreezeThreshold: Float = 0.01f
 )
 
 class PoseOcclusionGuard(
