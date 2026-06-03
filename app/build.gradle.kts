@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-  namespace = "com.example"
+  namespace = "com.incident201.poseguard"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.poseguard.kgjpxm"
+    applicationId = "com.incident201.poseguard"
     minSdk = 30
     targetSdk = 36
     versionCode = (project.findProperty("VERSION_CODE") as String?)?.toInt() ?: 1
