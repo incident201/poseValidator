@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -197,7 +198,8 @@ private fun LanguageOnboardingPage(
             language = language,
             onLanguageChanged = onLanguageChanged,
             colorScheme = colorScheme,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            showTitle = false
         )
     }
 }
@@ -238,25 +240,32 @@ private fun OnboardingImageCard(
 ) {
     val context = LocalContext.current
     Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(if (compact) 22.dp else 28.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+        modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        AsyncImage(
-            model = ImageRequest.Builder(context)
-                .data(imageRes)
-                .crossfade(true)
-                .build(),
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.matchParentSize()
-        )
-        if (showResultIcons) {
-            ResultIconsOverlay(
-                iconSize = if (compact) 56.dp else 64.dp,
-                bottomPadding = if (compact) 14.dp else 18.dp
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(3f / 4f)
+                .clip(RoundedCornerShape(if (compact) 22.dp else 28.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(imageRes)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.matchParentSize()
             )
+            if (showResultIcons) {
+                ResultIconsOverlay(
+                    iconSize = if (compact) 56.dp else 64.dp,
+                    bottomPadding = if (compact) 14.dp else 18.dp
+                )
+            }
         }
     }
 }

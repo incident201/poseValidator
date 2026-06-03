@@ -392,15 +392,22 @@ internal fun LanguageSelectorCard(
     language: AppLanguage,
     onLanguageChanged: (AppLanguage) -> Unit,
     colorScheme: ColorScheme,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showTitle: Boolean = true
 ) {
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text(localizedString(language, R.string.language), color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
+            if (showTitle) {
+                Text(
+                    localizedString(language, R.string.language),
+                    color = colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(8.dp))
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
