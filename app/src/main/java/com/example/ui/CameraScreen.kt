@@ -1334,8 +1334,24 @@ private fun PoseDebugOverlay(
     debugModeEnabled: Boolean,
     modifier: Modifier = Modifier
 ) {
-    Canvas(modifier = modifier) {
-        drawPoseDebugOverlay(overlayState, mirrorX, debugModeEnabled)
+    Box(modifier = modifier) {
+        Canvas(modifier = Modifier.matchParentSize()) {
+            drawPoseDebugOverlay(overlayState, mirrorX, debugModeEnabled)
+        }
+        if (debugModeEnabled && overlayState.identityDebugText.isNotBlank()) {
+            Text(
+                text = overlayState.identityDebugText,
+                color = Color.White,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 4.dp)
+            )
+        }
     }
 }
 

@@ -19,6 +19,8 @@ import com.example.tracker.FaceDetectorService
 import com.example.tracker.MovementTracker
 import com.example.tracker.Point3D
 import com.example.tracker.PoseFrameCropper
+import com.example.tracker.PoseIdentityStabilizationResult
+import com.example.tracker.PoseIdentityStabilizer
 import com.example.tracker.PoseLandmarks
 import com.example.tracker.PoseOcclusionGuard
 import com.example.tracker.PoseOcclusionGuardConfig
@@ -123,7 +125,8 @@ data class PoseOverlayState(
     val landmarks: List<Point3D> = emptyList(),
     val cropRect: PoseOverlayRect? = null,
     val face: FaceOverlayState = FaceOverlayState(),
-    val frozenLandmarkIndices: Set<Int> = emptySet()
+    val frozenLandmarkIndices: Set<Int> = emptySet(),
+    val identityDebugText: String = ""
 )
 
 data class PoseOverlayRect(val left: Float, val top: Float, val right: Float, val bottom: Float)
@@ -217,6 +220,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private val faceDetectorService = FaceDetectorService(application.applicationContext, _gameSettings.value.faceDetectionConfidence)
     private val movementTracker = MovementTracker()
+    private val poseIdentityStabilizer = PoseIdentityStabilizer()
     private val poseSmoother = PoseSmoother()
     private val poseOcclusionGuard = PoseOcclusionGuard()
 
@@ -548,24 +552,26 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private fun processMediaPipeResultsInternal(rawPose: PoseLandmarks, timestamp: Long, imageWidth: Int, imageHeight: Int) {
         if (isCleared) return
-        val (frameGeneration, pose) = synchronized(processingLock) {
-            val smoothedPose = poseSmoother.smooth(rawPose, timestamp)
+        val (frameGeneration, pose, identityDebugText) = synchronized(processingLock) {
+            val identityResult = poseIdentityStabilizer.stabilize(rawPose, timestamp)
+            val smoothedPose = poseSmoother.smooth(identityResult.pose, timestamp)
+            val identityDebugText = buildIdentityDebugText(identityResult)
             val shouldCollectOcclusionCalibration =
                 _gameState.value == GameState.StartingDelay &&
                     _startDelayRemainingSeconds.value in 1..poseOcclusionCalibrationSeconds
             if (shouldCollectOcclusionCalibration) {
                 poseOcclusionGuard.addCalibrationFrame(smoothedPose, timestamp)
             }
-            processingGeneration to smoothedPose
+            Triple(processingGeneration, smoothedPose, identityDebugText)
         }
         if (isCleared) return
         Log.v(tag, "MediaPipe frame ts=$timestamp size=${imageWidth}x$imageHeight landmarks=${pose.allLandmarks.size}")
         val matchedBitmap = synchronized(frameLock) { pendingFrames.remove(timestamp) }
         val nextOverlayState = try {
             if (matchedBitmap == null) {
-                buildOverlayStateWithoutFace(pose, imageWidth, imageHeight)
+                buildOverlayStateWithoutFace(pose, imageWidth, imageHeight, identityDebugText)
             } else {
-                buildOverlayState(matchedBitmap, pose, timestamp)
+                buildOverlayState(matchedBitmap, pose, timestamp, identityDebugText)
             }
         } finally {
             matchedBitmap?.recycleIfNeeded()
@@ -739,7 +745,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         }
     }
 
-    private fun buildOverlayState(bitmap: Bitmap, pose: PoseLandmarks, timestamp: Long): PoseOverlayState { /* trimmed from old implementation */
+    private fun buildOverlayState(
+        bitmap: Bitmap,
+        pose: PoseLandmarks,
+        timestamp: Long,
+        identityDebugText: String
+    ): PoseOverlayState { /* trimmed from old implementation */
         val cropRect = PoseFrameCropper.calculateCropRect(bitmap.width, bitmap.height, pose)
         val faceOverlayState = if (cropRect != null) {
             val faceCandidateRect = FaceCandidateCropper.calculateFaceCandidateRect(bitmap.width, bitmap.height, pose, cropRect)
@@ -778,10 +789,15 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         } else FaceOverlayState(status = FaceDetectionStatus.NotProcessed, debugMessage = "face=NotProcessed no body crop")
 
         val normalizedRect = cropRect?.let { PoseOverlayRect(it.left.toFloat() / bitmap.width, it.top.toFloat() / bitmap.height, it.right.toFloat() / bitmap.width, it.bottom.toFloat() / bitmap.height) }
-        return PoseOverlayState(bitmap.width, bitmap.height, pose.allLandmarks, normalizedRect, faceOverlayState)
+        return PoseOverlayState(bitmap.width, bitmap.height, pose.allLandmarks, normalizedRect, faceOverlayState, identityDebugText = identityDebugText)
     }
 
-    private fun buildOverlayStateWithoutFace(pose: PoseLandmarks, imageWidth: Int, imageHeight: Int): PoseOverlayState {
+    private fun buildOverlayStateWithoutFace(
+        pose: PoseLandmarks,
+        imageWidth: Int,
+        imageHeight: Int,
+        identityDebugText: String
+    ): PoseOverlayState {
         val safeWidth = imageWidth.coerceAtLeast(0)
         val safeHeight = imageHeight.coerceAtLeast(0)
         val normalizedRect = if (safeWidth > 0 && safeHeight > 0) {
@@ -800,7 +816,19 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             status = FaceDetectionStatus.NotProcessed,
             debugMessage = "face=NotProcessed no matched bitmap"
         )
-        return PoseOverlayState(safeWidth, safeHeight, pose.allLandmarks, normalizedRect, faceOverlayState)
+        return PoseOverlayState(safeWidth, safeHeight, pose.allLandmarks, normalizedRect, faceOverlayState, identityDebugText = identityDebugText)
+    }
+
+    private fun buildIdentityDebugText(identityResult: PoseIdentityStabilizationResult): String {
+        val ambiguousText = if (identityResult.ambiguous) " ambiguous" else ""
+        return String.format(
+            Locale.US,
+            "identity: %s%s d=%.3f s=%.3f",
+            identityResult.transform.name,
+            ambiguousText,
+            identityResult.directScore,
+            identityResult.swappedScore
+        )
     }
 
     private suspend fun getFreshAnalyzedFrame(maxAgeMs: Long): AnalyzedPoseFrame? {
@@ -864,6 +892,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         synchronized(processingLock) {
             processingGeneration += 1
             movementTracker.reset()
+            poseIdentityStabilizer.reset()
             poseSmoother.reset()
             poseOcclusionGuard.reset()
             currentViolationCount = 0
@@ -976,6 +1005,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _startDelayRemainingSeconds.value = 0
         synchronized(processingLock) {
             processingGeneration += 1
+            poseIdentityStabilizer.reset()
             poseSmoother.reset()
             movementTracker.reset()
             poseOcclusionGuard.reset()
@@ -1006,6 +1036,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _startDelayRemainingSeconds.value = 0
         synchronized(processingLock) {
             processingGeneration += 1
+            poseIdentityStabilizer.reset()
             poseSmoother.reset()
             movementTracker.reset()
             poseOcclusionGuard.reset()
@@ -1033,6 +1064,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _startDelayRemainingSeconds.value = 0
         synchronized(processingLock) {
             processingGeneration += 1
+            poseIdentityStabilizer.reset()
             poseSmoother.reset()
             movementTracker.reset()
             poseOcclusionGuard.reset()
@@ -1050,7 +1082,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _defeatReason.value = ""
         _timerSeconds.value = _selectedDurationSeconds.value
     }
-    override fun onCleared() { isCleared = true; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseSmoother.reset(); movementTracker.reset(); poseOcclusionGuard.reset() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
+    override fun onCleared() { isCleared = true; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseIdentityStabilizer.reset(); poseSmoother.reset(); movementTracker.reset(); poseOcclusionGuard.reset() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
 }
 
 private fun Bitmap.recycleIfNeeded() {
