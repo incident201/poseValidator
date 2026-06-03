@@ -95,6 +95,7 @@
     <string name="final_errors">Ошибки</string>
     <string name="final_session_settings">Настройки сессии</string>
     <string name="final_sensitivity">Чувствительность</string>
+    <string name="final_face_direction">Положение лица</string>
     <string name="final_save_timelapse">Сохранить timelapse-видео</string>
     <string name="final_timelapse_preparing">Timelapse-видео подготавливается...</string>
     <string name="final_close">Закрыть</string>

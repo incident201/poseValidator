@@ -65,6 +65,7 @@ import androidx.core.content.ContextCompat
 import com.example.tracker.Point3D
 import com.example.tracker.PoseLandmarkerService
 import com.example.viewmodel.AppLanguage
+import com.example.viewmodel.FaceCheckMode
 import com.example.viewmodel.GameState
 import com.example.viewmodel.GameViewModel
 import com.example.viewmodel.MovementGaugeState
@@ -888,6 +889,7 @@ private fun FinalSessionScreen(
         if (isSuccess) R.string.final_completed else R.string.final_failed
     )
     val sensitivity = sensitivityPresetFor(summary.settings)
+    val faceDirectionLabel = faceDirectionLabelFor(summary.settings.faceCheckMode)
 
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -967,6 +969,11 @@ private fun FinalSessionScreen(
                     FinalSettingRow(
                         label = localizedString(language, R.string.final_sensitivity),
                         value = localizedString(language, sensitivity.nameRes)
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    FinalSettingRow(
+                        label = localizedString(language, R.string.final_face_direction),
+                        value = localizedString(language, faceDirectionLabel)
                     )
 
                     if (summary.settings.timelapseRecordingEnabled) {
@@ -1048,6 +1055,14 @@ private fun FinalSessionScreen(
                         )
                     }
         }
+    }
+}
+
+private fun faceDirectionLabelFor(mode: FaceCheckMode): Int {
+    return when (mode) {
+        FaceCheckMode.FaceAwayFromCamera -> R.string.face_away
+        FaceCheckMode.FaceToCamera -> R.string.face_to_camera
+        FaceCheckMode.Disabled -> R.string.do_not_check
     }
 }
 

@@ -69,7 +69,7 @@ enum class AppLanguage { Russian, English }
 
 data class GameSettings(
     val language: AppLanguage = AppLanguage.English,
-    val faceCheckMode: FaceCheckMode = FaceCheckMode.FaceAwayFromCamera,
+    val faceCheckMode: FaceCheckMode = FaceCheckMode.Disabled,
     val faceDetectionConfidence: Float = 0.8f,
     val driftThresholdFactor: Float = 0.12f,
     val motionThresholdFactor: Float = 0.06f,
@@ -247,8 +247,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     private fun loadSettings(): GameSettings {
-        val mode = runCatching { FaceCheckMode.valueOf(prefs.getString("face_mode", FaceCheckMode.FaceAwayFromCamera.name) ?: FaceCheckMode.FaceAwayFromCamera.name) }
-            .getOrDefault(FaceCheckMode.FaceAwayFromCamera)
+        val mode = runCatching { FaceCheckMode.valueOf(prefs.getString("face_mode", FaceCheckMode.Disabled.name) ?: FaceCheckMode.Disabled.name) }
+            .getOrDefault(FaceCheckMode.Disabled)
         val language = runCatching { AppLanguage.valueOf(prefs.getString("app_language", AppLanguage.English.name) ?: AppLanguage.English.name) }.getOrDefault(AppLanguage.English)
         val (driftThresholdFactor, motionThresholdFactor) = normalizeSensitivityThresholds(
             drift = prefs.getFloat("pose_drift_factor_v2", 0.12f).coerceIn(0.05f, 0.40f),

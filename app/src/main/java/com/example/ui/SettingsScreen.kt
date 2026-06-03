@@ -102,9 +102,20 @@ internal fun SettingsScreen(
                     localizedString(settings.language, R.string.face_to_camera) to FaceCheckMode.FaceToCamera,
                     localizedString(settings.language, R.string.do_not_check) to FaceCheckMode.Disabled
                 ).forEach { (label, mode) ->
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onFaceModeChanged(mode) }
+                            .padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         RadioButton(selected = settings.faceCheckMode == mode, onClick = { onFaceModeChanged(mode) })
-                        Text(label, color = colorScheme.onSurfaceVariant)
+                        Text(
+                            label,
+                            color = colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
             }
