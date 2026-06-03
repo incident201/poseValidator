@@ -32,6 +32,8 @@ class PoseIdentityStabilizerTest {
         assertEquals(PoseIdentityTransform.Direct, rejected.transform)
         assertFalse(rejected.outlier)
         assertFalse(rejected.accepted)
+        assertEquals("initial_core", rejected.rejectReason)
+        assertTrue(rejected.debugDetails.startsWith("n=33"))
         assertEquals(PoseIdentityTransform.Direct, accepted.transform)
         assertFalse(accepted.outlier)
         assertTrue(accepted.accepted)
@@ -43,17 +45,37 @@ class PoseIdentityStabilizerTest {
     fun `collapsed first core is rejected and next valid pose becomes Direct baseline`() {
         val stabilizer = PoseIdentityStabilizer()
 
-        val rejected = stabilizer.stabilize(collapsedInitialCorePose(), timestampMs = 0L)
+        val rawPose = collapsedInitialCorePose()
+        val rejected = stabilizer.stabilize(rawPose, timestampMs = 0L)
         val accepted = stabilizer.stabilize(basePose(), timestampMs = 100L)
 
         assertEquals(PoseIdentityTransform.Direct, rejected.transform)
         assertFalse(rejected.outlier)
         assertFalse(rejected.accepted)
+        assertEquals("initial_core", rejected.rejectReason)
+        assertTrue(rejected.debugDetails.contains("n=33"))
+        assertEquals(rawPose, rejected.pose)
         assertEquals(PoseIdentityTransform.Direct, accepted.transform)
         assertFalse(accepted.outlier)
         assertTrue(accepted.accepted)
         assertEquals(0f, accepted.directScore, 0.0001f)
         assertEquals(0f, accepted.swappedScore, 0.0001f)
+    }
+
+
+    @Test
+    fun `first frame with fewer than 33 landmarks is rejected as no pose`() {
+        val stabilizer = PoseIdentityStabilizer()
+        val rawPose = PoseLandmarks.fromAllLandmarks(basePose().allLandmarks.take(10))
+
+        val result = stabilizer.stabilize(rawPose, timestampMs = 0L)
+
+        assertEquals(PoseIdentityTransform.Direct, result.transform)
+        assertFalse(result.outlier)
+        assertFalse(result.accepted)
+        assertEquals("no_pose", result.rejectReason)
+        assertTrue(result.debugDetails.contains("n=10"))
+        assertEquals(rawPose, result.pose)
     }
 
     @Test
@@ -127,6 +149,7 @@ class PoseIdentityStabilizerTest {
         assertFalse(invalidResult.ambiguous)
         assertFalse(invalidResult.outlier)
         assertFalse(invalidResult.accepted)
+        assertEquals("no_pose", invalidResult.rejectReason)
         assertEquals(PoseIdentityTransform.Direct, nextResult.transform)
         assertTrue(nextResult.accepted)
     }
@@ -272,6 +295,7 @@ class PoseIdentityStabilizerTest {
             assertTrue(result.outlier)
             assertFalse(result.accepted)
             assertEquals("score", result.outlierReason)
+            assertEquals("non_finite", result.rejectReason)
             assertPoseClose(stablePose, result.pose)
         }
     }

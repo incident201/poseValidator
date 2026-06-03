@@ -854,16 +854,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         val acceptanceText = when {
             identityResult.outlier -> " outlier(${identityResult.outlierReason})"
             identityResult.accepted -> " accepted"
-            else -> " rejected"
+            else -> " rejected(${identityResult.rejectReason})"
         }
+        val detailsText = if (identityResult.debugDetails.isBlank()) "" else " ${identityResult.debugDetails}"
         return String.format(
             Locale.US,
-            "identity: %s%s%s d=%.3f s=%.3f",
+            "identity: %s%s%s d=%.3f s=%.3f%s",
             identityResult.transform.name,
             ambiguousText,
             acceptanceText,
             identityResult.directScore,
-            identityResult.swappedScore
+            identityResult.swappedScore,
+            detailsText
         )
     }
 

@@ -35,7 +35,9 @@ data class PoseIdentityStabilizationResult(
     val ambiguous: Boolean,
     val outlier: Boolean,
     val accepted: Boolean,
-    val outlierReason: String
+    val outlierReason: String,
+    val rejectReason: String = "",
+    val debugDetails: String = ""
 )
 
 class PoseIdentityStabilizer {
@@ -62,7 +64,9 @@ class PoseIdentityStabilizer {
                 ambiguous = false,
                 outlier = false,
                 accepted = false,
-                outlierReason = ""
+                outlierReason = "",
+                rejectReason = "no_pose",
+                debugDetails = "n=${rawPose.allLandmarks.size}"
             )
         }
 
@@ -84,7 +88,9 @@ class PoseIdentityStabilizer {
                     ambiguous = false,
                     outlier = false,
                     accepted = false,
-                    outlierReason = ""
+                    outlierReason = "",
+                    rejectReason = "initial_core",
+                    debugDetails = rawPose.initialIdentityCoreDebugDetails()
                 )
             }
             previousStablePose = rawPose
@@ -151,7 +157,8 @@ class PoseIdentityStabilizer {
                 ambiguous = true,
                 outlier = true,
                 accepted = false,
-                outlierReason = "score"
+                outlierReason = "score",
+                rejectReason = "non_finite"
             )
         }
 
@@ -306,6 +313,19 @@ class PoseIdentityStabilizer {
         val shoulderCenter = midpoint(leftShoulder, rightShoulder)
         val hipCenter = midpoint(leftHip, rightHip)
         return listOfNotNull(shoulderCenter, hipCenter).all { it.isInsideSoftNormalizedBounds() }
+    }
+
+
+    private fun PoseLandmarks.initialIdentityCoreDebugDetails(): String {
+        val geometry = CoreGeometry.from(this)
+        return if (geometry == null) {
+            "n=${allLandmarks.size} geometry=null"
+        } else {
+            "n=${allLandmarks.size} sw=${geometry.shoulderWidth.formatDebugFloat()} " +
+                "hw=${geometry.hipWidth.formatDebugFloat()} " +
+                "torso=${geometry.torsoLength.formatDebugFloat()} " +
+                "scale=${geometry.scale.formatDebugFloat()}"
+        }
     }
 
     private fun PoseLandmarks.hasFiniteIdentityCore(): Boolean {
@@ -491,4 +511,6 @@ class PoseIdentityStabilizer {
         return x in MIN_SOFT_NORMALIZED_COORDINATE..MAX_SOFT_NORMALIZED_COORDINATE &&
             y in MIN_SOFT_NORMALIZED_COORDINATE..MAX_SOFT_NORMALIZED_COORDINATE
     }
+
+    private fun Float.formatDebugFloat(): String = String.format(java.util.Locale.US, "%.3f", this)
 }
