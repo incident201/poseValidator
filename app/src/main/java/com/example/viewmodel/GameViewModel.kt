@@ -56,6 +56,9 @@ private const val DEFAULT_OCCLUSION_FREEZE_VIS_SOFT = 0.1f
 private const val DEFAULT_OCCLUSION_JITTER_FREEZE_THRESHOLD = 0.01f
 private const val PREF_DEBUG_MODE_ENABLED = "debug_mode_enabled"
 private const val PREF_ONBOARDING_COMPLETED = "onboarding_completed"
+private const val PREF_POSE_SMOOTHER_MIN_CUTOFF = "pose_smoother_min_cutoff"
+private const val PREF_POSE_SMOOTHER_BETA = "pose_smoother_beta"
+private const val PREF_POSE_SMOOTHER_DERIVATIVE_CUTOFF = "pose_smoother_derivative_cutoff"
 private const val MAX_POSE_DROPOUT_HOLD_FRAMES = 5
 private const val MAX_POSE_DROPOUT_HOLD_MS = 180L
 
@@ -95,6 +98,9 @@ data class GameSettings(
     val occlusionFreezeVisibilityHard: Float = DEFAULT_OCCLUSION_FREEZE_VIS_HARD,
     val occlusionFreezeVisibilitySoft: Float = DEFAULT_OCCLUSION_FREEZE_VIS_SOFT,
     val occlusionJitterFreezeThreshold: Float = DEFAULT_OCCLUSION_JITTER_FREEZE_THRESHOLD,
+    val poseSmootherMinCutoff: Float = PoseSmoother.DEFAULT_MIN_CUTOFF,
+    val poseSmootherBeta: Float = PoseSmoother.DEFAULT_BETA,
+    val poseSmootherDerivativeCutoff: Float = PoseSmoother.DEFAULT_DERIVATIVE_CUTOFF,
     val debugModeEnabled: Boolean = false
 )
 
@@ -319,6 +325,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             occlusionFreezeVisibilityHard = occlusionFreezeVisibilityHard,
             occlusionFreezeVisibilitySoft = occlusionFreezeVisibilitySoft,
             occlusionJitterFreezeThreshold = occlusionJitterFreezeThreshold,
+            poseSmootherMinCutoff = prefs.getFloat(
+                PREF_POSE_SMOOTHER_MIN_CUTOFF,
+                PoseSmoother.DEFAULT_MIN_CUTOFF
+            ).coerceIn(PoseSmoother.MIN_CUTOFF_RANGE, PoseSmoother.MAX_CUTOFF_RANGE),
+            poseSmootherBeta = prefs.getFloat(
+                PREF_POSE_SMOOTHER_BETA,
+                PoseSmoother.DEFAULT_BETA
+            ).coerceIn(PoseSmoother.MIN_BETA_RANGE, PoseSmoother.MAX_BETA_RANGE),
+            poseSmootherDerivativeCutoff = prefs.getFloat(
+                PREF_POSE_SMOOTHER_DERIVATIVE_CUTOFF,
+                PoseSmoother.DEFAULT_DERIVATIVE_CUTOFF
+            ).coerceIn(PoseSmoother.MIN_CUTOFF_RANGE, PoseSmoother.MAX_CUTOFF_RANGE),
             debugModeEnabled = prefs.getBoolean(PREF_DEBUG_MODE_ENABLED, false)
         )
     }
@@ -340,6 +358,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         synchronized(processingLock) {
             movementTracker.driftThresholdFactor = settings.driftThresholdFactor
             movementTracker.motionThresholdFactor = settings.motionThresholdFactor
+            poseSmoother.updateConfig(
+                minCutoff = settings.poseSmootherMinCutoff,
+                beta = settings.poseSmootherBeta,
+                derivativeCutoff = settings.poseSmootherDerivativeCutoff
+            )
             poseOcclusionGuard.updateConfig(settings.toPoseOcclusionGuardConfig())
         }
         faceDetectorService.setMinDetectionConfidence(settings.faceDetectionConfidence)
@@ -371,6 +394,45 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _gameSettings.value = _gameSettings.value.copy(motionThresholdFactor = normalized)
         prefs.edit().putFloat("pose_motion_factor_v2", normalized).apply()
         synchronized(processingLock) { movementTracker.motionThresholdFactor = normalized }
+    }
+
+
+    fun updatePoseSmootherMinCutoff(value: Float) {
+        updatePoseSmootherConfig(
+            prefKey = PREF_POSE_SMOOTHER_MIN_CUTOFF,
+            normalized = value.coerceIn(PoseSmoother.MIN_CUTOFF_RANGE, PoseSmoother.MAX_CUTOFF_RANGE)
+        ) { copy(poseSmootherMinCutoff = it) }
+    }
+
+    fun updatePoseSmootherBeta(value: Float) {
+        updatePoseSmootherConfig(
+            prefKey = PREF_POSE_SMOOTHER_BETA,
+            normalized = value.coerceIn(PoseSmoother.MIN_BETA_RANGE, PoseSmoother.MAX_BETA_RANGE)
+        ) { copy(poseSmootherBeta = it) }
+    }
+
+    fun updatePoseSmootherDerivativeCutoff(value: Float) {
+        updatePoseSmootherConfig(
+            prefKey = PREF_POSE_SMOOTHER_DERIVATIVE_CUTOFF,
+            normalized = value.coerceIn(PoseSmoother.MIN_CUTOFF_RANGE, PoseSmoother.MAX_CUTOFF_RANGE)
+        ) { copy(poseSmootherDerivativeCutoff = it) }
+    }
+
+    private fun updatePoseSmootherConfig(
+        prefKey: String,
+        normalized: Float,
+        apply: GameSettings.(Float) -> GameSettings
+    ) {
+        val updated = _gameSettings.value.apply(normalized)
+        _gameSettings.value = updated
+        prefs.edit().putFloat(prefKey, normalized).apply()
+        synchronized(processingLock) {
+            poseSmoother.updateConfig(
+                minCutoff = updated.poseSmootherMinCutoff,
+                beta = updated.poseSmootherBeta,
+                derivativeCutoff = updated.poseSmootherDerivativeCutoff
+            )
+        }
     }
 
     fun updateOcclusionFreezeVisibilityAlways(value: Float) {

@@ -623,6 +623,9 @@ fun CameraScreen(
             onOcclusionFreezeVisibilityHardChanged = viewModel::updateOcclusionFreezeVisibilityHard,
             onOcclusionFreezeVisibilitySoftChanged = viewModel::updateOcclusionFreezeVisibilitySoft,
             onOcclusionJitterFreezeThresholdChanged = viewModel::updateOcclusionJitterFreezeThreshold,
+            onPoseSmootherMinCutoffChanged = viewModel::updatePoseSmootherMinCutoff,
+            onPoseSmootherBetaChanged = viewModel::updatePoseSmootherBeta,
+            onPoseSmootherDerivativeCutoffChanged = viewModel::updatePoseSmootherDerivativeCutoff,
             onShowInstructions = {
                 showSettings = false
                 showOnboarding = true

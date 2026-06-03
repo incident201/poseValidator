@@ -47,6 +47,9 @@ internal fun SettingsScreen(
     onOcclusionFreezeVisibilityHardChanged: (Float) -> Unit,
     onOcclusionFreezeVisibilitySoftChanged: (Float) -> Unit,
     onOcclusionJitterFreezeThresholdChanged: (Float) -> Unit,
+    onPoseSmootherMinCutoffChanged: (Float) -> Unit,
+    onPoseSmootherBetaChanged: (Float) -> Unit,
+    onPoseSmootherDerivativeCutoffChanged: (Float) -> Unit,
     onShowInstructions: () -> Unit
  ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -191,6 +194,37 @@ internal fun SettingsScreen(
             }
         }
         if (settings.debugModeEnabled) {
+            Spacer(Modifier.height(12.dp))
+            Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Pose Smoother One Euro Filter", color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(8.dp))
+                    FloatSettingField(
+                        label = "minCutoff 0.010–5.000",
+                        value = settings.poseSmootherMinCutoff,
+                        onValueChanged = onPoseSmootherMinCutoffChanged,
+                        min = 0.01f,
+                        max = 5.0f,
+                        decimals = 3
+                    )
+                    FloatSettingField(
+                        label = "beta 0.000–1.000",
+                        value = settings.poseSmootherBeta,
+                        onValueChanged = onPoseSmootherBetaChanged,
+                        min = 0f,
+                        max = 1.0f,
+                        decimals = 4
+                    )
+                    FloatSettingField(
+                        label = "derivativeCutoff 0.010–5.000",
+                        value = settings.poseSmootherDerivativeCutoff,
+                        onValueChanged = onPoseSmootherDerivativeCutoffChanged,
+                        min = 0.01f,
+                        max = 5.0f,
+                        decimals = 3
+                    )
+                }
+            }
             Spacer(Modifier.height(12.dp))
             Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
                 Column(Modifier.padding(16.dp)) {
