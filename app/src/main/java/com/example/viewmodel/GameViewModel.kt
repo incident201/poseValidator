@@ -56,8 +56,8 @@ private const val DEFAULT_OCCLUSION_FREEZE_VIS_SOFT = 0.1f
 private const val DEFAULT_OCCLUSION_JITTER_FREEZE_THRESHOLD = 0.01f
 private const val PREF_DEBUG_MODE_ENABLED = "debug_mode_enabled"
 private const val PREF_ONBOARDING_COMPLETED = "onboarding_completed"
-private const val MAX_POSE_DROPOUT_HOLD_FRAMES = 3
-private const val MAX_POSE_DROPOUT_HOLD_MS = 900L
+private const val MAX_POSE_DROPOUT_HOLD_FRAMES = 5
+private const val MAX_POSE_DROPOUT_HOLD_MS = 180L
 
 enum class GameState {
     Idle,
@@ -241,6 +241,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private var lastUsablePoseForDropoutHold: PoseLandmarks? = null
     private var lastUsablePoseTimestampMs: Long? = null
     private var consecutivePoseDropoutFrames: Int = 0
+    private var rawPoseOkFrames = 0
+    private var rawPoseMissingFrames = 0
     private var startDelayJob: Job? = null
     private var timerJob: Job? = null
 
@@ -582,6 +584,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 null
             } else {
                 val rawPoseMissing = rawPose.allLandmarks.size < 33
+                if (rawPoseMissing) {
+                    rawPoseMissingFrames += 1
+                } else {
+                    rawPoseOkFrames += 1
+                }
                 val dropoutHoldPose = if (rawPoseMissing) poseForDropoutHold(timestamp) else null
                 if (dropoutHoldPose != null) {
                     Triple(
@@ -891,6 +898,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         lastUsablePoseForDropoutHold = null
         lastUsablePoseTimestampMs = null
         consecutivePoseDropoutFrames = 0
+        rawPoseOkFrames = 0
+        rawPoseMissingFrames = 0
     }
 
     private fun poseForDropoutHold(timestampMs: Long): PoseLandmarks? {
@@ -908,7 +917,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private fun buildPoseDropoutDebugText(frames: Int, ageMs: Long?, holding: Boolean): String {
         val statusText = if (holding) "hold(no_pose)" else "rejected(no_pose)"
         val ageText = if (holding && ageMs != null) " age=${ageMs.coerceAtLeast(0L)}ms" else ""
-        return "identity: $statusText frames=$frames$ageText"
+        return "identity: $statusText frames=$frames$ageText rawOk=$rawPoseOkFrames rawMiss=$rawPoseMissingFrames"
     }
 
     private fun buildIdentityDebugText(identityResult: PoseIdentityStabilizationResult): String {

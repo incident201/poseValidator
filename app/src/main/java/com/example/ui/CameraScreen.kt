@@ -97,6 +97,7 @@ import kotlin.math.max
 
 private const val SHOW_POSE_DEBUG_OVERLAY = true
 private const val SHOW_POSE_DEBUG_POINTS = true
+private const val DEMO_FRAME_DELAY_MS = 40L
 
 private enum class TimelapseUiState { Preparing, Ready, Saving, Saved, Unavailable, Disabled }
 
@@ -407,7 +408,7 @@ fun CameraScreen(
                 Log.w("CameraScreen", "Dropping demo frame after camera executor shutdown", e)
                 break
             }
-            delay(250L)
+            delay(DEMO_FRAME_DELAY_MS)
         }
     }
 
