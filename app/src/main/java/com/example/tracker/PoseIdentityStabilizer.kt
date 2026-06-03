@@ -9,6 +9,11 @@ private const val RESET_AFTER_GAP_MS = 1200L
 private const val SWITCH_MARGIN = 0.05f
 private const val MIN_SCALE = 0.001f
 private const val MIN_VISIBILITY_CONFIDENCE = 0.05f
+private const val OUTLIER_SCORE_THRESHOLD = 0.32f
+private const val HARD_OUTLIER_SCORE_THRESHOLD = 0.55f
+private const val MIN_CORE_SCALE_RATIO = 0.55f
+private const val MAX_CORE_SCALE_RATIO = 1.80f
+private const val MAX_CONSECUTIVE_OUTLIERS_TO_FREEZE = 2
 
 enum class PoseIdentityTransform {
     Direct,
@@ -20,18 +25,23 @@ data class PoseIdentityStabilizationResult(
     val transform: PoseIdentityTransform,
     val directScore: Float,
     val swappedScore: Float,
-    val ambiguous: Boolean
+    val ambiguous: Boolean,
+    val outlier: Boolean,
+    val accepted: Boolean,
+    val outlierReason: String
 )
 
 class PoseIdentityStabilizer {
     private var previousStablePose: PoseLandmarks? = null
     private var previousTransform: PoseIdentityTransform = PoseIdentityTransform.Direct
     private var previousTimestampMs: Long? = null
+    private var consecutiveOutlierFrames = 0
 
     fun reset() {
         previousStablePose = null
         previousTransform = PoseIdentityTransform.Direct
         previousTimestampMs = null
+        consecutiveOutlierFrames = 0
     }
 
     fun stabilize(rawPose: PoseLandmarks, timestampMs: Long): PoseIdentityStabilizationResult {
@@ -42,7 +52,10 @@ class PoseIdentityStabilizer {
                 transform = PoseIdentityTransform.Direct,
                 directScore = 0f,
                 swappedScore = 0f,
-                ambiguous = false
+                ambiguous = false,
+                outlier = false,
+                accepted = false,
+                outlierReason = ""
             )
         }
 
@@ -56,12 +69,16 @@ class PoseIdentityStabilizer {
             previousStablePose = rawPose
             previousTransform = PoseIdentityTransform.Direct
             previousTimestampMs = timestampMs
+            consecutiveOutlierFrames = 0
             return PoseIdentityStabilizationResult(
                 pose = rawPose,
                 transform = PoseIdentityTransform.Direct,
                 directScore = 0f,
                 swappedScore = 0f,
-                ambiguous = false
+                ambiguous = false,
+                outlier = false,
+                accepted = true,
+                outlierReason = ""
             )
         }
 
@@ -69,6 +86,8 @@ class PoseIdentityStabilizer {
         val swappedPose = rawPose.swappedLeftRight()
         val directScore = scoreCandidate(directPose, previousPose)
         val swappedScore = scoreCandidate(swappedPose, previousPose)
+        val directScoreValue = directScore ?: 0f
+        val swappedScoreValue = swappedScore ?: 0f
 
         val chosenTransform: PoseIdentityTransform
         val ambiguous: Boolean
@@ -86,21 +105,51 @@ class PoseIdentityStabilizer {
             ambiguous = true
         }
 
-        val stablePose = when (chosenTransform) {
+        val candidatePose = when (chosenTransform) {
             PoseIdentityTransform.Direct -> directPose
             PoseIdentityTransform.Swapped -> swappedPose
         }
+        val bestScore = min(directScoreValue, swappedScoreValue)
+        val scaleRatio = coreScaleRatio(candidatePose, previousPose)
+        val outlierReason = buildOutlierReason(bestScore, scaleRatio)
+        val candidateIsOutlier = outlierReason.isNotBlank()
 
-        previousStablePose = stablePose
-        previousTransform = chosenTransform
         previousTimestampMs = timestampMs
 
+        if (candidateIsOutlier) {
+            consecutiveOutlierFrames += 1
+            if (consecutiveOutlierFrames <= MAX_CONSECUTIVE_OUTLIERS_TO_FREEZE) {
+                return PoseIdentityStabilizationResult(
+                    pose = previousPose,
+                    transform = previousTransform,
+                    directScore = directScoreValue,
+                    swappedScore = swappedScoreValue,
+                    ambiguous = ambiguous,
+                    outlier = true,
+                    accepted = false,
+                    outlierReason = outlierReason
+                )
+            }
+        }
+
+        consecutiveOutlierFrames = 0
+
+        if (!ambiguous || bestScore <= OUTLIER_SCORE_THRESHOLD * 0.5f || candidateIsOutlier) {
+            previousStablePose = candidatePose
+        }
+        if (!ambiguous) {
+            previousTransform = chosenTransform
+        }
+
         return PoseIdentityStabilizationResult(
-            pose = stablePose,
+            pose = candidatePose,
             transform = chosenTransform,
-            directScore = directScore ?: 0f,
-            swappedScore = swappedScore ?: 0f,
-            ambiguous = ambiguous
+            directScore = directScoreValue,
+            swappedScore = swappedScoreValue,
+            ambiguous = ambiguous,
+            outlier = false,
+            accepted = true,
+            outlierReason = ""
         )
     }
 
@@ -135,6 +184,25 @@ class PoseIdentityStabilizer {
         return weightedDistanceSum / weightSum
     }
 
+    private fun buildOutlierReason(bestScore: Float, scaleRatio: Float?): String {
+        val reasons = mutableListOf<String>()
+        val scoreOutlier = bestScore > OUTLIER_SCORE_THRESHOLD
+        val hardScoreOutlier = bestScore > HARD_OUTLIER_SCORE_THRESHOLD
+        if (scoreOutlier || hardScoreOutlier) {
+            reasons.add("score")
+        }
+        if (scaleRatio != null && (scaleRatio < MIN_CORE_SCALE_RATIO || scaleRatio > MAX_CORE_SCALE_RATIO)) {
+            reasons.add("scale")
+        }
+        return reasons.joinToString("+")
+    }
+
+    private fun coreScaleRatio(candidate: PoseLandmarks, previous: PoseLandmarks): Float? {
+        val candidateGeometry = CoreGeometry.from(candidate) ?: return null
+        val previousGeometry = CoreGeometry.from(previous) ?: return null
+        return candidateGeometry.scale / previousGeometry.scale.coerceAtLeast(MIN_SCALE)
+    }
+
     private fun PoseLandmarks.swappedLeftRight(): PoseLandmarks {
         val swapped = allLandmarks.toMutableList()
         LEFT_RIGHT_PAIRS.forEach { (leftIndex, rightIndex) ->
@@ -151,6 +219,37 @@ class PoseIdentityStabilizer {
     private data class ScoringLandmark(val index: Int, val weight: Float)
 
     private data class NormalizedPoint(val x: Float, val y: Float)
+
+    private data class CoreGeometry(
+        val shoulderWidth: Float,
+        val hipWidth: Float,
+        val torsoLength: Float,
+        val scale: Float
+    ) {
+        companion object {
+            fun from(pose: PoseLandmarks): CoreGeometry? {
+                val leftShoulder = pose.allLandmarks.getOrNull(11)?.takeIf { hasFinitePosition2D(it) }
+                val rightShoulder = pose.allLandmarks.getOrNull(12)?.takeIf { hasFinitePosition2D(it) }
+                val leftHip = pose.allLandmarks.getOrNull(23)?.takeIf { hasFinitePosition2D(it) }
+                val rightHip = pose.allLandmarks.getOrNull(24)?.takeIf { hasFinitePosition2D(it) }
+                val shoulderCenter = midpoint(leftShoulder, rightShoulder)
+                val hipCenter = midpoint(leftHip, rightHip)
+                if (shoulderCenter == null && hipCenter == null) return null
+
+                val shoulderWidth = distance(leftShoulder, rightShoulder) ?: 0f
+                val hipWidth = distance(leftHip, rightHip) ?: 0f
+                val torsoLength = centerDistance(shoulderCenter, hipCenter) ?: 0f
+                val scale = max(max(shoulderWidth, hipWidth), torsoLength).coerceAtLeast(MIN_SCALE)
+
+                return CoreGeometry(
+                    shoulderWidth = shoulderWidth,
+                    hipWidth = hipWidth,
+                    torsoLength = torsoLength,
+                    scale = scale
+                )
+            }
+        }
+    }
 
     private data class PoseNormalizer(
         val centerX: Float,
@@ -174,44 +273,12 @@ class PoseIdentityStabilizer {
                 val shoulderCenter = midpoint(leftShoulder, rightShoulder)
                 val hipCenter = midpoint(leftHip, rightHip)
                 val bodyCenter = hipCenter ?: shoulderCenter ?: return null
+                val geometry = CoreGeometry.from(pose) ?: return null
 
-                val shoulderWidth = distance(leftShoulder, rightShoulder) ?: 0f
-                val hipWidth = distance(leftHip, rightHip) ?: 0f
-                val torsoLength = centerDistance(shoulderCenter, hipCenter) ?: 0f
-                val scale = max(max(shoulderWidth, hipWidth), torsoLength).coerceAtLeast(MIN_SCALE)
-
-                return PoseNormalizer(bodyCenter.x, bodyCenter.y, scale)
-            }
-
-            private fun hasFinitePosition2D(point: Point3D): Boolean = point.x.isFinite() && point.y.isFinite()
-
-            private fun midpoint(first: Point3D?, second: Point3D?): NormalizedPoint? {
-                if (first == null || second == null) return null
-                return NormalizedPoint(
-                    x = (first.x + second.x) / 2f,
-                    y = (first.y + second.y) / 2f
-                )
-            }
-
-            private fun distance(first: Point3D?, second: Point3D?): Float? {
-                if (first == null || second == null) return null
-                val dx = first.x - second.x
-                val dy = first.y - second.y
-                return sqrt(dx * dx + dy * dy)
-            }
-
-            private fun centerDistance(first: NormalizedPoint?, second: NormalizedPoint?): Float? {
-                if (first == null || second == null) return null
-                val dx = first.x - second.x
-                val dy = first.y - second.y
-                return sqrt(dx * dx + dy * dy)
+                return PoseNormalizer(bodyCenter.x, bodyCenter.y, geometry.scale)
             }
         }
     }
-
-    private fun Point3D.hasFinitePosition2D(): Boolean = x.isFinite() && y.isFinite()
-
-    private fun Point3D.visibilityConfidence(): Float = visibility?.coerceIn(0f, 1f) ?: 1f
 
     private companion object {
         private val LEFT_RIGHT_PAIRS = listOf(
@@ -243,5 +310,33 @@ class PoseIdentityStabilizer {
             ScoringLandmark(25, 1.2f),
             ScoringLandmark(26, 1.2f)
         )
+
+        private fun hasFinitePosition2D(point: Point3D): Boolean = point.x.isFinite() && point.y.isFinite()
+
+        private fun midpoint(first: Point3D?, second: Point3D?): NormalizedPoint? {
+            if (first == null || second == null) return null
+            return NormalizedPoint(
+                x = (first.x + second.x) / 2f,
+                y = (first.y + second.y) / 2f
+            )
+        }
+
+        private fun distance(first: Point3D?, second: Point3D?): Float? {
+            if (first == null || second == null) return null
+            val dx = first.x - second.x
+            val dy = first.y - second.y
+            return sqrt(dx * dx + dy * dy)
+        }
+
+        private fun centerDistance(first: NormalizedPoint?, second: NormalizedPoint?): Float? {
+            if (first == null || second == null) return null
+            val dx = first.x - second.x
+            val dy = first.y - second.y
+            return sqrt(dx * dx + dy * dy)
+        }
     }
+
+    private fun Point3D.hasFinitePosition2D(): Boolean = x.isFinite() && y.isFinite()
+
+    private fun Point3D.visibilityConfidence(): Float = visibility?.coerceIn(0f, 1f) ?: 1f
 }

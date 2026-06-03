@@ -851,11 +851,17 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private fun buildIdentityDebugText(identityResult: PoseIdentityStabilizationResult): String {
         val ambiguousText = if (identityResult.ambiguous) " ambiguous" else ""
+        val acceptanceText = if (identityResult.outlier) {
+            " outlier(${identityResult.outlierReason})"
+        } else {
+            " accepted"
+        }
         return String.format(
             Locale.US,
-            "identity: %s%s d=%.3f s=%.3f",
+            "identity: %s%s%s d=%.3f s=%.3f",
             identityResult.transform.name,
             ambiguousText,
+            acceptanceText,
             identityResult.directScore,
             identityResult.swappedScore
         )

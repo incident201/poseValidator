@@ -2,19 +2,22 @@ package com.example.tracker
 
 import kotlin.math.abs
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PoseIdentityStabilizerTest {
     @Test
-    fun `first valid frame returns Direct and stores state`() {
+    fun `first valid frame returns Direct accepted and stores state`() {
         val stabilizer = PoseIdentityStabilizer()
 
         val firstResult = stabilizer.stabilize(basePose(), timestampMs = 0L)
         val secondResult = stabilizer.stabilize(globallySwapped(basePose()), timestampMs = 100L)
 
         assertEquals(PoseIdentityTransform.Direct, firstResult.transform)
-        assertEquals(false, firstResult.ambiguous)
+        assertFalse(firstResult.ambiguous)
+        assertFalse(firstResult.outlier)
+        assertTrue(firstResult.accepted)
         assertEquals(PoseIdentityTransform.Swapped, secondResult.transform)
     }
 
@@ -26,7 +29,9 @@ class PoseIdentityStabilizerTest {
         val result = stabilizer.stabilize(basePose(xOffset = 0.01f), timestampMs = 100L)
 
         assertEquals(PoseIdentityTransform.Direct, result.transform)
-        assertEquals(false, result.ambiguous)
+        assertFalse(result.ambiguous)
+        assertFalse(result.outlier)
+        assertTrue(result.accepted)
         assertTrue(result.directScore < result.swappedScore)
     }
 
@@ -39,6 +44,8 @@ class PoseIdentityStabilizerTest {
         val result = stabilizer.stabilize(globallySwapped(previousPose), timestampMs = 100L)
 
         assertEquals(PoseIdentityTransform.Swapped, result.transform)
+        assertFalse(result.outlier)
+        assertTrue(result.accepted)
         assertPoseClose(previousPose, result.pose)
         assertTrue(result.swappedScore < result.directScore)
     }
@@ -49,10 +56,12 @@ class PoseIdentityStabilizerTest {
 
         stabilizer.stabilize(basePose(), timestampMs = 0L)
         stabilizer.stabilize(globallySwapped(basePose()), timestampMs = 100L)
-        val result = stabilizer.stabilize(ambiguousPose(), timestampMs = 200L)
+        val result = stabilizer.stabilize(ambiguousOutlierPose(), timestampMs = 200L)
 
         assertEquals(PoseIdentityTransform.Swapped, result.transform)
-        assertEquals(true, result.ambiguous)
+        assertTrue(result.ambiguous)
+        assertTrue(result.outlier)
+        assertFalse(result.accepted)
         assertTrue(abs(result.directScore - result.swappedScore) < 0.0001f)
     }
 
@@ -64,7 +73,9 @@ class PoseIdentityStabilizerTest {
         val result = stabilizer.stabilize(globallySwapped(basePose()), timestampMs = 1201L)
 
         assertEquals(PoseIdentityTransform.Direct, result.transform)
-        assertEquals(false, result.ambiguous)
+        assertFalse(result.ambiguous)
+        assertFalse(result.outlier)
+        assertTrue(result.accepted)
         assertEquals(0f, result.directScore, 0.0001f)
         assertEquals(0f, result.swappedScore, 0.0001f)
     }
@@ -78,8 +89,11 @@ class PoseIdentityStabilizerTest {
         val nextResult = stabilizer.stabilize(globallySwapped(basePose()), timestampMs = 200L)
 
         assertEquals(PoseIdentityTransform.Direct, invalidResult.transform)
-        assertEquals(false, invalidResult.ambiguous)
+        assertFalse(invalidResult.ambiguous)
+        assertFalse(invalidResult.outlier)
+        assertFalse(invalidResult.accepted)
         assertEquals(PoseIdentityTransform.Direct, nextResult.transform)
+        assertTrue(nextResult.accepted)
     }
 
     @Test
@@ -96,41 +110,162 @@ class PoseIdentityStabilizerTest {
         val result = stabilizer.stabilize(noisyExtremitiesPose, timestampMs = 100L)
 
         assertEquals(PoseIdentityTransform.Direct, result.transform)
-        assertEquals(false, result.ambiguous)
+        assertFalse(result.ambiguous)
+        assertFalse(result.outlier)
+        assertTrue(result.accepted)
         assertTrue(result.directScore < result.swappedScore)
+    }
+
+    @Test
+    fun `single strongly deformed frame returns previous stable pose and does not update reference`() {
+        val stabilizer = PoseIdentityStabilizer()
+        val stablePose = basePose()
+
+        stabilizer.stabilize(stablePose, timestampMs = 0L)
+        val outlierResult = stabilizer.stabilize(scaledCorePose(scale = 0.20f), timestampMs = 100L)
+        val swappedStableResult = stabilizer.stabilize(globallySwapped(stablePose), timestampMs = 200L)
+
+        assertTrue(outlierResult.outlier)
+        assertFalse(outlierResult.accepted)
+        assertEquals("scale", outlierResult.outlierReason)
+        assertPoseClose(stablePose, outlierResult.pose)
+        assertEquals(PoseIdentityTransform.Swapped, swappedStableResult.transform)
+        assertPoseClose(stablePose, swappedStableResult.pose)
+    }
+
+    @Test
+    fun `normal frame after single outlier is accepted and resets outlier streak`() {
+        val stabilizer = PoseIdentityStabilizer()
+
+        stabilizer.stabilize(basePose(), timestampMs = 0L)
+        val firstOutlier = stabilizer.stabilize(scaledCorePose(scale = 0.20f), timestampMs = 100L)
+        val normalResult = stabilizer.stabilize(basePose(xOffset = 0.01f), timestampMs = 200L)
+        val nextOutlier = stabilizer.stabilize(scaledCorePose(scale = 0.20f), timestampMs = 300L)
+
+        assertTrue(firstOutlier.outlier)
+        assertFalse(firstOutlier.accepted)
+        assertFalse(normalResult.outlier)
+        assertTrue(normalResult.accepted)
+        assertTrue(nextOutlier.outlier)
+        assertFalse(nextOutlier.accepted)
+    }
+
+    @Test
+    fun `several consecutive outliers are accepted after freeze limit`() {
+        val stabilizer = PoseIdentityStabilizer()
+        val deformedPose = scaledCorePose(scale = 0.20f)
+
+        stabilizer.stabilize(basePose(), timestampMs = 0L)
+        val first = stabilizer.stabilize(deformedPose, timestampMs = 100L)
+        val second = stabilizer.stabilize(deformedPose, timestampMs = 200L)
+        val third = stabilizer.stabilize(deformedPose, timestampMs = 300L)
+
+        assertTrue(first.outlier)
+        assertFalse(first.accepted)
+        assertTrue(second.outlier)
+        assertFalse(second.accepted)
+        assertFalse(third.outlier)
+        assertTrue(third.accepted)
+        assertPoseClose(deformedPose, third.pose)
+    }
+
+    @Test
+    fun `ambiguous frame with small score can be accepted`() {
+        val stabilizer = PoseIdentityStabilizer()
+        val narrowPose = basePose(sideOffset = 0.003f)
+
+        stabilizer.stabilize(narrowPose, timestampMs = 0L)
+        val result = stabilizer.stabilize(globallySwapped(narrowPose), timestampMs = 100L)
+
+        assertTrue(result.ambiguous)
+        assertFalse(result.outlier)
+        assertTrue(result.accepted)
+        assertTrue(minOf(result.directScore, result.swappedScore) <= 0.16f)
+    }
+
+    @Test
+    fun `ambiguous frame with large score is suppressed as outlier and does not update reference`() {
+        val stabilizer = PoseIdentityStabilizer()
+        val stablePose = basePose()
+
+        stabilizer.stabilize(stablePose, timestampMs = 0L)
+        val ambiguousOutlier = stabilizer.stabilize(ambiguousOutlierPose(), timestampMs = 100L)
+        val swappedStableResult = stabilizer.stabilize(globallySwapped(stablePose), timestampMs = 200L)
+
+        assertTrue(ambiguousOutlier.ambiguous)
+        assertTrue(ambiguousOutlier.outlier)
+        assertFalse(ambiguousOutlier.accepted)
+        assertTrue(ambiguousOutlier.outlierReason.contains("score"))
+        assertPoseClose(stablePose, ambiguousOutlier.pose)
+        assertEquals(PoseIdentityTransform.Swapped, swappedStableResult.transform)
+        assertPoseClose(stablePose, swappedStableResult.pose)
+    }
+
+    @Test
+    fun `reset clears outlier streak and returns next valid frame to Direct accepted baseline`() {
+        val stabilizer = PoseIdentityStabilizer()
+
+        stabilizer.stabilize(basePose(), timestampMs = 0L)
+        stabilizer.stabilize(scaledCorePose(scale = 0.20f), timestampMs = 100L)
+        stabilizer.stabilize(scaledCorePose(scale = 0.20f), timestampMs = 200L)
+        stabilizer.reset()
+        val result = stabilizer.stabilize(globallySwapped(basePose()), timestampMs = 300L)
+
+        assertEquals(PoseIdentityTransform.Direct, result.transform)
+        assertFalse(result.ambiguous)
+        assertFalse(result.outlier)
+        assertTrue(result.accepted)
+        assertEquals(0f, result.directScore, 0.0001f)
+        assertEquals(0f, result.swappedScore, 0.0001f)
     }
 
     private fun basePose(
         xOffset: Float = 0f,
+        sideOffset: Float = 0.10f,
         leftWrist: Point3D = point(0.30f, 0.50f, visibility = 0.01f),
         rightWrist: Point3D = point(0.70f, 0.50f, visibility = 0.01f),
         leftAnkle: Point3D = point(0.43f, 0.90f, visibility = 0.01f),
         rightAnkle: Point3D = point(0.57f, 0.90f, visibility = 0.01f)
     ): PoseLandmarks {
+        val centerX = 0.50f + xOffset
         val all = MutableList(33) { index ->
-            point(0.50f + xOffset + index * 0.0001f, 0.50f, visibility = 0.5f)
+            point(centerX + index * 0.0001f, 0.50f, visibility = 0.5f)
         }
-        all[11] = point(0.40f + xOffset, 0.30f)
-        all[12] = point(0.60f + xOffset, 0.30f)
-        all[13] = point(0.35f + xOffset, 0.42f)
-        all[14] = point(0.65f + xOffset, 0.42f)
+        all[11] = point(centerX - sideOffset, 0.30f)
+        all[12] = point(centerX + sideOffset, 0.30f)
+        all[13] = point(centerX - sideOffset * 1.5f, 0.42f)
+        all[14] = point(centerX + sideOffset * 1.5f, 0.42f)
         all[15] = leftWrist.copy(x = leftWrist.x + xOffset)
         all[16] = rightWrist.copy(x = rightWrist.x + xOffset)
-        all[23] = point(0.43f + xOffset, 0.60f)
-        all[24] = point(0.57f + xOffset, 0.60f)
-        all[25] = point(0.43f + xOffset, 0.78f)
-        all[26] = point(0.57f + xOffset, 0.78f)
+        all[23] = point(centerX - sideOffset * 0.7f, 0.60f)
+        all[24] = point(centerX + sideOffset * 0.7f, 0.60f)
+        all[25] = point(centerX - sideOffset * 0.7f, 0.78f)
+        all[26] = point(centerX + sideOffset * 0.7f, 0.78f)
         all[27] = leftAnkle.copy(x = leftAnkle.x + xOffset)
         all[28] = rightAnkle.copy(x = rightAnkle.x + xOffset)
         return PoseLandmarks.fromAllLandmarks(all)
     }
 
-    private fun ambiguousPose(): PoseLandmarks {
+    private fun scaledCorePose(scale: Float): PoseLandmarks {
+        return basePose(sideOffset = 0.10f * scale).withCoreYScale(scale)
+    }
+
+    private fun PoseLandmarks.withCoreYScale(scale: Float): PoseLandmarks {
+        val all = allLandmarks.toMutableList()
+        val centerY = 0.45f
+        listOf(11, 12, 13, 14, 23, 24, 25, 26).forEach { index ->
+            val point = all[index]
+            all[index] = point.copy(y = centerY + (point.y - centerY) * scale)
+        }
+        return PoseLandmarks.fromAllLandmarks(all)
+    }
+
+    private fun ambiguousOutlierPose(): PoseLandmarks {
         val all = basePose().allLandmarks.toMutableList()
-        listOf(11, 12).forEach { all[it] = point(0.50f, 0.30f) }
-        listOf(13, 14).forEach { all[it] = point(0.50f, 0.42f) }
-        listOf(23, 24).forEach { all[it] = point(0.50f, 0.60f) }
-        listOf(25, 26).forEach { all[it] = point(0.50f, 0.78f) }
+        listOf(11, 12).forEach { all[it] = point(0.50f, 0.15f) }
+        listOf(13, 14).forEach { all[it] = point(0.50f, 0.30f) }
+        listOf(23, 24).forEach { all[it] = point(0.50f, 0.75f) }
+        listOf(25, 26).forEach { all[it] = point(0.50f, 0.95f) }
         return PoseLandmarks.fromAllLandmarks(all)
     }
 
