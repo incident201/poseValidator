@@ -97,6 +97,7 @@ import kotlin.math.max
 
 private const val SHOW_POSE_DEBUG_OVERLAY = true
 private const val SHOW_POSE_DEBUG_POINTS = true
+private const val DEMO_FRAME_DELAY_MS = 40L
 
 private enum class TimelapseUiState { Preparing, Ready, Saving, Saved, Unavailable, Disabled }
 
@@ -321,6 +322,7 @@ fun CameraScreen(
             if (resizedBitmap !== decodedBitmap) {
                 decodedBitmap.recycleIfNeeded()
             }
+            viewModel.resetPoseInputContinuity()
             val oldDemoBitmap = demoBitmap
             demoBitmap = resizedBitmap
             if (oldDemoBitmap != null && oldDemoBitmap !== resizedBitmap) {
@@ -372,7 +374,8 @@ fun CameraScreen(
     }
 
     LaunchedEffect(debugModeEnabled) {
-        if (!debugModeEnabled) {
+        if (!debugModeEnabled && isDemoMode) {
+            viewModel.resetPoseInputContinuity()
             isDemoMode = false
         }
     }
@@ -405,7 +408,7 @@ fun CameraScreen(
                 Log.w("CameraScreen", "Dropping demo frame after camera executor shutdown", e)
                 break
             }
-            delay(250L)
+            delay(DEMO_FRAME_DELAY_MS)
         }
     }
 
@@ -620,6 +623,9 @@ fun CameraScreen(
             onOcclusionFreezeVisibilityHardChanged = viewModel::updateOcclusionFreezeVisibilityHard,
             onOcclusionFreezeVisibilitySoftChanged = viewModel::updateOcclusionFreezeVisibilitySoft,
             onOcclusionJitterFreezeThresholdChanged = viewModel::updateOcclusionJitterFreezeThreshold,
+            onPoseSmootherMinCutoffChanged = viewModel::updatePoseSmootherMinCutoff,
+            onPoseSmootherBetaChanged = viewModel::updatePoseSmootherBeta,
+            onPoseSmootherDerivativeCutoffChanged = viewModel::updatePoseSmootherDerivativeCutoff,
             onShowInstructions = {
                 showSettings = false
                 showOnboarding = true
@@ -731,6 +737,7 @@ fun CameraScreen(
                 SwitchCameraButton(
                     onClick = {
                         if (canSwitchCamera) {
+                            viewModel.resetPoseInputContinuity()
                             selectedLensFacing = oppositeLensFacing(selectedLensFacing)
                         }
                     },
@@ -810,6 +817,7 @@ fun CameraScreen(
             debugModeEnabled = debugModeEnabled,
             onDemoClick = {
                 if (isDemoMode) {
+                    viewModel.resetPoseInputContinuity()
                     isDemoMode = false
                 } else {
                     demoImagePickerLauncher.launch("image/*")
@@ -1334,8 +1342,24 @@ private fun PoseDebugOverlay(
     debugModeEnabled: Boolean,
     modifier: Modifier = Modifier
 ) {
-    Canvas(modifier = modifier) {
-        drawPoseDebugOverlay(overlayState, mirrorX, debugModeEnabled)
+    Box(modifier = modifier) {
+        Canvas(modifier = Modifier.matchParentSize()) {
+            drawPoseDebugOverlay(overlayState, mirrorX, debugModeEnabled)
+        }
+        if (debugModeEnabled && overlayState.identityDebugText.isNotBlank()) {
+            Text(
+                text = overlayState.identityDebugText,
+                color = Color.White,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 8.dp, top = 58.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 4.dp)
+            )
+        }
     }
 }
 

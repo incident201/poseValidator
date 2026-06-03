@@ -3,10 +3,11 @@ package com.example.tracker
 import kotlin.math.PI
 import kotlin.math.abs
 
-class PoseSmoother {
-    private val minCutoff = 0.35f
-    private val beta = 0.025f
-    private val derivativeCutoff = 1.0f
+class PoseSmoother(
+    private var minCutoff: Float = DEFAULT_MIN_CUTOFF,
+    private var beta: Float = DEFAULT_BETA,
+    private var derivativeCutoff: Float = DEFAULT_DERIVATIVE_CUTOFF
+) {
     private val resetAfterGapMs = 1200L
 
     private val landmarkFilters = mutableMapOf<Int, LandmarkFilter>()
@@ -15,6 +16,22 @@ class PoseSmoother {
     fun reset() {
         landmarkFilters.clear()
         previousTimestampMs = null
+    }
+
+    fun updateConfig(minCutoff: Float, beta: Float, derivativeCutoff: Float) {
+        val normalizedMinCutoff = minCutoff.coerceIn(MIN_CUTOFF_RANGE, MAX_CUTOFF_RANGE)
+        val normalizedBeta = beta.coerceIn(MIN_BETA_RANGE, MAX_BETA_RANGE)
+        val normalizedDerivativeCutoff = derivativeCutoff.coerceIn(MIN_CUTOFF_RANGE, MAX_CUTOFF_RANGE)
+        if (this.minCutoff == normalizedMinCutoff &&
+            this.beta == normalizedBeta &&
+            this.derivativeCutoff == normalizedDerivativeCutoff
+        ) {
+            return
+        }
+        this.minCutoff = normalizedMinCutoff
+        this.beta = normalizedBeta
+        this.derivativeCutoff = normalizedDerivativeCutoff
+        reset()
     }
 
     fun smooth(raw: PoseLandmarks, timestampMs: Long): PoseLandmarks {
@@ -59,6 +76,16 @@ class PoseSmoother {
             beta = beta,
             derivativeCutoff = derivativeCutoff
         )
+    }
+
+    companion object {
+        const val DEFAULT_MIN_CUTOFF = 0.35f
+        const val DEFAULT_BETA = 0.025f
+        const val DEFAULT_DERIVATIVE_CUTOFF = 1.0f
+        const val MIN_CUTOFF_RANGE = 0.01f
+        const val MAX_CUTOFF_RANGE = 5.0f
+        const val MIN_BETA_RANGE = 0.0f
+        const val MAX_BETA_RANGE = 1.0f
     }
 
     private class LowPassFilter {
