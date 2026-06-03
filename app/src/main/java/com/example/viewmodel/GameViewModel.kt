@@ -56,6 +56,8 @@ private const val DEFAULT_OCCLUSION_FREEZE_VIS_SOFT = 0.1f
 private const val DEFAULT_OCCLUSION_JITTER_FREEZE_THRESHOLD = 0.01f
 private const val PREF_DEBUG_MODE_ENABLED = "debug_mode_enabled"
 private const val PREF_ONBOARDING_COMPLETED = "onboarding_completed"
+private const val MAX_POSE_DROPOUT_HOLD_FRAMES = 3
+private const val MAX_POSE_DROPOUT_HOLD_MS = 900L
 
 enum class GameState {
     Idle,
@@ -236,6 +238,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     @Volatile private var isCleared = false
     private val pendingFrames = LinkedHashMap<Long, PendingPoseFrame>()
     private var latestAnalyzedFrame: AnalyzedPoseFrame? = null
+    private var lastUsablePoseForDropoutHold: PoseLandmarks? = null
+    private var lastUsablePoseTimestampMs: Long? = null
+    private var consecutivePoseDropoutFrames: Int = 0
     private var startDelayJob: Job? = null
     private var timerJob: Job? = null
 
@@ -463,6 +468,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             poseIdentityStabilizer.reset()
             poseSmoother.reset()
             poseOcclusionGuard.reset()
+            resetPoseDropoutHoldState()
         }
     }
 
@@ -575,16 +581,48 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             if (matchedFrame != null && matchedFrame.processingGeneration != processingGeneration) {
                 null
             } else {
-                val identityResult = poseIdentityStabilizer.stabilize(rawPose, timestamp)
-                val smoothedPose = poseSmoother.smooth(identityResult.pose, timestamp)
-                val identityDebugText = buildIdentityDebugText(identityResult)
-                val shouldCollectOcclusionCalibration =
-                    _gameState.value == GameState.StartingDelay &&
-                        _startDelayRemainingSeconds.value in 1..poseOcclusionCalibrationSeconds
-                if (shouldCollectOcclusionCalibration) {
-                    poseOcclusionGuard.addCalibrationFrame(smoothedPose, timestamp)
+                val rawPoseMissing = rawPose.allLandmarks.size < 33
+                val dropoutHoldPose = if (rawPoseMissing) poseForDropoutHold(timestamp) else null
+                if (dropoutHoldPose != null) {
+                    Triple(
+                        processingGeneration,
+                        dropoutHoldPose,
+                        buildPoseDropoutDebugText(
+                            frames = consecutivePoseDropoutFrames,
+                            ageMs = lastUsablePoseTimestampMs?.let { timestamp - it },
+                            holding = true
+                        )
+                    )
+                } else if (rawPoseMissing) {
+                    consecutivePoseDropoutFrames += 1
+                    poseIdentityStabilizer.reset()
+                    poseSmoother.reset()
+                    Triple(
+                        processingGeneration,
+                        rawPose,
+                        buildPoseDropoutDebugText(
+                            frames = consecutivePoseDropoutFrames,
+                            ageMs = null,
+                            holding = false
+                        )
+                    )
+                } else {
+                    consecutivePoseDropoutFrames = 0
+                    val identityResult = poseIdentityStabilizer.stabilize(rawPose, timestamp)
+                    val smoothedPose = poseSmoother.smooth(identityResult.pose, timestamp)
+                    if (identityResult.accepted && smoothedPose.allLandmarks.size >= 33) {
+                        lastUsablePoseForDropoutHold = smoothedPose
+                        lastUsablePoseTimestampMs = timestamp
+                    }
+                    val identityDebugText = buildIdentityDebugText(identityResult)
+                    val shouldCollectOcclusionCalibration =
+                        _gameState.value == GameState.StartingDelay &&
+                            _startDelayRemainingSeconds.value in 1..poseOcclusionCalibrationSeconds
+                    if (shouldCollectOcclusionCalibration) {
+                        poseOcclusionGuard.addCalibrationFrame(smoothedPose, timestamp)
+                    }
+                    Triple(processingGeneration, smoothedPose, identityDebugText)
                 }
-                Triple(processingGeneration, smoothedPose, identityDebugText)
             }
         }
         if (stabilizedFrame == null) {
@@ -849,6 +887,30 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         return PoseOverlayState(safeWidth, safeHeight, pose.allLandmarks, normalizedRect, faceOverlayState, identityDebugText = identityDebugText)
     }
 
+    private fun resetPoseDropoutHoldState() {
+        lastUsablePoseForDropoutHold = null
+        lastUsablePoseTimestampMs = null
+        consecutivePoseDropoutFrames = 0
+    }
+
+    private fun poseForDropoutHold(timestampMs: Long): PoseLandmarks? {
+        val heldPose = lastUsablePoseForDropoutHold ?: return null
+        val heldTimestamp = lastUsablePoseTimestampMs ?: return null
+        val nextDropoutFrames = consecutivePoseDropoutFrames + 1
+        val ageMs = timestampMs - heldTimestamp
+        if (nextDropoutFrames > MAX_POSE_DROPOUT_HOLD_FRAMES || ageMs > MAX_POSE_DROPOUT_HOLD_MS) {
+            return null
+        }
+        consecutivePoseDropoutFrames = nextDropoutFrames
+        return heldPose
+    }
+
+    private fun buildPoseDropoutDebugText(frames: Int, ageMs: Long?, holding: Boolean): String {
+        val statusText = if (holding) "hold(no_pose)" else "rejected(no_pose)"
+        val ageText = if (holding && ageMs != null) " age=${ageMs.coerceAtLeast(0L)}ms" else ""
+        return "identity: $statusText frames=$frames$ageText"
+    }
+
     private fun buildIdentityDebugText(identityResult: PoseIdentityStabilizationResult): String {
         val ambiguousText = if (identityResult.ambiguous) " ambiguous" else ""
         val acceptanceText = when {
@@ -933,6 +995,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             poseIdentityStabilizer.reset()
             poseSmoother.reset()
             poseOcclusionGuard.reset()
+            resetPoseDropoutHoldState()
             currentViolationCount = 0
             _violationCount.value = 0
             resetRuleViolationCounts()
@@ -1047,6 +1110,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             poseSmoother.reset()
             movementTracker.reset()
             poseOcclusionGuard.reset()
+            resetPoseDropoutHoldState()
         }
         resetMovementGaugeState()
         _sessionSummary.value = SessionSummary(
@@ -1078,6 +1142,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             poseSmoother.reset()
             movementTracker.reset()
             poseOcclusionGuard.reset()
+            resetPoseDropoutHoldState()
             currentViolationCount = 0
             _violationCount.value = 0
             resetRuleViolationCounts()
@@ -1106,6 +1171,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             poseSmoother.reset()
             movementTracker.reset()
             poseOcclusionGuard.reset()
+            resetPoseDropoutHoldState()
             currentViolationCount = 0
             _violationCount.value = 0
             resetRuleViolationCounts()
@@ -1120,7 +1186,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _defeatReason.value = ""
         _timerSeconds.value = _selectedDurationSeconds.value
     }
-    override fun onCleared() { isCleared = true; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseIdentityStabilizer.reset(); poseSmoother.reset(); movementTracker.reset(); poseOcclusionGuard.reset() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
+    override fun onCleared() { isCleared = true; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseIdentityStabilizer.reset(); poseSmoother.reset(); movementTracker.reset(); poseOcclusionGuard.reset(); resetPoseDropoutHoldState() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
 }
 
 private fun Bitmap.recycleIfNeeded() {
