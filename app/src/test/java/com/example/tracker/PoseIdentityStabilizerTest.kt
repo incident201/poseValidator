@@ -21,6 +21,41 @@ class PoseIdentityStabilizerTest {
         assertEquals(PoseIdentityTransform.Swapped, secondResult.transform)
     }
 
+
+    @Test
+    fun `non finite first core is rejected and next valid pose becomes Direct baseline`() {
+        val stabilizer = PoseIdentityStabilizer()
+
+        val rejected = stabilizer.stabilize(basePose().withNonFiniteScoringPositions(), timestampMs = 0L)
+        val accepted = stabilizer.stabilize(basePose(), timestampMs = 100L)
+
+        assertEquals(PoseIdentityTransform.Direct, rejected.transform)
+        assertFalse(rejected.outlier)
+        assertFalse(rejected.accepted)
+        assertEquals(PoseIdentityTransform.Direct, accepted.transform)
+        assertFalse(accepted.outlier)
+        assertTrue(accepted.accepted)
+        assertEquals(0f, accepted.directScore, 0.0001f)
+        assertEquals(0f, accepted.swappedScore, 0.0001f)
+    }
+
+    @Test
+    fun `collapsed first core is rejected and next valid pose becomes Direct baseline`() {
+        val stabilizer = PoseIdentityStabilizer()
+
+        val rejected = stabilizer.stabilize(collapsedInitialCorePose(), timestampMs = 0L)
+        val accepted = stabilizer.stabilize(basePose(), timestampMs = 100L)
+
+        assertEquals(PoseIdentityTransform.Direct, rejected.transform)
+        assertFalse(rejected.outlier)
+        assertFalse(rejected.accepted)
+        assertEquals(PoseIdentityTransform.Direct, accepted.transform)
+        assertFalse(accepted.outlier)
+        assertTrue(accepted.accepted)
+        assertEquals(0f, accepted.directScore, 0.0001f)
+        assertEquals(0f, accepted.swappedScore, 0.0001f)
+    }
+
     @Test
     fun `second frame with same identity remains Direct`() {
         val stabilizer = PoseIdentityStabilizer()
@@ -376,6 +411,15 @@ class PoseIdentityStabilizerTest {
         listOf(13, 14).forEach { all[it] = point(0.50f, 0.30f) }
         listOf(23, 24).forEach { all[it] = point(0.50f, 0.75f) }
         listOf(25, 26).forEach { all[it] = point(0.50f, 0.95f) }
+        return PoseLandmarks.fromAllLandmarks(all)
+    }
+
+
+    private fun collapsedInitialCorePose(): PoseLandmarks {
+        val all = basePose().allLandmarks.toMutableList()
+        scoringIndices.forEach { index ->
+            all[index] = point(0.50f, 0.50f)
+        }
         return PoseLandmarks.fromAllLandmarks(all)
     }
 

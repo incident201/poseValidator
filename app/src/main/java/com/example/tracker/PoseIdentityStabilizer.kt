@@ -18,6 +18,9 @@ private const val MAX_CORE_WIDTH_RATIO = 1.80f
 private const val MIN_TORSO_LENGTH_RATIO = 0.60f
 private const val MAX_TORSO_LENGTH_RATIO = 1.70f
 private const val MAX_CONSECUTIVE_OUTLIERS_TO_FREEZE = 2
+private const val MIN_INITIAL_CORE_SCALE = 0.02f
+private const val MIN_SOFT_NORMALIZED_COORDINATE = -0.25f
+private const val MAX_SOFT_NORMALIZED_COORDINATE = 1.25f
 
 enum class PoseIdentityTransform {
     Direct,
@@ -70,10 +73,22 @@ class PoseIdentityStabilizer {
 
         val previousPose = previousStablePose
         if (previousPose == null) {
-            previousStablePose = rawPose
-            previousTransform = PoseIdentityTransform.Direct
             previousTimestampMs = timestampMs
             consecutiveOutlierFrames = 0
+            if (!rawPose.hasUsableInitialIdentityCore()) {
+                return PoseIdentityStabilizationResult(
+                    pose = rawPose,
+                    transform = PoseIdentityTransform.Direct,
+                    directScore = 0f,
+                    swappedScore = 0f,
+                    ambiguous = false,
+                    outlier = false,
+                    accepted = false,
+                    outlierReason = ""
+                )
+            }
+            previousStablePose = rawPose
+            previousTransform = PoseIdentityTransform.Direct
             return PoseIdentityStabilizationResult(
                 pose = rawPose,
                 transform = PoseIdentityTransform.Direct,
@@ -265,6 +280,34 @@ class PoseIdentityStabilizer {
     }
 
 
+
+    private fun PoseLandmarks.hasUsableInitialIdentityCore(): Boolean {
+        val scoringPoints = SCORING_LANDMARKS.map { scoringLandmark ->
+            allLandmarks.getOrNull(scoringLandmark.index) ?: return false
+        }
+        if (scoringPoints.any { !it.hasFinitePosition2D() || !it.isInsideSoftNormalizedBounds() }) {
+            return false
+        }
+
+        val geometry = CoreGeometry.from(this) ?: return false
+        val reliableDimensions = listOf(
+            geometry.shoulderWidth,
+            geometry.hipWidth,
+            geometry.torsoLength
+        ).count { it > MIN_SCALE }
+        if (reliableDimensions < 2 || geometry.scale <= MIN_INITIAL_CORE_SCALE) {
+            return false
+        }
+
+        val leftShoulder = allLandmarks.getOrNull(11)
+        val rightShoulder = allLandmarks.getOrNull(12)
+        val leftHip = allLandmarks.getOrNull(23)
+        val rightHip = allLandmarks.getOrNull(24)
+        val shoulderCenter = midpoint(leftShoulder, rightShoulder)
+        val hipCenter = midpoint(leftHip, rightHip)
+        return listOfNotNull(shoulderCenter, hipCenter).all { it.isInsideSoftNormalizedBounds() }
+    }
+
     private fun PoseLandmarks.hasFiniteIdentityCore(): Boolean {
         return SCORING_LANDMARKS.all { scoringLandmark ->
             allLandmarks.getOrNull(scoringLandmark.index)?.hasFinitePosition2D() == true
@@ -438,4 +481,14 @@ class PoseIdentityStabilizer {
     private fun Point3D.hasFinitePosition2D(): Boolean = x.isFinite() && y.isFinite()
 
     private fun Point3D.visibilityConfidence(): Float = visibility?.coerceIn(0f, 1f) ?: 1f
+
+    private fun Point3D.isInsideSoftNormalizedBounds(): Boolean {
+        return x in MIN_SOFT_NORMALIZED_COORDINATE..MAX_SOFT_NORMALIZED_COORDINATE &&
+            y in MIN_SOFT_NORMALIZED_COORDINATE..MAX_SOFT_NORMALIZED_COORDINATE
+    }
+
+    private fun NormalizedPoint.isInsideSoftNormalizedBounds(): Boolean {
+        return x in MIN_SOFT_NORMALIZED_COORDINATE..MAX_SOFT_NORMALIZED_COORDINATE &&
+            y in MIN_SOFT_NORMALIZED_COORDINATE..MAX_SOFT_NORMALIZED_COORDINATE
+    }
 }
