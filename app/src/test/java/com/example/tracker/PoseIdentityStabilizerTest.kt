@@ -127,7 +127,7 @@ class PoseIdentityStabilizerTest {
 
         assertTrue(outlierResult.outlier)
         assertFalse(outlierResult.accepted)
-        assertEquals("scale", outlierResult.outlierReason)
+        assertTrue(outlierResult.outlierReason.contains("scale"))
         assertPoseClose(stablePose, outlierResult.pose)
         assertEquals(PoseIdentityTransform.Swapped, swappedStableResult.transform)
         assertPoseClose(stablePose, swappedStableResult.pose)
@@ -201,6 +201,54 @@ class PoseIdentityStabilizerTest {
         assertPoseClose(stablePose, swappedStableResult.pose)
     }
 
+
+    @Test
+    fun `horizontal core collapse is suppressed even when torso length stays stable`() {
+        val stabilizer = PoseIdentityStabilizer()
+        val stablePose = basePose()
+
+        stabilizer.stabilize(stablePose, timestampMs = 0L)
+        val result = stabilizer.stabilize(basePose(sideOffset = 0.02f), timestampMs = 100L)
+
+        assertTrue(result.outlier)
+        assertFalse(result.accepted)
+        assertTrue(result.outlierReason.contains("width"))
+        assertPoseClose(stablePose, result.pose)
+    }
+
+    @Test
+    fun `moderate core width change is accepted`() {
+        val stabilizer = PoseIdentityStabilizer()
+
+        stabilizer.stabilize(basePose(), timestampMs = 0L)
+        val result = stabilizer.stabilize(basePose(sideOffset = 0.08f), timestampMs = 100L)
+
+        assertFalse(result.outlier)
+        assertTrue(result.accepted)
+    }
+
+    @Test
+    fun `unavailable scores do not update stable reference as a good frame`() {
+        val stabilizer = PoseIdentityStabilizer()
+        val stablePose = basePose()
+
+        stabilizer.stabilize(stablePose, timestampMs = 0L)
+        val unavailableScoreResult = stabilizer.stabilize(
+            basePose(xOffset = 0.20f).withNonFiniteScoringPositions(),
+            timestampMs = 100L
+        )
+        val swappedStableResult = stabilizer.stabilize(globallySwapped(stablePose), timestampMs = 200L)
+
+        assertTrue(unavailableScoreResult.ambiguous)
+        assertTrue(unavailableScoreResult.outlier)
+        assertFalse(unavailableScoreResult.accepted)
+        assertEquals("score", unavailableScoreResult.outlierReason)
+        assertEquals(-1f, unavailableScoreResult.directScore, 0.0001f)
+        assertEquals(-1f, unavailableScoreResult.swappedScore, 0.0001f)
+        assertEquals(PoseIdentityTransform.Swapped, swappedStableResult.transform)
+        assertPoseClose(stablePose, swappedStableResult.pose)
+    }
+
     @Test
     fun `reset clears outlier streak and returns next valid frame to Direct accepted baseline`() {
         val stabilizer = PoseIdentityStabilizer()
@@ -256,6 +304,15 @@ class PoseIdentityStabilizerTest {
         listOf(11, 12, 13, 14, 23, 24, 25, 26).forEach { index ->
             val point = all[index]
             all[index] = point.copy(y = centerY + (point.y - centerY) * scale)
+        }
+        return PoseLandmarks.fromAllLandmarks(all)
+    }
+
+
+    private fun PoseLandmarks.withNonFiniteScoringPositions(): PoseLandmarks {
+        val all = allLandmarks.toMutableList()
+        scoringIndices.forEach { index ->
+            all[index] = all[index].copy(x = Float.NaN, y = Float.NaN)
         }
         return PoseLandmarks.fromAllLandmarks(all)
     }

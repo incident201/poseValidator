@@ -13,6 +13,10 @@ private const val OUTLIER_SCORE_THRESHOLD = 0.32f
 private const val HARD_OUTLIER_SCORE_THRESHOLD = 0.55f
 private const val MIN_CORE_SCALE_RATIO = 0.55f
 private const val MAX_CORE_SCALE_RATIO = 1.80f
+private const val MIN_CORE_WIDTH_RATIO = 0.55f
+private const val MAX_CORE_WIDTH_RATIO = 1.80f
+private const val MIN_TORSO_LENGTH_RATIO = 0.60f
+private const val MAX_TORSO_LENGTH_RATIO = 1.70f
 private const val MAX_CONSECUTIVE_OUTLIERS_TO_FREEZE = 2
 
 enum class PoseIdentityTransform {
@@ -86,8 +90,9 @@ class PoseIdentityStabilizer {
         val swappedPose = rawPose.swappedLeftRight()
         val directScore = scoreCandidate(directPose, previousPose)
         val swappedScore = scoreCandidate(swappedPose, previousPose)
-        val directScoreValue = directScore ?: 0f
-        val swappedScoreValue = swappedScore ?: 0f
+        val scoresAvailable = directScore != null && swappedScore != null
+        val directScoreValue = directScore ?: -1f
+        val swappedScoreValue = swappedScore ?: -1f
 
         val chosenTransform: PoseIdentityTransform
         val ambiguous: Boolean
@@ -109,12 +114,28 @@ class PoseIdentityStabilizer {
             PoseIdentityTransform.Direct -> directPose
             PoseIdentityTransform.Swapped -> swappedPose
         }
-        val bestScore = min(directScoreValue, swappedScoreValue)
-        val scaleRatio = coreScaleRatio(candidatePose, previousPose)
-        val outlierReason = buildOutlierReason(bestScore, scaleRatio)
+        val bestScore = if (scoresAvailable) min(directScore!!, swappedScore!!) else Float.POSITIVE_INFINITY
+        val coreRatios = CoreGeometryRatios.from(candidatePose, previousPose)
+        val geometryOutlierReason = buildGeometryOutlierReason(coreRatios)
+        val outlierReason = buildOutlierReason(scoresAvailable, bestScore, geometryOutlierReason, coreRatios)
         val candidateIsOutlier = outlierReason.isNotBlank()
+        val canUpdateAmbiguousReference = scoresAvailable && bestScore <= OUTLIER_SCORE_THRESHOLD * 0.5f
 
         previousTimestampMs = timestampMs
+
+        if (!scoresAvailable && !candidateIsOutlier) {
+            consecutiveOutlierFrames = 0
+            return PoseIdentityStabilizationResult(
+                pose = candidatePose,
+                transform = chosenTransform,
+                directScore = directScoreValue,
+                swappedScore = swappedScoreValue,
+                ambiguous = true,
+                outlier = false,
+                accepted = true,
+                outlierReason = ""
+            )
+        }
 
         if (candidateIsOutlier) {
             consecutiveOutlierFrames += 1
@@ -134,7 +155,7 @@ class PoseIdentityStabilizer {
 
         consecutiveOutlierFrames = 0
 
-        if (!ambiguous || bestScore <= OUTLIER_SCORE_THRESHOLD * 0.5f || candidateIsOutlier) {
+        if (!ambiguous || canUpdateAmbiguousReference || candidateIsOutlier) {
             previousStablePose = candidatePose
         }
         if (!ambiguous) {
@@ -184,23 +205,46 @@ class PoseIdentityStabilizer {
         return weightedDistanceSum / weightSum
     }
 
-    private fun buildOutlierReason(bestScore: Float, scaleRatio: Float?): String {
+    private fun buildOutlierReason(
+        scoresAvailable: Boolean,
+        bestScore: Float,
+        geometryOutlierReason: String,
+        coreRatios: CoreGeometryRatios?
+    ): String {
         val reasons = mutableListOf<String>()
-        val scoreOutlier = bestScore > OUTLIER_SCORE_THRESHOLD
-        val hardScoreOutlier = bestScore > HARD_OUTLIER_SCORE_THRESHOLD
-        if (scoreOutlier || hardScoreOutlier) {
+        if (scoresAvailable) {
+            if (bestScore > OUTLIER_SCORE_THRESHOLD || bestScore > HARD_OUTLIER_SCORE_THRESHOLD) {
+                reasons.add("score")
+            }
+        } else if (geometryOutlierReason.isNotBlank() || coreRatios == null || !coreRatios.hasAnyRatio) {
             reasons.add("score")
         }
+        if (geometryOutlierReason.isNotBlank()) {
+            reasons.addAll(geometryOutlierReason.split("+"))
+        }
+        return reasons.distinct().joinToString("+")
+    }
+
+    private fun buildGeometryOutlierReason(coreRatios: CoreGeometryRatios?): String {
+        if (coreRatios == null) return ""
+        val reasons = mutableListOf<String>()
+        val scaleRatio = coreRatios.scaleRatio
         if (scaleRatio != null && (scaleRatio < MIN_CORE_SCALE_RATIO || scaleRatio > MAX_CORE_SCALE_RATIO)) {
             reasons.add("scale")
         }
+        val widthOutlier = listOf(coreRatios.shoulderWidthRatio, coreRatios.hipWidthRatio).any { ratio ->
+            ratio != null && (ratio < MIN_CORE_WIDTH_RATIO || ratio > MAX_CORE_WIDTH_RATIO)
+        }
+        if (widthOutlier) {
+            reasons.add("width")
+        }
+        val torsoLengthRatio = coreRatios.torsoLengthRatio
+        if (torsoLengthRatio != null &&
+            (torsoLengthRatio < MIN_TORSO_LENGTH_RATIO || torsoLengthRatio > MAX_TORSO_LENGTH_RATIO)
+        ) {
+            reasons.add("torso")
+        }
         return reasons.joinToString("+")
-    }
-
-    private fun coreScaleRatio(candidate: PoseLandmarks, previous: PoseLandmarks): Float? {
-        val candidateGeometry = CoreGeometry.from(candidate) ?: return null
-        val previousGeometry = CoreGeometry.from(previous) ?: return null
-        return candidateGeometry.scale / previousGeometry.scale.coerceAtLeast(MIN_SCALE)
     }
 
     private fun PoseLandmarks.swappedLeftRight(): PoseLandmarks {
@@ -219,6 +263,37 @@ class PoseIdentityStabilizer {
     private data class ScoringLandmark(val index: Int, val weight: Float)
 
     private data class NormalizedPoint(val x: Float, val y: Float)
+
+
+    private data class CoreGeometryRatios(
+        val scaleRatio: Float?,
+        val shoulderWidthRatio: Float?,
+        val hipWidthRatio: Float?,
+        val torsoLengthRatio: Float?
+    ) {
+        val hasAnyRatio: Boolean = scaleRatio != null ||
+            shoulderWidthRatio != null ||
+            hipWidthRatio != null ||
+            torsoLengthRatio != null
+
+        companion object {
+            fun from(candidate: PoseLandmarks, previous: PoseLandmarks): CoreGeometryRatios? {
+                val candidateGeometry = CoreGeometry.from(candidate) ?: return null
+                val previousGeometry = CoreGeometry.from(previous) ?: return null
+                return CoreGeometryRatios(
+                    scaleRatio = reliableRatio(candidateGeometry.scale, previousGeometry.scale),
+                    shoulderWidthRatio = reliableRatio(candidateGeometry.shoulderWidth, previousGeometry.shoulderWidth),
+                    hipWidthRatio = reliableRatio(candidateGeometry.hipWidth, previousGeometry.hipWidth),
+                    torsoLengthRatio = reliableRatio(candidateGeometry.torsoLength, previousGeometry.torsoLength)
+                )
+            }
+
+            private fun reliableRatio(candidateValue: Float, previousValue: Float): Float? {
+                if (candidateValue < MIN_SCALE || previousValue < MIN_SCALE) return null
+                return candidateValue / previousValue.coerceAtLeast(MIN_SCALE)
+            }
+        }
+    }
 
     private data class CoreGeometry(
         val shoulderWidth: Float,
