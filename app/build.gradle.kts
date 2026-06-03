@@ -37,7 +37,7 @@ android {
 
   buildTypes {
     release {
-      isMinifyEnabled = true
+      isMinifyEnabled = false
       isShrinkResources = false
       isCrunchPngs = true
       proguardFiles(
