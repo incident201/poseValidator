@@ -53,15 +53,8 @@ internal fun SettingsScreen(
     onShowInstructions: () -> Unit
  ) {
     val colorScheme = MaterialTheme.colorScheme
-    val normalSensitivity = SensitivityPresets.first { it.nameRes == R.string.sensitivity_normal }
-    val selectedSensitivity = sensitivityPresetFor(settings)
-
-    LaunchedEffect(selectedSensitivity, settings.driftThresholdFactor, settings.motionThresholdFactor) {
-        if (!selectedSensitivity.matches(settings)) {
-            onDriftChanged(normalSensitivity.driftThresholdFactor)
-            onMotionChanged(normalSensitivity.motionThresholdFactor)
-        }
-    }
+    val selectedDriftTolerance = driftTolerancePresetFor(settings.driftThresholdFactor)
+    val selectedMotionSensitivity = motionSensitivityPresetFor(settings.motionThresholdFactor)
 
     Column(
         modifier = Modifier
@@ -181,15 +174,20 @@ internal fun SettingsScreen(
         Spacer(Modifier.height(12.dp))
         Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
             Column(Modifier.padding(16.dp)) {
-                Text(localizedString(settings.language, R.string.sensitivity), color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+                Text(localizedString(settings.language, R.string.pose_deviation_tolerance), color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
-                SensitivityDropdown(
+                DriftToleranceDropdown(
                     language = settings.language,
-                    selectedPreset = selectedSensitivity,
-                    onPresetSelected = { preset ->
-                        onDriftChanged(preset.driftThresholdFactor)
-                        onMotionChanged(preset.motionThresholdFactor)
-                    }
+                    selectedPreset = selectedDriftTolerance,
+                    onPresetSelected = { preset -> onDriftChanged(preset.thresholdFactor) }
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(localizedString(settings.language, R.string.motion_sensitivity), color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                MotionSensitivityDropdown(
+                    language = settings.language,
+                    selectedPreset = selectedMotionSensitivity,
+                    onPresetSelected = { preset -> onMotionChanged(preset.thresholdFactor) }
                 )
             }
         }
@@ -405,28 +403,43 @@ private fun FloatSettingField(
 }
 
 
-internal data class SensitivityPreset(
+internal data class DriftTolerancePreset(
     val nameRes: Int,
-    val driftThresholdFactor: Float,
-    val motionThresholdFactor: Float
-) {
-    fun matches(settings: GameSettings): Boolean =
-        driftThresholdFactor.nearlyEquals(settings.driftThresholdFactor) &&
-            motionThresholdFactor.nearlyEquals(settings.motionThresholdFactor)
-}
-
-internal val SensitivityPresets = listOf(
-    SensitivityPreset(R.string.sensitivity_normal, 0.12f, 0.06f),
-    SensitivityPreset(R.string.sensitivity_high, 0.10f, 0.04f),
-    SensitivityPreset(R.string.sensitivity_low, 0.15f, 0.08f),
-    SensitivityPreset(R.string.sensitivity_very_low, 0.17f, 0.09f)
+    val thresholdFactor: Float
 )
 
-internal fun sensitivityPresetFor(settings: GameSettings): SensitivityPreset {
-    val normal = SensitivityPresets.first { it.nameRes == R.string.sensitivity_normal }
-    return SensitivityPresets.firstOrNull { preset ->
-        preset.driftThresholdFactor.nearlyEquals(settings.driftThresholdFactor) &&
-            preset.motionThresholdFactor.nearlyEquals(settings.motionThresholdFactor)
+internal data class MotionSensitivityPreset(
+    val nameRes: Int,
+    val thresholdFactor: Float
+)
+
+internal val DriftTolerancePresets = listOf(
+    DriftTolerancePreset(R.string.pose_tolerance_very_easy, 0.200f),
+    DriftTolerancePreset(R.string.pose_tolerance_easy, 0.180f),
+    DriftTolerancePreset(R.string.pose_tolerance_normal, 0.160f),
+    DriftTolerancePreset(R.string.pose_tolerance_strict, 0.140f),
+    DriftTolerancePreset(R.string.pose_tolerance_very_strict, 0.120f)
+)
+
+internal val MotionSensitivityPresets = listOf(
+    MotionSensitivityPreset(R.string.motion_sensitivity_very_low, 0.08f),
+    MotionSensitivityPreset(R.string.motion_sensitivity_low, 0.06f),
+    MotionSensitivityPreset(R.string.motion_sensitivity_normal, 0.04f),
+    MotionSensitivityPreset(R.string.motion_sensitivity_high, 0.03f),
+    MotionSensitivityPreset(R.string.motion_sensitivity_very_high, 0.02f)
+)
+
+internal fun driftTolerancePresetFor(thresholdFactor: Float): DriftTolerancePreset {
+    val normal = DriftTolerancePresets.first { it.nameRes == R.string.pose_tolerance_normal }
+    return DriftTolerancePresets.firstOrNull { preset ->
+        preset.thresholdFactor.nearlyEquals(thresholdFactor)
+    } ?: normal
+}
+
+internal fun motionSensitivityPresetFor(thresholdFactor: Float): MotionSensitivityPreset {
+    val normal = MotionSensitivityPresets.first { it.nameRes == R.string.motion_sensitivity_normal }
+    return MotionSensitivityPresets.firstOrNull { preset ->
+        preset.thresholdFactor.nearlyEquals(thresholdFactor)
     } ?: normal
 }
 
@@ -489,10 +502,44 @@ internal fun LanguageSelectorCard(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SensitivityDropdown(
+private fun DriftToleranceDropdown(
     language: AppLanguage,
-    selectedPreset: SensitivityPreset,
-    onPresetSelected: (SensitivityPreset) -> Unit
+    selectedPreset: DriftTolerancePreset,
+    onPresetSelected: (DriftTolerancePreset) -> Unit
+) {
+    PresetDropdown(
+        language = language,
+        selectedNameRes = selectedPreset.nameRes,
+        presets = DriftTolerancePresets,
+        presetNameRes = DriftTolerancePreset::nameRes,
+        onPresetSelected = onPresetSelected
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MotionSensitivityDropdown(
+    language: AppLanguage,
+    selectedPreset: MotionSensitivityPreset,
+    onPresetSelected: (MotionSensitivityPreset) -> Unit
+) {
+    PresetDropdown(
+        language = language,
+        selectedNameRes = selectedPreset.nameRes,
+        presets = MotionSensitivityPresets,
+        presetNameRes = MotionSensitivityPreset::nameRes,
+        onPresetSelected = onPresetSelected
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun <T> PresetDropdown(
+    language: AppLanguage,
+    selectedNameRes: Int,
+    presets: List<T>,
+    presetNameRes: (T) -> Int,
+    onPresetSelected: (T) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -501,7 +548,7 @@ private fun SensitivityDropdown(
         onExpandedChange = { expanded = !expanded }
     ) {
         OutlinedTextField(
-            value = localizedString(language, selectedPreset.nameRes),
+            value = localizedString(language, selectedNameRes),
             onValueChange = {},
             readOnly = true,
             singleLine = true,
@@ -515,9 +562,9 @@ private fun SensitivityDropdown(
             expanded = expanded,
             onDismissRequest = { expanded = false }
         ) {
-            SensitivityPresets.forEach { preset ->
+            presets.forEach { preset ->
                 DropdownMenuItem(
-                    text = { Text(localizedString(language, preset.nameRes)) },
+                    text = { Text(localizedString(language, presetNameRes(preset))) },
                     onClick = {
                         expanded = false
                         onPresetSelected(preset)

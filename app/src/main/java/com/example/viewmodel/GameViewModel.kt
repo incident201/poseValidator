@@ -59,6 +59,8 @@ private const val PREF_ONBOARDING_COMPLETED = "onboarding_completed"
 private const val PREF_POSE_SMOOTHER_MIN_CUTOFF = "pose_smoother_min_cutoff"
 private const val PREF_POSE_SMOOTHER_BETA = "pose_smoother_beta"
 private const val PREF_POSE_SMOOTHER_DERIVATIVE_CUTOFF = "pose_smoother_derivative_cutoff"
+private const val PREF_SENSITIVITY_PRESETS_VERSION = "sensitivity_presets_version"
+private const val CURRENT_SENSITIVITY_PRESETS_VERSION = 2
 private const val MAX_POSE_DROPOUT_HOLD_FRAMES = 5
 private const val MAX_POSE_DROPOUT_HOLD_MS = 180L
 
@@ -83,8 +85,8 @@ data class GameSettings(
     val language: AppLanguage = AppLanguage.English,
     val faceCheckMode: FaceCheckMode = FaceCheckMode.Disabled,
     val faceDetectionConfidence: Float = 0.8f,
-    val driftThresholdFactor: Float = 0.12f,
-    val motionThresholdFactor: Float = 0.06f,
+    val driftThresholdFactor: Float = 0.160f,
+    val motionThresholdFactor: Float = 0.04f,
     val minimumPenaltyIntervalSeconds: Int = 5,
     val maxViolations: Int = 4,
     val penaltiesEnabled: Boolean = true,
@@ -277,10 +279,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         val mode = runCatching { FaceCheckMode.valueOf(prefs.getString("face_mode", FaceCheckMode.Disabled.name) ?: FaceCheckMode.Disabled.name) }
             .getOrDefault(FaceCheckMode.Disabled)
         val language = runCatching { AppLanguage.valueOf(prefs.getString("app_language", AppLanguage.English.name) ?: AppLanguage.English.name) }.getOrDefault(AppLanguage.English)
-        val (driftThresholdFactor, motionThresholdFactor) = normalizeSensitivityThresholds(
-            drift = prefs.getFloat("pose_drift_factor_v2", 0.12f).coerceIn(0.05f, 0.40f),
-            motion = prefs.getFloat("pose_motion_factor_v2", 0.06f).coerceIn(0.03f, 0.25f)
-        )
+        val (driftThresholdFactor, motionThresholdFactor) = loadSensitivityThresholds()
         val occlusionFreezeVisibilityAlways =
             prefs.getFloat(
                 PREF_OCCLUSION_FREEZE_VIS_ALWAYS,
@@ -341,17 +340,40 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         )
     }
 
+    private fun loadSensitivityThresholds(): Pair<Float, Float> {
+        val rawDrift = prefs.getFloat("pose_drift_factor_v2", 0.160f).coerceIn(0.05f, 0.40f)
+        val rawMotion = prefs.getFloat("pose_motion_factor_v2", 0.04f).coerceIn(0.02f, 0.25f)
+        val presetsVersion = prefs.getInt(PREF_SENSITIVITY_PRESETS_VERSION, 1)
 
-    private fun normalizeSensitivityThresholds(drift: Float, motion: Float): Pair<Float, Float> {
-        val presets = listOf(
-            0.12f to 0.06f,
-            0.10f to 0.04f,
-            0.15f to 0.08f,
-            0.17f to 0.09f
-        )
-        return presets.firstOrNull { (presetDrift, presetMotion) ->
-            abs(presetDrift - drift) < 0.001f && abs(presetMotion - motion) < 0.001f
-        } ?: (0.12f to 0.06f)
+        if (presetsVersion < CURRENT_SENSITIVITY_PRESETS_VERSION) {
+            val (migratedDrift, migratedMotion) = migrateLegacySensitivityThresholds(rawDrift, rawMotion)
+            prefs.edit()
+                .putFloat("pose_drift_factor_v2", migratedDrift)
+                .putFloat("pose_motion_factor_v2", migratedMotion)
+                .putInt(PREF_SENSITIVITY_PRESETS_VERSION, CURRENT_SENSITIVITY_PRESETS_VERSION)
+                .apply()
+            return migratedDrift to migratedMotion
+        }
+
+        return normalizeDriftThreshold(rawDrift) to normalizeMotionThreshold(rawMotion)
+    }
+
+    private fun migrateLegacySensitivityThresholds(drift: Float, motion: Float): Pair<Float, Float> {
+        return when {
+            abs(drift - 0.12f) < 0.001f && abs(motion - 0.06f) < 0.001f -> 0.160f to 0.04f
+            else -> normalizeDriftThreshold(drift) to normalizeMotionThreshold(motion)
+        }
+    }
+
+
+    private fun normalizeDriftThreshold(drift: Float): Float {
+        val presets = listOf(0.200f, 0.180f, 0.160f, 0.140f, 0.120f)
+        return presets.firstOrNull { preset -> abs(preset - drift) < 0.001f } ?: 0.160f
+    }
+
+    private fun normalizeMotionThreshold(motion: Float): Float {
+        val presets = listOf(0.08f, 0.06f, 0.04f, 0.03f, 0.02f)
+        return presets.firstOrNull { preset -> abs(preset - motion) < 0.001f } ?: 0.04f
     }
 
     private fun applySettingsToEngines(settings: GameSettings) {
@@ -385,14 +407,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     fun updateDriftThresholdFactor(value: Float) {
         val normalized = value.coerceIn(0.05f, 0.40f)
         _gameSettings.value = _gameSettings.value.copy(driftThresholdFactor = normalized)
-        prefs.edit().putFloat("pose_drift_factor_v2", normalized).apply()
+        prefs.edit()
+            .putFloat("pose_drift_factor_v2", normalized)
+            .putInt(PREF_SENSITIVITY_PRESETS_VERSION, CURRENT_SENSITIVITY_PRESETS_VERSION)
+            .apply()
         synchronized(processingLock) { movementTracker.driftThresholdFactor = normalized }
     }
 
     fun updateMotionThresholdFactor(value: Float) {
-        val normalized = value.coerceIn(0.03f, 0.25f)
+        val normalized = value.coerceIn(0.02f, 0.25f)
         _gameSettings.value = _gameSettings.value.copy(motionThresholdFactor = normalized)
-        prefs.edit().putFloat("pose_motion_factor_v2", normalized).apply()
+        prefs.edit()
+            .putFloat("pose_motion_factor_v2", normalized)
+            .putInt(PREF_SENSITIVITY_PRESETS_VERSION, CURRENT_SENSITIVITY_PRESETS_VERSION)
+            .apply()
         synchronized(processingLock) { movementTracker.motionThresholdFactor = normalized }
     }
 
