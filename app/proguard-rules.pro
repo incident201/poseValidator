@@ -1,21 +1,22 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# MediaPipe Tasks / TFLite / generated metadata
+-keep class com.google.mediapipe.** { *; }
+-keep class com.google.protobuf.** { *; }
+-keep class com.google.flatbuffers.** { *; }
+-keep class org.tensorflow.** { *; }
+-keep class org.tensorflow.lite.** { *; }
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# JNI/native methods often rely on stable member names
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Keep annotations/signatures that reflective/native code may inspect
+-keepattributes Signature
+-keepattributes *Annotation*
+-keepattributes InnerClasses,EnclosingMethod
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+-dontwarn com.google.mediapipe.**
+-dontwarn com.google.protobuf.**
+-dontwarn com.google.flatbuffers.**
+-dontwarn org.tensorflow.**
+-dontwarn org.tensorflow.lite.**
