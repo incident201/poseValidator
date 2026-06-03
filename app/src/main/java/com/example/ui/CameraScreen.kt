@@ -173,8 +173,36 @@ fun CameraScreen(
     val violationCount by viewModel.violationCount.collectAsState()
     val ruleViolationCounts by viewModel.ruleViolationCounts.collectAsState()
     val sessionSummary by viewModel.sessionSummary.collectAsState()
-    VoiceAnnouncer(viewModel = viewModel, language = gameSettings.language)
+    val onboardingCompleted by viewModel.onboardingCompleted.collectAsState()
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showOnboarding by rememberSaveable { mutableStateOf(!onboardingCompleted) }
+    var onboardingIncludesLanguage by rememberSaveable { mutableStateOf(!onboardingCompleted) }
+
+    LaunchedEffect(onboardingCompleted) {
+        if (!onboardingCompleted) {
+            showOnboarding = true
+            onboardingIncludesLanguage = true
+        }
+    }
+
+    if (showOnboarding) {
+        OnboardingScreen(
+            language = gameSettings.language,
+            includeLanguageSlide = onboardingIncludesLanguage,
+            onLanguageChanged = viewModel::updateLanguage,
+            onFinished = {
+                if (onboardingIncludesLanguage) {
+                    viewModel.markOnboardingCompleted()
+                }
+                showOnboarding = false
+                onboardingIncludesLanguage = false
+            },
+            modifier = modifier
+        )
+        return
+    }
+
+    VoiceAnnouncer(viewModel = viewModel, language = gameSettings.language)
     val currentGameState = rememberUpdatedState(gameState)
     val currentTimelapseRecordingEnabled = rememberUpdatedState(gameSettings.timelapseRecordingEnabled)
     val debugModeEnabled = gameSettings.debugModeEnabled
@@ -590,7 +618,12 @@ fun CameraScreen(
             onOcclusionFreezeVisibilityP10AlwaysChanged = viewModel::updateOcclusionFreezeVisibilityP10Always,
             onOcclusionFreezeVisibilityHardChanged = viewModel::updateOcclusionFreezeVisibilityHard,
             onOcclusionFreezeVisibilitySoftChanged = viewModel::updateOcclusionFreezeVisibilitySoft,
-            onOcclusionJitterFreezeThresholdChanged = viewModel::updateOcclusionJitterFreezeThreshold
+            onOcclusionJitterFreezeThresholdChanged = viewModel::updateOcclusionJitterFreezeThreshold,
+            onShowInstructions = {
+                showSettings = false
+                showOnboarding = true
+                onboardingIncludesLanguage = false
+            }
         )
         return
     }

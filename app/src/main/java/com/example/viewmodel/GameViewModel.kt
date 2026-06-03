@@ -48,6 +48,7 @@ private const val PREF_OCCLUSION_FREEZE_VIS_HARD = "occlusion_freeze_visibility_
 private const val PREF_OCCLUSION_FREEZE_VIS_SOFT = "occlusion_freeze_visibility_soft"
 private const val PREF_OCCLUSION_JITTER_FREEZE_THRESHOLD = "occlusion_jitter_freeze_threshold"
 private const val PREF_DEBUG_MODE_ENABLED = "debug_mode_enabled"
+private const val PREF_ONBOARDING_COMPLETED = "onboarding_completed"
 
 enum class GameState {
     Idle,
@@ -190,6 +191,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     val voiceEvents: SharedFlow<String> = _voiceEvents.asSharedFlow()
     private val _gameSettings = MutableStateFlow(loadSettings())
     val gameSettings: StateFlow<GameSettings> = _gameSettings.asStateFlow()
+    private val _onboardingCompleted = MutableStateFlow(
+        prefs.getBoolean(PREF_ONBOARDING_COMPLETED, false)
+    )
+    val onboardingCompleted: StateFlow<Boolean> = _onboardingCompleted.asStateFlow()
     private val _sessionSummary = MutableStateFlow<SessionSummary?>(null)
     val sessionSummary: StateFlow<SessionSummary?> = _sessionSummary.asStateFlow()
 
@@ -400,6 +405,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         if (_gameState.value == GameState.Idle) {
             _statusMessage.value = tr(R.string.status_initial)
         }
+    }
+
+    fun markOnboardingCompleted() {
+        _onboardingCompleted.value = true
+        prefs.edit().putBoolean(PREF_ONBOARDING_COMPLETED, true).apply()
     }
 
     fun updatePenaltiesEnabled(enabled: Boolean) {
