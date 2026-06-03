@@ -451,6 +451,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         prefs.edit().putBoolean(PREF_DEBUG_MODE_ENABLED, enabled).apply()
     }
 
+    fun resetPoseInputContinuity() {
+        if (_gameState.value !in setOf(GameState.Idle, GameState.Failed, GameState.Success)) return
+        synchronized(processingLock) {
+            processingGeneration += 1
+            poseIdentityStabilizer.reset()
+            poseSmoother.reset()
+            poseOcclusionGuard.reset()
+        }
+    }
+
     fun updateFirstViolationPenaltyMinutes(value: Int) = updatePenaltyMinutes("penalty_1_min", value) { copy(firstViolationPenaltyMinutes = it) }
     fun updateSecondViolationPenaltyMinutes(value: Int) = updatePenaltyMinutes("penalty_2_min", value) { copy(secondViolationPenaltyMinutes = it) }
     fun updateThirdViolationPenaltyMinutes(value: Int) = updatePenaltyMinutes("penalty_3_min", value) { copy(thirdViolationPenaltyMinutes = it) }

@@ -321,6 +321,7 @@ fun CameraScreen(
             if (resizedBitmap !== decodedBitmap) {
                 decodedBitmap.recycleIfNeeded()
             }
+            viewModel.resetPoseInputContinuity()
             val oldDemoBitmap = demoBitmap
             demoBitmap = resizedBitmap
             if (oldDemoBitmap != null && oldDemoBitmap !== resizedBitmap) {
@@ -372,7 +373,8 @@ fun CameraScreen(
     }
 
     LaunchedEffect(debugModeEnabled) {
-        if (!debugModeEnabled) {
+        if (!debugModeEnabled && isDemoMode) {
+            viewModel.resetPoseInputContinuity()
             isDemoMode = false
         }
     }
@@ -731,6 +733,7 @@ fun CameraScreen(
                 SwitchCameraButton(
                     onClick = {
                         if (canSwitchCamera) {
+                            viewModel.resetPoseInputContinuity()
                             selectedLensFacing = oppositeLensFacing(selectedLensFacing)
                         }
                     },
@@ -810,6 +813,7 @@ fun CameraScreen(
             debugModeEnabled = debugModeEnabled,
             onDemoClick = {
                 if (isDemoMode) {
+                    viewModel.resetPoseInputContinuity()
                     isDemoMode = false
                 } else {
                     demoImagePickerLauncher.launch("image/*")
@@ -1347,7 +1351,7 @@ private fun PoseDebugOverlay(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(8.dp)
+                    .padding(start = 8.dp, top = 58.dp)
                     .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
                     .padding(horizontal = 6.dp, vertical = 4.dp)
             )
