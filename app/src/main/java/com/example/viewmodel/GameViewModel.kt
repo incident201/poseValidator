@@ -218,6 +218,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         val face: FaceOverlayState
     )
 
+    private data class PendingPoseFrame(
+        val bitmap: Bitmap,
+        val processingGeneration: Long
+    )
+
     private val faceDetectorService = FaceDetectorService(application.applicationContext, _gameSettings.value.faceDetectionConfidence)
     private val movementTracker = MovementTracker()
     private val poseIdentityStabilizer = PoseIdentityStabilizer()
@@ -229,7 +234,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private var processingGeneration = 0L
     private val mediaPipeResultExecutor = Executors.newSingleThreadExecutor()
     @Volatile private var isCleared = false
-    private val pendingFrames = LinkedHashMap<Long, Bitmap>()
+    private val pendingFrames = LinkedHashMap<Long, PendingPoseFrame>()
     private var latestAnalyzedFrame: AnalyzedPoseFrame? = null
     private var startDelayJob: Job? = null
     private var timerJob: Job? = null
@@ -479,18 +484,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     fun registerCameraFrame(bitmap: Bitmap, timestampMs: Long) {
+        val generation = synchronized(processingLock) { processingGeneration }
+        val pendingFrame = PendingPoseFrame(bitmap, generation)
         val removedBitmaps = mutableListOf<Bitmap>()
         synchronized(frameLock) {
-            val previous = pendingFrames.put(timestampMs, bitmap)
-            if (previous != null && previous !== bitmap) {
-                removedBitmaps.add(previous)
+            val previous = pendingFrames.put(timestampMs, pendingFrame)
+            if (previous != null && previous.bitmap !== bitmap) {
+                removedBitmaps.add(previous.bitmap)
             }
 
             while (pendingFrames.size > 20) {
                 val oldestTimestamp = pendingFrames.keys.first()
                 val removed = pendingFrames.remove(oldestTimestamp)
-                if (removed != null && removed !== bitmap) {
-                    removedBitmaps.add(removed)
+                if (removed != null && removed.bitmap !== bitmap) {
+                    removedBitmaps.add(removed.bitmap)
                 }
             }
 
@@ -501,8 +508,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 if (entry.key < minTs) {
                     val removed = entry.value
                     iterator.remove()
-                    if (removed !== bitmap) {
-                        removedBitmaps.add(removed)
+                    if (removed.bitmap !== bitmap) {
+                        removedBitmaps.add(removed.bitmap)
                     }
                 }
             }
@@ -511,13 +518,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     fun dropCameraFrame(timestampMs: Long, recycle: Boolean) {
-        val bitmap = synchronized(frameLock) { pendingFrames.remove(timestampMs) }
-        if (recycle) bitmap?.recycleIfNeeded()
+        val frame = synchronized(frameLock) { pendingFrames.remove(timestampMs) }
+        if (recycle) frame?.bitmap?.recycleIfNeeded()
     }
 
     fun clearCameraFrameCache(recycle: Boolean) {
         val bitmaps = synchronized(frameLock) {
-            val values = pendingFrames.values.toList()
+            val values = pendingFrames.values.map { it.bitmap }
             pendingFrames.clear()
             values
         }
@@ -562,21 +569,34 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private fun processMediaPipeResultsInternal(rawPose: PoseLandmarks, timestamp: Long, imageWidth: Int, imageHeight: Int) {
         if (isCleared) return
-        val (frameGeneration, pose, identityDebugText) = synchronized(processingLock) {
-            val identityResult = poseIdentityStabilizer.stabilize(rawPose, timestamp)
-            val smoothedPose = poseSmoother.smooth(identityResult.pose, timestamp)
-            val identityDebugText = buildIdentityDebugText(identityResult)
-            val shouldCollectOcclusionCalibration =
-                _gameState.value == GameState.StartingDelay &&
-                    _startDelayRemainingSeconds.value in 1..poseOcclusionCalibrationSeconds
-            if (shouldCollectOcclusionCalibration) {
-                poseOcclusionGuard.addCalibrationFrame(smoothedPose, timestamp)
+        val matchedFrame = synchronized(frameLock) { pendingFrames.remove(timestamp) }
+        val matchedBitmap = matchedFrame?.bitmap
+        val stabilizedFrame = synchronized(processingLock) {
+            if (matchedFrame != null && matchedFrame.processingGeneration != processingGeneration) {
+                null
+            } else {
+                val identityResult = poseIdentityStabilizer.stabilize(rawPose, timestamp)
+                val smoothedPose = poseSmoother.smooth(identityResult.pose, timestamp)
+                val identityDebugText = buildIdentityDebugText(identityResult)
+                val shouldCollectOcclusionCalibration =
+                    _gameState.value == GameState.StartingDelay &&
+                        _startDelayRemainingSeconds.value in 1..poseOcclusionCalibrationSeconds
+                if (shouldCollectOcclusionCalibration) {
+                    poseOcclusionGuard.addCalibrationFrame(smoothedPose, timestamp)
+                }
+                Triple(processingGeneration, smoothedPose, identityDebugText)
             }
-            Triple(processingGeneration, smoothedPose, identityDebugText)
         }
-        if (isCleared) return
+        if (stabilizedFrame == null) {
+            matchedBitmap?.recycleIfNeeded()
+            return
+        }
+        val (frameGeneration, pose, identityDebugText) = stabilizedFrame
+        if (isCleared) {
+            matchedBitmap?.recycleIfNeeded()
+            return
+        }
         Log.v(tag, "MediaPipe frame ts=$timestamp size=${imageWidth}x$imageHeight landmarks=${pose.allLandmarks.size}")
-        val matchedBitmap = synchronized(frameLock) { pendingFrames.remove(timestamp) }
         val nextOverlayState = try {
             if (matchedBitmap == null) {
                 buildOverlayStateWithoutFace(pose, imageWidth, imageHeight, identityDebugText)
