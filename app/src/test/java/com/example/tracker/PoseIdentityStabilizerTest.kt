@@ -202,6 +202,45 @@ class PoseIdentityStabilizerTest {
     }
 
 
+
+    @Test
+    fun `outlier decision uses chosen candidate score instead of best score`() {
+        val stabilizer = PoseIdentityStabilizer()
+        val stablePose = basePose()
+
+        stabilizer.stabilize(stablePose, timestampMs = 0L)
+        val result = stabilizer.stabilize(ambiguousDirectOutlierPose(), timestampMs = 100L)
+
+        assertTrue(result.ambiguous)
+        assertEquals(PoseIdentityTransform.Direct, result.transform)
+        assertTrue(result.directScore > 0.32f)
+        assertTrue(result.swappedScore < 0.32f)
+        assertTrue(result.directScore - result.swappedScore < 0.05f)
+        assertTrue(result.outlier)
+        assertFalse(result.accepted)
+        assertTrue(result.outlierReason.contains("score"))
+        assertPoseClose(stablePose, result.pose)
+    }
+
+    @Test
+    fun `non finite scoring coordinates are never accepted after freeze limit`() {
+        val stabilizer = PoseIdentityStabilizer()
+        val stablePose = basePose()
+        val nonFinitePose = basePose(xOffset = 0.20f).withNonFiniteScoringPositions()
+
+        stabilizer.stabilize(stablePose, timestampMs = 0L)
+        val first = stabilizer.stabilize(nonFinitePose, timestampMs = 100L)
+        val second = stabilizer.stabilize(nonFinitePose, timestampMs = 200L)
+        val third = stabilizer.stabilize(nonFinitePose, timestampMs = 300L)
+
+        listOf(first, second, third).forEach { result ->
+            assertTrue(result.outlier)
+            assertFalse(result.accepted)
+            assertEquals("score", result.outlierReason)
+            assertPoseClose(stablePose, result.pose)
+        }
+    }
+
     @Test
     fun `horizontal core collapse is suppressed even when torso length stays stable`() {
         val stabilizer = PoseIdentityStabilizer()
@@ -308,6 +347,20 @@ class PoseIdentityStabilizerTest {
         return PoseLandmarks.fromAllLandmarks(all)
     }
 
+
+
+    private fun ambiguousDirectOutlierPose(): PoseLandmarks {
+        val all = basePose().allLandmarks.toMutableList()
+        all[11] = point(0.44054491f, 0.2679832f)
+        all[12] = point(0.58080155f, 0.1987193f)
+        all[13] = point(0.5207421f, 0.3865327f)
+        all[14] = point(0.48232344f, 0.4171832f)
+        all[23] = point(0.5338078f, 0.62821555f)
+        all[24] = point(0.4266843f, 0.6595241f)
+        all[25] = point(0.5254917f, 0.8709806f)
+        all[26] = point(0.4372651f, 0.8778149f)
+        return PoseLandmarks.fromAllLandmarks(all)
+    }
 
     private fun PoseLandmarks.withNonFiniteScoringPositions(): PoseLandmarks {
         val all = allLandmarks.toMutableList()

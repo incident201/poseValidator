@@ -114,14 +114,31 @@ class PoseIdentityStabilizer {
             PoseIdentityTransform.Direct -> directPose
             PoseIdentityTransform.Swapped -> swappedPose
         }
-        val bestScore = if (scoresAvailable) min(directScore!!, swappedScore!!) else Float.POSITIVE_INFINITY
+        val chosenScore = when {
+            !scoresAvailable -> Float.POSITIVE_INFINITY
+            chosenTransform == PoseIdentityTransform.Direct -> directScore!!
+            else -> swappedScore!!
+        }
         val coreRatios = CoreGeometryRatios.from(candidatePose, previousPose)
         val geometryOutlierReason = buildGeometryOutlierReason(coreRatios)
-        val outlierReason = buildOutlierReason(scoresAvailable, bestScore, geometryOutlierReason, coreRatios)
+        val outlierReason = buildOutlierReason(scoresAvailable, chosenScore, geometryOutlierReason, coreRatios)
         val candidateIsOutlier = outlierReason.isNotBlank()
-        val canUpdateAmbiguousReference = scoresAvailable && bestScore <= OUTLIER_SCORE_THRESHOLD * 0.5f
+        val canUpdateAmbiguousReference = scoresAvailable && chosenScore <= OUTLIER_SCORE_THRESHOLD * 0.5f
 
         previousTimestampMs = timestampMs
+
+        if (!candidatePose.hasFiniteIdentityCore()) {
+            return PoseIdentityStabilizationResult(
+                pose = previousPose,
+                transform = previousTransform,
+                directScore = directScoreValue,
+                swappedScore = swappedScoreValue,
+                ambiguous = true,
+                outlier = true,
+                accepted = false,
+                outlierReason = "score"
+            )
+        }
 
         if (!scoresAvailable && !candidateIsOutlier) {
             consecutiveOutlierFrames = 0
@@ -245,6 +262,13 @@ class PoseIdentityStabilizer {
             reasons.add("torso")
         }
         return reasons.joinToString("+")
+    }
+
+
+    private fun PoseLandmarks.hasFiniteIdentityCore(): Boolean {
+        return SCORING_LANDMARKS.all { scoringLandmark ->
+            allLandmarks.getOrNull(scoringLandmark.index)?.hasFinitePosition2D() == true
+        }
     }
 
     private fun PoseLandmarks.swappedLeftRight(): PoseLandmarks {
