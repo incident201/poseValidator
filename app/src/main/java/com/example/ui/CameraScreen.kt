@@ -896,7 +896,8 @@ private fun FinalSessionScreen(
         language,
         if (isSuccess) R.string.final_completed else R.string.final_failed
     )
-    val sensitivity = sensitivityPresetFor(summary.settings)
+    val driftTolerance = driftTolerancePresetFor(summary.settings.driftThresholdFactor)
+    val motionSensitivity = motionSensitivityPresetFor(summary.settings.motionThresholdFactor)
     val faceDirectionLabel = faceDirectionLabelFor(summary.settings.faceCheckMode)
 
     Surface(
@@ -975,8 +976,13 @@ private fun FinalSessionScreen(
                     FinalSectionTitle(localizedString(language, R.string.final_session_settings))
                     Spacer(Modifier.height(8.dp))
                     FinalSettingRow(
-                        label = localizedString(language, R.string.final_sensitivity),
-                        value = localizedString(language, sensitivity.nameRes)
+                        label = localizedString(language, R.string.pose_deviation_tolerance),
+                        value = localizedString(language, driftTolerance.nameRes)
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    FinalSettingRow(
+                        label = localizedString(language, R.string.motion_sensitivity),
+                        value = localizedString(language, motionSensitivity.nameRes)
                     )
                     Spacer(Modifier.height(6.dp))
                     FinalSettingRow(

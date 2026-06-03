@@ -124,8 +124,8 @@ class MovementTracker {
     }
 
     // Thresholds are normalized relative to the fixed reference pose scale.
-    var driftThresholdFactor: Float = 0.12f
-    var motionThresholdFactor: Float = 0.06f
+    var driftThresholdFactor: Float = 0.160f
+    var motionThresholdFactor: Float = 0.04f
 
     var referencePose: PoseLandmarks? = null
     var previousPose: PoseLandmarks? = null
