@@ -101,4 +101,14 @@
     <string name="final_timelapse_saving">Saving timelapse video...</string>
     <string name="final_timelapse_unavailable">Timelapse video is unavailable</string>
     <string name="final_timelapse_saved">Timelapse video saved</string>
+    <string name="tip_1">Choose a well-lit area where the subject is clearly visible and fits fully within the frame.</string>
+    <string name="tip_2">Secure the device so it remains still in portrait orientation.</string>
+    <string name="tip_3">Make sure there are no extra objects in the frame blocking the view.</string>
+    <string name="tip_4">Prefer minimal or close-fitting clothing.</string>
+    <string name="tip_5">Avoid loose, shapeless clothing, as it makes pose tracking more difficult.</string>
+    <string name="tip_6">The app can optionally track face orientation: facing the camera or facing away from it.</string>
+    <string name="tip_7">When the “Facing away from camera” option is selected, looking into the camera is counted as an error.</string>
+    <string name="tip_8">Conversely, when the “Facing camera” option is selected, hiding the face is counted as an error.</string>
+    <string name="tip_9">You may use any poses you like, but avoid complex positions where the limbs are heavily obscured by the body.</string>
+    <string name="tip_10">Ideally, key points such as the shoulders, elbows, and knees should be clearly visible.</string>
 </resources>
