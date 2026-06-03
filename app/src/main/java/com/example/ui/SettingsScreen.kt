@@ -46,7 +46,8 @@ internal fun SettingsScreen(
     onOcclusionFreezeVisibilityP10AlwaysChanged: (Float) -> Unit,
     onOcclusionFreezeVisibilityHardChanged: (Float) -> Unit,
     onOcclusionFreezeVisibilitySoftChanged: (Float) -> Unit,
-    onOcclusionJitterFreezeThresholdChanged: (Float) -> Unit
+    onOcclusionJitterFreezeThresholdChanged: (Float) -> Unit,
+    onShowInstructions: () -> Unit
  ) {
     val colorScheme = MaterialTheme.colorScheme
     val normalSensitivity = SensitivityPresets.first { it.nameRes == R.string.sensitivity_normal }
@@ -87,7 +88,7 @@ internal fun SettingsScreen(
             )
         }
         Spacer(Modifier.height(12.dp))
-        LanguageSettingsCard(
+        LanguageSelectorCard(
             language = settings.language,
             onLanguageChanged = onLanguageChanged,
             colorScheme = colorScheme
@@ -281,6 +282,13 @@ internal fun SettingsScreen(
                 }
             }
         }
+        Spacer(Modifier.height(12.dp))
+        FilledTonalButton(
+            onClick = onShowInstructions,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(localizedString(settings.language, R.string.view_instructions))
+        }
         Spacer(Modifier.height(20.dp))
     }
 }
@@ -380,15 +388,26 @@ internal fun sensitivityPresetFor(settings: GameSettings): SensitivityPreset {
 internal fun Float.nearlyEquals(other: Float): Boolean = kotlin.math.abs(this - other) < 0.001f
 
 @Composable
-private fun LanguageSettingsCard(
+internal fun LanguageSelectorCard(
     language: AppLanguage,
     onLanguageChanged: (AppLanguage) -> Unit,
-    colorScheme: ColorScheme
+    colorScheme: ColorScheme,
+    modifier: Modifier = Modifier,
+    showTitle: Boolean = true
 ) {
-    Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)
+    ) {
         Column(Modifier.padding(16.dp)) {
-            Text(localizedString(language, R.string.language), color = colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
+            if (showTitle) {
+                Text(
+                    localizedString(language, R.string.language),
+                    color = colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(8.dp))
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

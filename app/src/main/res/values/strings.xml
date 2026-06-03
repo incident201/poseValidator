@@ -111,4 +111,8 @@
     <string name="tip_8">Conversely, when the “Facing camera” option is selected, hiding the face is counted as an error.</string>
     <string name="tip_9">You may use any poses you like, but avoid complex positions where the limbs are heavily obscured by the body.</string>
     <string name="tip_10">Ideally, key points such as the shoulders, elbows, and knees should be clearly visible.</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_previous">Back</string>
+    <string name="onboarding_done">Start</string>
+    <string name="view_instructions">View instructions</string>
 </resources>
