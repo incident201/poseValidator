@@ -171,7 +171,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private val maximumDurationMinutes = 120
     private val startDelaySeconds = 10
     private val poseOcclusionCalibrationSeconds = 2
-    private val stabilizationDurationMs = 5_000L
+    private val stabilizationDurationMs = 4_000L
     private val gyroscopeStillThresholdRadPerSec = 0.08f
 
     private val sensorManager =
