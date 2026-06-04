@@ -43,7 +43,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size as ComposeSize
 import androidx.compose.ui.graphics.Color
@@ -173,7 +172,6 @@ fun CameraScreen(
     val defeatReason by viewModel.defeatReason.collectAsState()
     val selectedDurationSeconds by viewModel.selectedDurationSeconds.collectAsState()
     val startDelayRemainingSeconds by viewModel.startDelayRemainingSeconds.collectAsState()
-    val stabilizationRemainingSeconds by viewModel.stabilizationRemainingSeconds.collectAsState()
     val poseOverlayState by viewModel.poseOverlayState.collectAsState()
     val movementGaugeState by viewModel.movementGaugeState.collectAsState()
     val violationCount by viewModel.violationCount.collectAsState()
@@ -771,21 +769,9 @@ fun CameraScreen(
                 )
             }
 
-            val previewCountdownSeconds = when (gameState) {
-                GameState.WaitingForStabilization -> stabilizationRemainingSeconds
-                GameState.StartingDelay -> startDelayRemainingSeconds
-                else -> 0
-            }
-
-            val showPreviewCountdown = when (gameState) {
-                GameState.WaitingForStabilization -> previewCountdownSeconds > 0
-                GameState.StartingDelay -> previewCountdownSeconds >= 0
-                else -> false
-            }
-
-            if (!showFinalScreen && showPreviewCountdown) {
+            if (!showFinalScreen && gameState == GameState.StartingDelay && startDelayRemainingSeconds >= 0) {
                 PreviewCountdownOverlay(
-                    seconds = previewCountdownSeconds,
+                    seconds = startDelayRemainingSeconds,
                     modifier = Modifier
                         .align(Alignment.Center)
                         .zIndex(4f)
@@ -864,38 +850,33 @@ private fun PreviewCountdownOverlay(
     seconds: Int,
     modifier: Modifier = Modifier
 ) {
+    val text = seconds.toString()
+
     Box(
-        modifier = modifier
-            .size(190.dp)
-            .shadow(30.dp, RoundedCornerShape(56.dp), clip = false),
+        modifier = modifier.size(width = 340.dp, height = 240.dp),
         contentAlignment = Alignment.Center
     ) {
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .blur(18.dp)
-                .clip(RoundedCornerShape(56.dp))
-                .background(Color.White.copy(alpha = 0.18f))
-        )
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .clip(RoundedCornerShape(56.dp))
-                .background(Color.White.copy(alpha = 0.10f))
-                .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(56.dp))
+        Text(
+            text = text,
+            modifier = Modifier.blur(18.dp),
+            color = Color.White.copy(alpha = 0.34f),
+            fontSize = 180.sp,
+            lineHeight = 180.sp,
+            fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center
         )
         Text(
-            text = seconds.toString(),
-            color = Color.White.copy(alpha = 0.92f),
-            fontSize = 118.sp,
-            lineHeight = 118.sp,
+            text = text,
+            color = Color.White.copy(alpha = 0.82f),
+            fontSize = 180.sp,
+            lineHeight = 180.sp,
             fontWeight = FontWeight.Black,
             textAlign = TextAlign.Center,
             style = TextStyle(
                 shadow = androidx.compose.ui.graphics.Shadow(
-                    color = Color.Black.copy(alpha = 0.45f),
-                    offset = Offset(0f, 8f),
-                    blurRadius = 24f
+                    color = Color.Black.copy(alpha = 0.46f),
+                    offset = Offset(0f, 10f),
+                    blurRadius = 30f
                 )
             )
         )

@@ -203,8 +203,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     val movementGaugeState: StateFlow<MovementGaugeState> = _movementGaugeState.asStateFlow()
     private val _startDelayRemainingSeconds = MutableStateFlow(0)
     val startDelayRemainingSeconds: StateFlow<Int> = _startDelayRemainingSeconds.asStateFlow()
-    private val _stabilizationRemainingSeconds = MutableStateFlow(0)
-    val stabilizationRemainingSeconds: StateFlow<Int> = _stabilizationRemainingSeconds.asStateFlow()
     private val _poseOverlayState = MutableStateFlow(PoseOverlayState())
     val poseOverlayState: StateFlow<PoseOverlayState> = _poseOverlayState.asStateFlow()
     private val _voiceEvents = MutableSharedFlow<String>(extraBufferCapacity = 8)
@@ -1090,7 +1088,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _defeatReason.value = ""
         resetMovementGaugeState()
         _startDelayRemainingSeconds.value = 0
-        _stabilizationRemainingSeconds.value = 0
         synchronized(processingLock) {
             processingGeneration += 1
             movementTracker.reset()
@@ -1114,7 +1111,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
-        _stabilizationRemainingSeconds.value = stabilizationDurationSeconds()
         _gameState.value = GameState.WaitingForStabilization
         _statusMessage.value = tr(R.string.place_device_still)
         speak(tr(R.string.place_device_still))
@@ -1169,7 +1165,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationCompleted = true
         sensorManager.unregisterListener(this)
         stabilizationStableSinceMs = null
-        _stabilizationRemainingSeconds.value = 0
         startPoseCountdownAfterDeviceStabilized()
     }
 
@@ -1186,25 +1181,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         val now = SystemClock.elapsedRealtime()
         if (magnitude <= gyroscopeStillThresholdRadPerSec) {
             val stableSince = stabilizationStableSinceMs ?: now.also { stabilizationStableSinceMs = it }
-            val stableElapsedMs = now - stableSince
-            _stabilizationRemainingSeconds.value = stabilizationRemainingSeconds(stableElapsedMs)
-            if (stableElapsedMs >= stabilizationDurationMs) {
+            if (now - stableSince >= stabilizationDurationMs) {
                 viewModelScope.launch {
                     completeDeviceStabilization()
                 }
             }
         } else {
             stabilizationStableSinceMs = null
-            _stabilizationRemainingSeconds.value = stabilizationDurationSeconds()
         }
-    }
-
-    private fun stabilizationDurationSeconds(): Int =
-        ((stabilizationDurationMs + 999L) / 1000L).toInt()
-
-    private fun stabilizationRemainingSeconds(stableElapsedMs: Long): Int {
-        val remainingMs = (stabilizationDurationMs - stableElapsedMs).coerceAtLeast(0L)
-        return ((remainingMs + 999L) / 1000L).toInt()
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
@@ -1219,7 +1203,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
         _startDelayRemainingSeconds.value = 0
-        _stabilizationRemainingSeconds.value = 0
         synchronized(processingLock) {
             processingGeneration += 1
             poseIdentityStabilizer.reset()
@@ -1252,7 +1235,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
         _startDelayRemainingSeconds.value = 0
-        _stabilizationRemainingSeconds.value = 0
         synchronized(processingLock) {
             processingGeneration += 1
             poseIdentityStabilizer.reset()
@@ -1282,7 +1264,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
         _startDelayRemainingSeconds.value = 0
-        _stabilizationRemainingSeconds.value = 0
         synchronized(processingLock) {
             processingGeneration += 1
             poseIdentityStabilizer.reset()
@@ -1304,7 +1285,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _defeatReason.value = ""
         _timerSeconds.value = _selectedDurationSeconds.value
     }
-    override fun onCleared() { isCleared = true; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; _stabilizationRemainingSeconds.value = 0; synchronized(processingLock) { processingGeneration += 1; poseIdentityStabilizer.reset(); poseSmoother.reset(); movementTracker.reset(); poseOcclusionGuard.reset(); resetPoseDropoutHoldState() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
+    override fun onCleared() { isCleared = true; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseIdentityStabilizer.reset(); poseSmoother.reset(); movementTracker.reset(); poseOcclusionGuard.reset(); resetPoseDropoutHoldState() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
 }
 
 private fun Bitmap.recycleIfNeeded() {
