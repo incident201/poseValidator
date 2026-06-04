@@ -41,6 +41,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size as ComposeSize
@@ -53,6 +54,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -767,6 +769,15 @@ fun CameraScreen(
                 )
             }
 
+            if (!showFinalScreen && gameState == GameState.StartingDelay && startDelayRemainingSeconds >= 0) {
+                PreviewCountdownOverlay(
+                    seconds = startDelayRemainingSeconds,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .zIndex(4f)
+                )
+            }
+
             if (!showFinalScreen && SHOW_POSE_DEBUG_OVERLAY) {
                 PoseDebugOverlay(
                     overlayState = poseOverlayState,
@@ -833,6 +844,44 @@ fun CameraScreen(
 }
 
 
+
+@Composable
+private fun PreviewCountdownOverlay(
+    seconds: Int,
+    modifier: Modifier = Modifier
+) {
+    val text = seconds.toString()
+
+    Box(
+        modifier = modifier.size(width = 340.dp, height = 240.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.blur(18.dp),
+            color = Color.White.copy(alpha = 0.34f),
+            fontSize = 180.sp,
+            lineHeight = 180.sp,
+            fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center
+        )
+        Text(
+            text = text,
+            color = Color.White.copy(alpha = 0.82f),
+            fontSize = 180.sp,
+            lineHeight = 180.sp,
+            fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center,
+            style = TextStyle(
+                shadow = androidx.compose.ui.graphics.Shadow(
+                    color = Color.Black.copy(alpha = 0.46f),
+                    offset = Offset(0f, 10f),
+                    blurRadius = 30f
+                )
+            )
+        )
+    }
+}
 
 @Composable
 private fun SwitchCameraButton(
