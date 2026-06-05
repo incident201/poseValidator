@@ -50,6 +50,7 @@ internal fun SettingsScreen(
     onPoseSmootherMinCutoffChanged: (Float) -> Unit,
     onPoseSmootherBetaChanged: (Float) -> Unit,
     onPoseSmootherDerivativeCutoffChanged: (Float) -> Unit,
+    onWristDriftWeightChanged: (Float) -> Unit,
     onShowInstructions: () -> Unit
  ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -219,6 +220,25 @@ internal fun SettingsScreen(
                         onValueChanged = onPoseSmootherDerivativeCutoffChanged,
                         min = 0.01f,
                         max = 5.0f,
+                        decimals = 3
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(
+                        localizedString(settings.language, R.string.wrist_drift_weight),
+                        color = colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    FloatSettingField(
+                        label = localizedString(settings.language, R.string.wrist_drift_weight_range),
+                        value = settings.wristDriftWeight,
+                        onValueChanged = onWristDriftWeightChanged,
+                        min = 0f,
+                        max = 1f,
                         decimals = 3
                     )
                 }

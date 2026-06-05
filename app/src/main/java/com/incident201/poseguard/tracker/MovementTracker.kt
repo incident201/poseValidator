@@ -126,6 +126,7 @@ class MovementTracker {
     // Thresholds are normalized relative to the fixed reference pose scale.
     var driftThresholdFactor: Float = 0.160f
     var motionThresholdFactor: Float = 0.04f
+    var wristDriftWeight: Float = 0.7f
 
     var referencePose: PoseLandmarks? = null
     var previousPose: PoseLandmarks? = null
@@ -210,7 +211,8 @@ class MovementTracker {
         val poseDistances = trackedPoseIndices.mapNotNull { index ->
             val current = currentNormalizedPose[index] ?: return@mapNotNull null
             val reference = refNormalized[index] ?: return@mapNotNull null
-            current.distance2DTo(reference)
+            val distance = current.distance2DTo(reference)
+            distance * driftWeightForLandmark(index)
         }
         val poseDrift = robustShapeScore(poseDistances)
         val globalDrift = currentCenter.distance2DTo(refCenter) / referenceScale
@@ -247,6 +249,14 @@ class MovementTracker {
                 motionThresholdFactor = motionThresholdFactor
             )
         )
+    }
+
+    private fun driftWeightForLandmark(index: Int): Float {
+        return if (index == 15 || index == 16) {
+            wristDriftWeight.coerceIn(0f, 1f)
+        } else {
+            1f
+        }
     }
 
     private fun evaluateViolation(driftScore: Float, motionScore: Float, currentTime: Long): Violation {

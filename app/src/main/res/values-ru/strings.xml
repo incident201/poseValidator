@@ -95,6 +95,8 @@
     <string name="save">Сохранить</string>
     <string name="dont_save">Не сохранять</string>
     <string name="timelapse_save_error">Не удалось сохранить timelapse-видео.</string>
+    <string name="wrist_drift_weight">Вес запястий в drift</string>
+    <string name="wrist_drift_weight_range">0.000–1.000, по умолчанию 0.700</string>
     <string name="debug_mode">Режим отладки</string>
     <string name="record_timelapse_video">Записывать Timelapse видео</string>
     <string name="movement_gauge_drift">Смещение</string>

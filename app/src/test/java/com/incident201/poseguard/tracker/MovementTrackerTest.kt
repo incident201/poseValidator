@@ -224,6 +224,61 @@ class MovementTrackerTest {
         assertTrue(result.violation is MovementTracker.Violation.MotionLimitExceeded)
     }
 
+    @Test
+    fun `wrist drift weight reduces wrist only drift contribution`() {
+        val reference = referencePose()
+        val wristMoved = reference.withMovedLandmarks(
+            15 to Point3D(0.25f, 0.78f, 0f)
+        )
+
+        val fullWeightTracker = MovementTracker().apply {
+            wristDriftWeight = 1f
+            motionThresholdFactor = Float.MAX_VALUE
+        }
+        fullWeightTracker.startTracking(reference)
+        val fullWeightResult = fullWeightTracker.trackFrame(wristMoved, currentTime = 0L)
+
+        val reducedWeightTracker = MovementTracker().apply {
+            wristDriftWeight = 0.7f
+            motionThresholdFactor = Float.MAX_VALUE
+        }
+        reducedWeightTracker.startTracking(reference)
+        val reducedWeightResult = reducedWeightTracker.trackFrame(wristMoved, currentTime = 0L)
+
+        assertTrue(
+            reducedWeightResult.metrics.driftNormalizedScore <
+                fullWeightResult.metrics.driftNormalizedScore
+        )
+    }
+
+    @Test
+    fun `wrist drift weight does not affect non wrist drift contribution`() {
+        val reference = referencePose()
+        val elbowMoved = reference.withMovedLandmarks(
+            13 to Point3D(0.34f, 0.56f, 0f)
+        )
+
+        val zeroWristWeightTracker = MovementTracker().apply {
+            wristDriftWeight = 0f
+            motionThresholdFactor = Float.MAX_VALUE
+        }
+        zeroWristWeightTracker.startTracking(reference)
+        val zeroWristWeightResult = zeroWristWeightTracker.trackFrame(elbowMoved, currentTime = 0L)
+
+        val fullWristWeightTracker = MovementTracker().apply {
+            wristDriftWeight = 1f
+            motionThresholdFactor = Float.MAX_VALUE
+        }
+        fullWristWeightTracker.startTracking(reference)
+        val fullWristWeightResult = fullWristWeightTracker.trackFrame(elbowMoved, currentTime = 0L)
+
+        assertEquals(
+            fullWristWeightResult.metrics.driftNormalizedScore,
+            zeroWristWeightResult.metrics.driftNormalizedScore,
+            0.0001f
+        )
+    }
+
     private fun referencePose(): PoseLandmarks {
         val all = MutableList(33) { Point3D(0.5f, 0.5f, 0f) }
         all[11] = Point3D(0.3f, 0.2f, 0f)

@@ -628,6 +628,7 @@ fun CameraScreen(
             onPoseSmootherMinCutoffChanged = viewModel::updatePoseSmootherMinCutoff,
             onPoseSmootherBetaChanged = viewModel::updatePoseSmootherBeta,
             onPoseSmootherDerivativeCutoffChanged = viewModel::updatePoseSmootherDerivativeCutoff,
+            onWristDriftWeightChanged = viewModel::updateWristDriftWeight,
             onShowInstructions = {
                 showSettings = false
                 showOnboarding = true
