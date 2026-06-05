@@ -62,6 +62,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -1804,16 +1805,19 @@ fun BottomHUDEngine(
             BoxWithConstraints(
                 modifier = Modifier.fillMaxWidth()
             ) {
-                val compactActionButton = maxWidth < 360.dp
-                val actionButtonWidth = if (compactActionButton) 72.dp else 112.dp
+                val compactHud = maxWidth < 360.dp
+                val actionButtonWidth = if (compactHud) 104.dp else 136.dp
+                val timerFontSize = if (compactHud) 22.sp else 24.sp
+                val stepButtonSize = if (compactHud) 34.dp else 36.dp
+                val horizontalGap = if (compactHud) 8.dp else 12.dp
                 val actionButtonContentPadding = PaddingValues(
-                    horizontal = if (compactActionButton) 0.dp else 10.dp
+                    horizontal = if (compactHud) 8.dp else 12.dp
                 )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(horizontalGap)
                 ) {
                     Row(
                         modifier = Modifier
@@ -1821,7 +1825,7 @@ fun BottomHUDEngine(
                             .height(72.dp)
                             .background(colorScheme.surfaceVariant, RoundedCornerShape(22.dp))
                             .border(1.dp, colorScheme.outlineVariant, RoundedCornerShape(22.dp))
-                            .padding(horizontal = 4.dp),
+                            .padding(horizontal = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
@@ -1832,49 +1836,47 @@ fun BottomHUDEngine(
                                 contentDescription = localizedString(language, R.string.decrease),
                                 onClick = {
                                     onDurationSecondsChanged((selectedDurationSeconds - 60).coerceAtLeast(60))
-                                }
+                                },
+                                size = stepButtonSize
                             )
                         }
 
-                        Box(
+                        Text(
+                            text = formatDurationHms(displaySeconds),
+                            color = colorScheme.onSurfaceVariant,
+                            fontSize = timerFontSize,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Clip,
+                            textAlign = TextAlign.Center,
                             modifier = Modifier
                                 .weight(1f)
-                                .fillMaxHeight(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = formatDurationHms(displaySeconds),
-                                color = colorScheme.onSurfaceVariant,
-                                fontSize = 24.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Clip,
-                                modifier = Modifier
-                                    .testTag("timer_display")
-                                    .then(
-                                        if (canStart) {
-                                            Modifier.clickable {
-                                                val safeSelectedSeconds = selectedDurationSeconds.coerceAtLeast(1)
-                                                val totalPickerMinutes = (safeSelectedSeconds + 59) / 60
-                                                pickerHours = totalPickerMinutes / 60
-                                                pickerMinutes = totalPickerMinutes % 60
-                                                showTimerSheet = true
-                                            }
-                                        } else {
-                                            Modifier
+                                .testTag("timer_display")
+                                .then(
+                                    if (canStart) {
+                                        Modifier.clickable {
+                                            val safeSelectedSeconds = selectedDurationSeconds.coerceAtLeast(1)
+                                            val totalPickerMinutes = (safeSelectedSeconds + 59) / 60
+                                            pickerHours = totalPickerMinutes / 60
+                                            pickerMinutes = totalPickerMinutes % 60
+                                            showTimerSheet = true
                                         }
-                                    )
-                            )
-                        }
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                        )
 
                         if (canStart) {
                             TimerStepButton(
                                 symbol = "+",
                                 enabled = true,
                                 contentDescription = localizedString(language, R.string.increase),
-                                onClick = { onDurationSecondsChanged(selectedDurationSeconds + 60) }
+                                onClick = { onDurationSecondsChanged(selectedDurationSeconds + 60) },
+                                size = stepButtonSize
                             )
                         }
                     }
@@ -1898,16 +1900,14 @@ fun BottomHUDEngine(
                                 imageVector = Icons.Default.PlayArrow,
                                 contentDescription = localizedString(language, R.string.start)
                             )
-                            if (!compactActionButton) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = localizedString(language, R.string.start),
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = localizedString(language, R.string.start),
+                                fontSize = if (compactHud) 15.sp else 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
                     } else {
                         Button(
@@ -1928,16 +1928,14 @@ fun BottomHUDEngine(
                                     .size(14.dp)
                                     .background(colorScheme.onError, RoundedCornerShape(2.dp))
                             )
-                            if (!compactActionButton) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = localizedString(language, R.string.stop),
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = localizedString(language, R.string.stop),
+                                fontSize = if (compactHud) 15.sp else 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
                     }
                 }
@@ -2037,13 +2035,14 @@ private fun TimerStepButton(
     symbol: String,
     enabled: Boolean,
     contentDescription: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    size: Dp = 36.dp
 ) {
     val colorScheme = MaterialTheme.colorScheme
     IconButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.size(36.dp)
+        modifier = Modifier.size(size)
     ) {
         Text(
             text = symbol,
@@ -2052,7 +2051,7 @@ private fun TimerStepButton(
             } else {
                 colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
             },
-            fontSize = 24.sp,
+            fontSize = if (size < 36.dp) 22.sp else 24.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
