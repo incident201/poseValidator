@@ -61,6 +61,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -1800,121 +1801,144 @@ fun BottomHUDEngine(
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            BoxWithConstraints(
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier
-                        .weight(1.25f)
-                        .height(72.dp)
-                        .background(colorScheme.surfaceVariant, RoundedCornerShape(22.dp))
-                        .border(1.dp, colorScheme.outlineVariant, RoundedCornerShape(22.dp))
-                        .padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    if (canStart) {
-                        TimerStepButton(
-                            symbol = "−",
-                            enabled = selectedDurationSeconds > 60,
-                            contentDescription = localizedString(language, R.string.decrease),
-                            onClick = {
-                                onDurationSecondsChanged((selectedDurationSeconds - 60).coerceAtLeast(60))
-                            }
-                        )
-                    }
+                val compactActionButton = maxWidth < 360.dp
+                val actionButtonWidth = if (compactActionButton) 72.dp else 112.dp
+                val actionButtonContentPadding = PaddingValues(
+                    horizontal = if (compactActionButton) 0.dp else 10.dp
+                )
 
-                    Box(
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
                         modifier = Modifier
                             .weight(1f)
-                            .fillMaxHeight(),
-                        contentAlignment = Alignment.Center
+                            .height(72.dp)
+                            .background(colorScheme.surfaceVariant, RoundedCornerShape(22.dp))
+                            .border(1.dp, colorScheme.outlineVariant, RoundedCornerShape(22.dp))
+                            .padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
                     ) {
-                        Text(
-                            text = formatDurationHms(displaySeconds),
-                            color = colorScheme.onSurfaceVariant,
-                            fontSize = 26.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
+                        if (canStart) {
+                            TimerStepButton(
+                                symbol = "−",
+                                enabled = selectedDurationSeconds > 60,
+                                contentDescription = localizedString(language, R.string.decrease),
+                                onClick = {
+                                    onDurationSecondsChanged((selectedDurationSeconds - 60).coerceAtLeast(60))
+                                }
+                            )
+                        }
+
+                        Box(
                             modifier = Modifier
-                                .testTag("timer_display")
-                                .then(
-                                    if (canStart) {
-                                        Modifier.clickable {
-                                            val safeSelectedSeconds = selectedDurationSeconds.coerceAtLeast(1)
-                                            val totalPickerMinutes = (safeSelectedSeconds + 59) / 60
-                                            pickerHours = totalPickerMinutes / 60
-                                            pickerMinutes = totalPickerMinutes % 60
-                                            showTimerSheet = true
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = formatDurationHms(displaySeconds),
+                                color = colorScheme.onSurfaceVariant,
+                                fontSize = 24.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Clip,
+                                modifier = Modifier
+                                    .testTag("timer_display")
+                                    .then(
+                                        if (canStart) {
+                                            Modifier.clickable {
+                                                val safeSelectedSeconds = selectedDurationSeconds.coerceAtLeast(1)
+                                                val totalPickerMinutes = (safeSelectedSeconds + 59) / 60
+                                                pickerHours = totalPickerMinutes / 60
+                                                pickerMinutes = totalPickerMinutes % 60
+                                                showTimerSheet = true
+                                            }
+                                        } else {
+                                            Modifier
                                         }
-                                    } else {
-                                        Modifier
-                                    }
-                                )
-                        )
+                                    )
+                            )
+                        }
+
+                        if (canStart) {
+                            TimerStepButton(
+                                symbol = "+",
+                                enabled = true,
+                                contentDescription = localizedString(language, R.string.increase),
+                                onClick = { onDurationSecondsChanged(selectedDurationSeconds + 60) }
+                            )
+                        }
                     }
 
                     if (canStart) {
-                        TimerStepButton(
-                            symbol = "+",
-                            enabled = true,
-                            contentDescription = localizedString(language, R.string.increase),
-                            onClick = { onDurationSecondsChanged(selectedDurationSeconds + 60) }
-                        )
-                    }
-                }
-
-                if (canStart) {
-                    Button(
-                        onClick = onStart,
-                        enabled = startEnabled,
-                        modifier = Modifier
-                            .height(72.dp)
-                            .weight(0.9f)
-                            .testTag("start_button"),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = colorScheme.primary,
-                            contentColor = colorScheme.onPrimary
-                        ),
-                        shape = RoundedCornerShape(22.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = localizedString(language, R.string.start)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = localizedString(language, R.string.start),
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                } else {
-                    Button(
-                        onClick = onStop,
-                        modifier = Modifier
-                            .height(72.dp)
-                            .weight(0.9f)
-                            .testTag("stop_on_button"),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = colorScheme.error,
-                            contentColor = colorScheme.onError
-                        ),
-                        shape = RoundedCornerShape(22.dp)
-                    ) {
-                        Box(
+                        Button(
+                            onClick = onStart,
+                            enabled = startEnabled,
                             modifier = Modifier
-                                .size(14.dp)
-                                .background(colorScheme.onError, RoundedCornerShape(2.dp))
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = localizedString(language, R.string.stop),
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                                .height(72.dp)
+                                .width(actionButtonWidth)
+                                .testTag("start_button"),
+                            contentPadding = actionButtonContentPadding,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colorScheme.primary,
+                                contentColor = colorScheme.onPrimary
+                            ),
+                            shape = RoundedCornerShape(22.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = localizedString(language, R.string.start)
+                            )
+                            if (!compactActionButton) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = localizedString(language, R.string.start),
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = onStop,
+                            modifier = Modifier
+                                .height(72.dp)
+                                .width(actionButtonWidth)
+                                .testTag("stop_on_button"),
+                            contentPadding = actionButtonContentPadding,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colorScheme.error,
+                                contentColor = colorScheme.onError
+                            ),
+                            shape = RoundedCornerShape(22.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .background(colorScheme.onError, RoundedCornerShape(2.dp))
+                            )
+                            if (!compactActionButton) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = localizedString(language, R.string.stop),
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -2019,7 +2043,7 @@ private fun TimerStepButton(
     IconButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.size(44.dp)
+        modifier = Modifier.size(36.dp)
     ) {
         Text(
             text = symbol,
@@ -2028,7 +2052,7 @@ private fun TimerStepButton(
             } else {
                 colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
             },
-            fontSize = 26.sp,
+            fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
