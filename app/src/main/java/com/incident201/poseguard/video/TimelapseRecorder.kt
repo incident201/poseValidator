@@ -13,6 +13,7 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.util.Log
 import android.view.Surface
+import com.incident201.poseguard.util.formatDurationHmsFromMillis
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -269,11 +270,7 @@ class TimelapseRecorder(
         val dstRect = RectF(left, top, left + scaledWidth, top + scaledHeight)
         canvas.drawBitmap(source, null, dstRect, null)
 
-        val totalSeconds = (elapsedMs / 1000L).coerceAtLeast(0L)
-        val hours = totalSeconds / 3600
-        val minutes = (totalSeconds % 3600) / 60
-        val seconds = totalSeconds % 60
-        val text = String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
+        val text = formatDurationHmsFromMillis(elapsedMs)
 
         val textSize = (videoWidth * 0.06f).coerceIn(28f, 72f)
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

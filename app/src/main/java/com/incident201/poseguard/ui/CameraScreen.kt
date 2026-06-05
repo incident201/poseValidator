@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Environment
 import android.speech.tts.TextToSpeech
 import android.os.SystemClock
+import android.view.View
 import android.provider.MediaStore
 import android.util.Log
 import androidx.activity.compose.BackHandler
@@ -25,6 +26,7 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -49,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -58,6 +61,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -75,6 +80,7 @@ import com.incident201.poseguard.viewmodel.PoseOverlayState
 import com.incident201.poseguard.viewmodel.RuleViolationCounts
 import com.incident201.poseguard.viewmodel.SessionSummary
 import com.incident201.poseguard.video.TimelapseRecorder
+import com.incident201.poseguard.util.formatDurationHms
 import com.incident201.poseguard.R
 import java.io.File
 import java.text.SimpleDateFormat
@@ -86,6 +92,8 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.Locale
 import java.util.Date
 import android.util.Size
+import android.widget.EditText
+import android.widget.NumberPicker
 import android.widget.Toast
 import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.Dispatchers
@@ -824,7 +832,7 @@ fun CameraScreen(
             timerSeconds = timerSeconds,
             selectedDurationSeconds = selectedDurationSeconds,
             startDelayRemainingSeconds = startDelayRemainingSeconds,
-            onDurationChanged = { viewModel.updateSelectedDurationMinutes(it) },
+            onDurationSecondsChanged = viewModel::updateSelectedDurationSeconds,
             isDemoMode = isDemoMode,
             debugModeEnabled = debugModeEnabled,
             onDemoClick = {
@@ -988,12 +996,12 @@ private fun FinalSessionScreen(
                     ) {
                         FinalMetricCard(
                             label = localizedString(language, R.string.final_initial_timer),
-                            value = formatDuration(summary.initialTimerSeconds),
+                            value = formatDurationHms(summary.initialTimerSeconds),
                             modifier = Modifier.weight(1f)
                         )
                         FinalMetricCard(
                             label = localizedString(language, R.string.final_actual_timer),
-                            value = formatDuration(summary.actualTimerSeconds),
+                            value = formatDurationHms(summary.actualTimerSeconds),
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -1246,18 +1254,6 @@ private fun FinalSettingRow(
                 textAlign = TextAlign.End
             )
         }
-    }
-}
-
-private fun formatDuration(seconds: Int): String {
-    val safeSeconds = seconds.coerceAtLeast(0)
-    val hours = safeSeconds / 3600
-    val minutes = (safeSeconds % 3600) / 60
-    val secs = safeSeconds % 60
-    return if (hours > 0) {
-        String.format(Locale.US, "%d:%02d:%02d", hours, minutes, secs)
-    } else {
-        String.format(Locale.US, "%02d:%02d", minutes, secs)
     }
 }
 
@@ -1612,6 +1608,7 @@ private fun VoiceAnnouncer(viewModel: GameViewModel, language: AppLanguage) {
 
 
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BottomHUDEngine(
     language: AppLanguage,
@@ -1621,7 +1618,7 @@ fun BottomHUDEngine(
     timerSeconds: Int,
     selectedDurationSeconds: Int,
     startDelayRemainingSeconds: Int,
-    onDurationChanged: (Int) -> Unit,
+    onDurationSecondsChanged: (Int) -> Unit,
     isDemoMode: Boolean,
     debugModeEnabled: Boolean,
     onDemoClick: () -> Unit,
@@ -1634,7 +1631,90 @@ fun BottomHUDEngine(
     val colorScheme = MaterialTheme.colorScheme
     val canStart = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
     val displaySeconds = if (canStart) selectedDurationSeconds else timerSeconds
-    val selectedMinutes = (selectedDurationSeconds / 60).coerceIn(1, 120)
+    val currentSelectedHours = selectedDurationSeconds.coerceAtLeast(0) / 3600
+    var showTimerSheet by rememberSaveable { mutableStateOf(false) }
+    var pickerHours by rememberSaveable { mutableStateOf(0) }
+    var pickerMinutes by rememberSaveable { mutableStateOf(0) }
+    val hourRange = 0..maxOf(99, currentSelectedHours, pickerHours)
+    val selectedPickerSeconds = (pickerHours * 3600) + (pickerMinutes * 60)
+
+    if (showTimerSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showTimerSheet = false },
+            containerColor = colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                Text(
+                    text = localizedString(language, R.string.set_timer),
+                    color = colorScheme.onSurface,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = formatDurationHms(selectedPickerSeconds),
+                    color = colorScheme.primary,
+                    fontSize = 36.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(24.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    DurationPickerColumn(
+                        label = localizedString(language, R.string.hours),
+                        value = pickerHours,
+                        range = hourRange,
+                        wrapSelectorWheel = false,
+                        onValueChanged = { pickerHours = it },
+                        modifier = Modifier.weight(1f)
+                    )
+                    DurationPickerColumn(
+                        label = localizedString(language, R.string.minutes),
+                        value = pickerMinutes,
+                        range = 0..59,
+                        wrapSelectorWheel = true,
+                        onValueChanged = { pickerMinutes = it },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { showTimerSheet = false },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(localizedString(language, R.string.cancel))
+                    }
+                    Button(
+                        onClick = {
+                            if (selectedPickerSeconds > 0) {
+                                onDurationSecondsChanged(selectedPickerSeconds)
+                                showTimerSheet = false
+                            }
+                        },
+                        enabled = selectedPickerSeconds > 0,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(localizedString(language, R.string.apply))
+                    }
+                }
+            }
+        }
+    }
 
     Card(
         modifier = Modifier
@@ -1722,108 +1802,230 @@ fun BottomHUDEngine(
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            BoxWithConstraints(
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(72.dp)
-                        .background(colorScheme.surfaceVariant, RoundedCornerShape(22.dp))
-                        .border(1.dp, colorScheme.outlineVariant, RoundedCornerShape(22.dp))
-                        .padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    if (canStart) {
-                        TimerStepButton(
-                            symbol = "−",
-                            enabled = selectedMinutes > 1,
-                            contentDescription = localizedString(language, R.string.decrease),
-                            onClick = { onDurationChanged((selectedMinutes - 1).coerceAtLeast(1)) }
-                        )
-                    }
+                val compactHud = maxWidth < 360.dp
+                val actionButtonWidth = if (compactHud) 104.dp else 136.dp
+                val timerFontSize = if (compactHud) 22.sp else 24.sp
+                val stepButtonSize = if (compactHud) 34.dp else 36.dp
+                val horizontalGap = if (compactHud) 8.dp else 12.dp
+                val actionButtonContentPadding = PaddingValues(
+                    horizontal = if (compactHud) 8.dp else 12.dp
+                )
 
-                    Box(
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(horizontalGap)
+                ) {
+                    Row(
                         modifier = Modifier
                             .weight(1f)
-                            .fillMaxHeight(),
-                        contentAlignment = Alignment.Center
+                            .height(72.dp)
+                            .background(colorScheme.surfaceVariant, RoundedCornerShape(22.dp))
+                            .border(1.dp, colorScheme.outlineVariant, RoundedCornerShape(22.dp))
+                            .padding(horizontal = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
                     ) {
+                        if (canStart) {
+                            TimerStepButton(
+                                symbol = "−",
+                                enabled = selectedDurationSeconds > 60,
+                                contentDescription = localizedString(language, R.string.decrease),
+                                onClick = {
+                                    onDurationSecondsChanged((selectedDurationSeconds - 60).coerceAtLeast(60))
+                                },
+                                size = stepButtonSize
+                            )
+                        }
+
                         Text(
-                            text = String.format(Locale.US, "%02d:%02d", displaySeconds / 60, displaySeconds % 60),
+                            text = formatDurationHms(displaySeconds),
                             color = colorScheme.onSurfaceVariant,
-                            fontSize = 28.sp,
+                            fontSize = timerFontSize,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.testTag("timer_display")
+                            letterSpacing = 0.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Clip,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("timer_display")
+                                .then(
+                                    if (canStart) {
+                                        Modifier.clickable {
+                                            val safeSelectedSeconds = selectedDurationSeconds.coerceAtLeast(1)
+                                            val totalPickerMinutes = (safeSelectedSeconds + 59) / 60
+                                            pickerHours = totalPickerMinutes / 60
+                                            pickerMinutes = totalPickerMinutes % 60
+                                            showTimerSheet = true
+                                        }
+                                    } else {
+                                        Modifier
+                                    }
+                                )
                         )
+
+                        if (canStart) {
+                            TimerStepButton(
+                                symbol = "+",
+                                enabled = true,
+                                contentDescription = localizedString(language, R.string.increase),
+                                onClick = { onDurationSecondsChanged(selectedDurationSeconds + 60) },
+                                size = stepButtonSize
+                            )
+                        }
                     }
 
                     if (canStart) {
-                        TimerStepButton(
-                            symbol = "+",
-                            enabled = selectedMinutes < 120,
-                            contentDescription = localizedString(language, R.string.increase),
-                            onClick = { onDurationChanged((selectedMinutes + 1).coerceAtMost(120)) }
-                        )
-                    }
-                }
-
-                if (canStart) {
-                    Button(
-                        onClick = onStart,
-                        enabled = startEnabled,
-                        modifier = Modifier
-                            .height(72.dp)
-                            .weight(1.05f)
-                            .testTag("start_button"),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = colorScheme.primary,
-                            contentColor = colorScheme.onPrimary
-                        ),
-                        shape = RoundedCornerShape(22.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = localizedString(language, R.string.start)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = localizedString(language, R.string.start),
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                } else {
-                    Button(
-                        onClick = onStop,
-                        modifier = Modifier
-                            .height(72.dp)
-                            .weight(1.05f)
-                            .testTag("stop_on_button"),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = colorScheme.error,
-                            contentColor = colorScheme.onError
-                        ),
-                        shape = RoundedCornerShape(22.dp)
-                    ) {
-                        Box(
+                        Button(
+                            onClick = onStart,
+                            enabled = startEnabled,
                             modifier = Modifier
-                                .size(14.dp)
-                                .background(colorScheme.onError, RoundedCornerShape(2.dp))
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = localizedString(language, R.string.stop),
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                                .height(72.dp)
+                                .width(actionButtonWidth)
+                                .testTag("start_button"),
+                            contentPadding = actionButtonContentPadding,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colorScheme.primary,
+                                contentColor = colorScheme.onPrimary
+                            ),
+                            shape = RoundedCornerShape(22.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = localizedString(language, R.string.start)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = localizedString(language, R.string.start),
+                                fontSize = if (compactHud) 15.sp else 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    } else {
+                        Button(
+                            onClick = onStop,
+                            modifier = Modifier
+                                .height(72.dp)
+                                .width(actionButtonWidth)
+                                .testTag("stop_on_button"),
+                            contentPadding = actionButtonContentPadding,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colorScheme.error,
+                                contentColor = colorScheme.onError
+                            ),
+                            shape = RoundedCornerShape(22.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .background(colorScheme.onError, RoundedCornerShape(2.dp))
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = localizedString(language, R.string.stop),
+                                fontSize = if (compactHud) 15.sp else 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DurationPickerColumn(
+    label: String,
+    value: Int,
+    range: IntRange,
+    wrapSelectorWheel: Boolean,
+    onValueChanged: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = label,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+        DurationNumberPicker(
+            value = value,
+            range = range,
+            formatter = { String.format(Locale.US, "%02d", it) },
+            wrapSelectorWheel = wrapSelectorWheel,
+            onValueChanged = onValueChanged,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun DurationNumberPicker(
+    value: Int,
+    range: IntRange,
+    formatter: (Int) -> String,
+    onValueChanged: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    wrapSelectorWheel: Boolean = false
+) {
+    val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
+
+    AndroidView(
+        modifier = modifier.height(160.dp),
+        factory = { context ->
+            NumberPicker(context).apply {
+                descendantFocusability = NumberPicker.FOCUS_BLOCK_DESCENDANTS
+                minValue = range.first
+                maxValue = range.last
+                this.value = value.coerceIn(range)
+                this.wrapSelectorWheel = wrapSelectorWheel
+                setFormatter { formatter(it) }
+                setOnValueChangedListener { _, _, newValue -> onValueChanged(newValue) }
+                applyTimerPickerStyle(textColor)
+            }
+        },
+        update = { picker ->
+            picker.minValue = range.first
+            picker.maxValue = range.last
+            picker.value = value.coerceIn(range)
+            picker.wrapSelectorWheel = wrapSelectorWheel
+            picker.setFormatter { formatter(it) }
+            picker.setOnValueChangedListener { _, _, newValue -> onValueChanged(newValue) }
+            picker.applyTimerPickerStyle(textColor)
+        }
+    )
+}
+
+private fun NumberPicker.applyTimerPickerStyle(textColor: Int) {
+    setBackgroundColor(android.graphics.Color.TRANSPARENT)
+
+    for (index in 0 until childCount) {
+        val child = getChildAt(index)
+        if (child is EditText) {
+            child.setTextColor(textColor)
+            child.textAlignment = View.TEXT_ALIGNMENT_CENTER
+            child.typeface = android.graphics.Typeface.create(
+                android.graphics.Typeface.MONOSPACE,
+                android.graphics.Typeface.BOLD
+            )
+            child.textSize = 24f
         }
     }
 }
@@ -1833,13 +2035,14 @@ private fun TimerStepButton(
     symbol: String,
     enabled: Boolean,
     contentDescription: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    size: Dp = 36.dp
 ) {
     val colorScheme = MaterialTheme.colorScheme
     IconButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.size(44.dp)
+        modifier = Modifier.size(size)
     ) {
         Text(
             text = symbol,
@@ -1848,7 +2051,7 @@ private fun TimerStepButton(
             } else {
                 colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
             },
-            fontSize = 26.sp,
+            fontSize = if (size < 36.dp) 22.sp else 24.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
