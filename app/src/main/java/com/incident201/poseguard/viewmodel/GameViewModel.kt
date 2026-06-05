@@ -49,11 +49,13 @@ private const val PREF_OCCLUSION_FREEZE_VIS_P10_ALWAYS = "occlusion_freeze_visib
 private const val PREF_OCCLUSION_FREEZE_VIS_HARD = "occlusion_freeze_visibility_hard"
 private const val PREF_OCCLUSION_FREEZE_VIS_SOFT = "occlusion_freeze_visibility_soft"
 private const val PREF_OCCLUSION_JITTER_FREEZE_THRESHOLD = "occlusion_jitter_freeze_threshold"
+private const val PREF_WRIST_DRIFT_WEIGHT = "wrist_drift_weight"
 private const val DEFAULT_OCCLUSION_FREEZE_VIS_ALWAYS = 0.05f
 private const val DEFAULT_OCCLUSION_FREEZE_VIS_P10_ALWAYS = 0.02f
 private const val DEFAULT_OCCLUSION_FREEZE_VIS_HARD = 0.08f
 private const val DEFAULT_OCCLUSION_FREEZE_VIS_SOFT = 0.1f
 private const val DEFAULT_OCCLUSION_JITTER_FREEZE_THRESHOLD = 0.01f
+private const val DEFAULT_WRIST_DRIFT_WEIGHT = 0.7f
 private const val PREF_DEBUG_MODE_ENABLED = "debug_mode_enabled"
 private const val PREF_ONBOARDING_COMPLETED = "onboarding_completed"
 private const val PREF_POSE_SMOOTHER_MIN_CUTOFF = "pose_smoother_min_cutoff"
@@ -100,6 +102,7 @@ data class GameSettings(
     val occlusionFreezeVisibilityHard: Float = DEFAULT_OCCLUSION_FREEZE_VIS_HARD,
     val occlusionFreezeVisibilitySoft: Float = DEFAULT_OCCLUSION_FREEZE_VIS_SOFT,
     val occlusionJitterFreezeThreshold: Float = DEFAULT_OCCLUSION_JITTER_FREEZE_THRESHOLD,
+    val wristDriftWeight: Float = DEFAULT_WRIST_DRIFT_WEIGHT,
     val poseSmootherMinCutoff: Float = PoseSmoother.DEFAULT_MIN_CUTOFF,
     val poseSmootherBeta: Float = PoseSmoother.DEFAULT_BETA,
     val poseSmootherDerivativeCutoff: Float = PoseSmoother.DEFAULT_DERIVATIVE_CUTOFF,
@@ -305,6 +308,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 PREF_OCCLUSION_JITTER_FREEZE_THRESHOLD,
                 DEFAULT_OCCLUSION_JITTER_FREEZE_THRESHOLD
             ).coerceIn(0f, 0.30f)
+        val wristDriftWeight = prefs.getFloat(
+            PREF_WRIST_DRIFT_WEIGHT,
+            DEFAULT_WRIST_DRIFT_WEIGHT
+        ).coerceIn(0f, 1f)
         return GameSettings(
             language = language,
             faceCheckMode = mode,
@@ -324,6 +331,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             occlusionFreezeVisibilityHard = occlusionFreezeVisibilityHard,
             occlusionFreezeVisibilitySoft = occlusionFreezeVisibilitySoft,
             occlusionJitterFreezeThreshold = occlusionJitterFreezeThreshold,
+            wristDriftWeight = wristDriftWeight,
             poseSmootherMinCutoff = prefs.getFloat(
                 PREF_POSE_SMOOTHER_MIN_CUTOFF,
                 PoseSmoother.DEFAULT_MIN_CUTOFF
@@ -380,6 +388,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         synchronized(processingLock) {
             movementTracker.driftThresholdFactor = settings.driftThresholdFactor
             movementTracker.motionThresholdFactor = settings.motionThresholdFactor
+            movementTracker.wristDriftWeight = settings.wristDriftWeight
             poseSmoother.updateConfig(
                 minCutoff = settings.poseSmootherMinCutoff,
                 beta = settings.poseSmootherBeta,
@@ -424,6 +433,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         synchronized(processingLock) { movementTracker.motionThresholdFactor = normalized }
     }
 
+    fun updateWristDriftWeight(value: Float) {
+        val normalized = value.coerceIn(0f, 1f)
+        _gameSettings.value = _gameSettings.value.copy(wristDriftWeight = normalized)
+        prefs.edit().putFloat(PREF_WRIST_DRIFT_WEIGHT, normalized).apply()
+        synchronized(processingLock) {
+            movementTracker.wristDriftWeight = normalized
+        }
+    }
 
     fun updatePoseSmootherMinCutoff(value: Float) {
         updatePoseSmootherConfig(
