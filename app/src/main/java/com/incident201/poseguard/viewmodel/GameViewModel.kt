@@ -170,8 +170,6 @@ data class SessionSummary(
 class GameViewModel(application: Application) : AndroidViewModel(application), SensorEventListener {
     private val tag = "GameViewModel"
     private val defaultDurationSeconds = 180
-    private val minimumDurationMinutes = 1
-    private val maximumDurationMinutes = 120
     private val startDelaySeconds = 10
     private val poseOcclusionCalibrationSeconds = 2
     private val stabilizationDurationMs = 4_000L
@@ -592,10 +590,21 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         prefs.edit().putInt(prefKey, normalized).apply()
     }
 
+    fun updateSelectedDurationSeconds(seconds: Int) {
+        val normalizedSeconds = seconds.coerceAtLeast(1)
+        _selectedDurationSeconds.value = normalizedSeconds
+
+        if (
+            _gameState.value == GameState.Idle ||
+            _gameState.value == GameState.Failed ||
+            _gameState.value == GameState.Success
+        ) {
+            _timerSeconds.value = normalizedSeconds
+        }
+    }
+
     fun updateSelectedDurationMinutes(minutes: Int) {
-        val normalizedMinutes = minutes.coerceIn(minimumDurationMinutes, maximumDurationMinutes)
-        _selectedDurationSeconds.value = normalizedMinutes * 60
-        if (_gameState.value == GameState.Idle || _gameState.value == GameState.Failed || _gameState.value == GameState.Success) _timerSeconds.value = _selectedDurationSeconds.value
+        updateSelectedDurationSeconds(minutes * 60)
     }
 
     fun registerCameraFrame(bitmap: Bitmap, timestampMs: Long) {

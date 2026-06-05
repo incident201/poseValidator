@@ -25,6 +25,7 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -75,6 +76,7 @@ import com.incident201.poseguard.viewmodel.PoseOverlayState
 import com.incident201.poseguard.viewmodel.RuleViolationCounts
 import com.incident201.poseguard.viewmodel.SessionSummary
 import com.incident201.poseguard.video.TimelapseRecorder
+import com.incident201.poseguard.util.formatDurationHms
 import com.incident201.poseguard.R
 import java.io.File
 import java.text.SimpleDateFormat
@@ -86,6 +88,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.Locale
 import java.util.Date
 import android.util.Size
+import android.widget.NumberPicker
 import android.widget.Toast
 import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.Dispatchers
@@ -824,7 +827,7 @@ fun CameraScreen(
             timerSeconds = timerSeconds,
             selectedDurationSeconds = selectedDurationSeconds,
             startDelayRemainingSeconds = startDelayRemainingSeconds,
-            onDurationChanged = { viewModel.updateSelectedDurationMinutes(it) },
+            onDurationSecondsChanged = viewModel::updateSelectedDurationSeconds,
             isDemoMode = isDemoMode,
             debugModeEnabled = debugModeEnabled,
             onDemoClick = {
@@ -988,12 +991,12 @@ private fun FinalSessionScreen(
                     ) {
                         FinalMetricCard(
                             label = localizedString(language, R.string.final_initial_timer),
-                            value = formatDuration(summary.initialTimerSeconds),
+                            value = formatDurationHms(summary.initialTimerSeconds),
                             modifier = Modifier.weight(1f)
                         )
                         FinalMetricCard(
                             label = localizedString(language, R.string.final_actual_timer),
-                            value = formatDuration(summary.actualTimerSeconds),
+                            value = formatDurationHms(summary.actualTimerSeconds),
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -1246,18 +1249,6 @@ private fun FinalSettingRow(
                 textAlign = TextAlign.End
             )
         }
-    }
-}
-
-private fun formatDuration(seconds: Int): String {
-    val safeSeconds = seconds.coerceAtLeast(0)
-    val hours = safeSeconds / 3600
-    val minutes = (safeSeconds % 3600) / 60
-    val secs = safeSeconds % 60
-    return if (hours > 0) {
-        String.format(Locale.US, "%d:%02d:%02d", hours, minutes, secs)
-    } else {
-        String.format(Locale.US, "%02d:%02d", minutes, secs)
     }
 }
 
@@ -1612,6 +1603,7 @@ private fun VoiceAnnouncer(viewModel: GameViewModel, language: AppLanguage) {
 
 
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BottomHUDEngine(
     language: AppLanguage,
@@ -1621,7 +1613,7 @@ fun BottomHUDEngine(
     timerSeconds: Int,
     selectedDurationSeconds: Int,
     startDelayRemainingSeconds: Int,
-    onDurationChanged: (Int) -> Unit,
+    onDurationSecondsChanged: (Int) -> Unit,
     isDemoMode: Boolean,
     debugModeEnabled: Boolean,
     onDemoClick: () -> Unit,
@@ -1634,7 +1626,90 @@ fun BottomHUDEngine(
     val colorScheme = MaterialTheme.colorScheme
     val canStart = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
     val displaySeconds = if (canStart) selectedDurationSeconds else timerSeconds
-    val selectedMinutes = (selectedDurationSeconds / 60).coerceIn(1, 120)
+    val currentSelectedHours = selectedDurationSeconds.coerceAtLeast(0) / 3600
+    var showTimerSheet by rememberSaveable { mutableStateOf(false) }
+    var pickerHours by rememberSaveable { mutableStateOf(0) }
+    var pickerMinutes by rememberSaveable { mutableStateOf(0) }
+    val hourRange = 0..maxOf(99, currentSelectedHours, pickerHours)
+    val selectedPickerSeconds = (pickerHours * 3600) + (pickerMinutes * 60)
+
+    if (showTimerSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showTimerSheet = false },
+            containerColor = colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                Text(
+                    text = localizedString(language, R.string.set_timer),
+                    color = colorScheme.onSurface,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = formatDurationHms(selectedPickerSeconds),
+                    color = colorScheme.primary,
+                    fontSize = 36.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(24.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    DurationPickerColumn(
+                        label = localizedString(language, R.string.hours),
+                        value = pickerHours,
+                        range = hourRange,
+                        wrapSelectorWheel = false,
+                        onValueChanged = { pickerHours = it },
+                        modifier = Modifier.weight(1f)
+                    )
+                    DurationPickerColumn(
+                        label = localizedString(language, R.string.minutes),
+                        value = pickerMinutes,
+                        range = 0..59,
+                        wrapSelectorWheel = true,
+                        onValueChanged = { pickerMinutes = it },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { showTimerSheet = false },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(localizedString(language, R.string.cancel))
+                    }
+                    Button(
+                        onClick = {
+                            if (selectedPickerSeconds > 0) {
+                                onDurationSecondsChanged(selectedPickerSeconds)
+                                showTimerSheet = false
+                            }
+                        },
+                        enabled = selectedPickerSeconds > 0,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(localizedString(language, R.string.apply))
+                    }
+                }
+            }
+        }
+    }
 
     Card(
         modifier = Modifier
@@ -1729,7 +1804,7 @@ fun BottomHUDEngine(
             ) {
                 Row(
                     modifier = Modifier
-                        .weight(1f)
+                        .weight(1.25f)
                         .height(72.dp)
                         .background(colorScheme.surfaceVariant, RoundedCornerShape(22.dp))
                         .border(1.dp, colorScheme.outlineVariant, RoundedCornerShape(22.dp))
@@ -1740,9 +1815,9 @@ fun BottomHUDEngine(
                     if (canStart) {
                         TimerStepButton(
                             symbol = "−",
-                            enabled = selectedMinutes > 1,
+                            enabled = selectedDurationSeconds > 1,
                             contentDescription = localizedString(language, R.string.decrease),
-                            onClick = { onDurationChanged((selectedMinutes - 1).coerceAtLeast(1)) }
+                            onClick = { onDurationSecondsChanged((selectedDurationSeconds - 60).coerceAtLeast(1)) }
                         )
                     }
 
@@ -1753,21 +1828,34 @@ fun BottomHUDEngine(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = String.format(Locale.US, "%02d:%02d", displaySeconds / 60, displaySeconds % 60),
+                            text = formatDurationHms(displaySeconds),
                             color = colorScheme.onSurfaceVariant,
-                            fontSize = 28.sp,
+                            fontSize = 26.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.testTag("timer_display")
+                            modifier = Modifier
+                                .testTag("timer_display")
+                                .then(
+                                    if (canStart) {
+                                        Modifier.clickable {
+                                            val safeSelectedSeconds = selectedDurationSeconds.coerceAtLeast(0)
+                                            pickerHours = safeSelectedSeconds / 3600
+                                            pickerMinutes = (safeSelectedSeconds % 3600) / 60
+                                            showTimerSheet = true
+                                        }
+                                    } else {
+                                        Modifier
+                                    }
+                                )
                         )
                     }
 
                     if (canStart) {
                         TimerStepButton(
                             symbol = "+",
-                            enabled = selectedMinutes < 120,
+                            enabled = true,
                             contentDescription = localizedString(language, R.string.increase),
-                            onClick = { onDurationChanged((selectedMinutes + 1).coerceAtMost(120)) }
+                            onClick = { onDurationSecondsChanged(selectedDurationSeconds + 60) }
                         )
                     }
                 }
@@ -1778,7 +1866,7 @@ fun BottomHUDEngine(
                         enabled = startEnabled,
                         modifier = Modifier
                             .height(72.dp)
-                            .weight(1.05f)
+                            .weight(0.9f)
                             .testTag("start_button"),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = colorScheme.primary,
@@ -1802,7 +1890,7 @@ fun BottomHUDEngine(
                         onClick = onStop,
                         modifier = Modifier
                             .height(72.dp)
-                            .weight(1.05f)
+                            .weight(0.9f)
                             .testTag("stop_on_button"),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = colorScheme.error,
@@ -1826,6 +1914,71 @@ fun BottomHUDEngine(
             }
         }
     }
+}
+
+@Composable
+private fun DurationPickerColumn(
+    label: String,
+    value: Int,
+    range: IntRange,
+    wrapSelectorWheel: Boolean,
+    onValueChanged: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = label,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+        DurationNumberPicker(
+            value = value,
+            range = range,
+            formatter = { String.format(Locale.US, "%02d", it) },
+            wrapSelectorWheel = wrapSelectorWheel,
+            onValueChanged = onValueChanged,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun DurationNumberPicker(
+    value: Int,
+    range: IntRange,
+    formatter: (Int) -> String,
+    onValueChanged: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    wrapSelectorWheel: Boolean = false
+) {
+    AndroidView(
+        modifier = modifier.height(160.dp),
+        factory = { context ->
+            NumberPicker(context).apply {
+                descendantFocusability = NumberPicker.FOCUS_BLOCK_DESCENDANTS
+                minValue = range.first
+                maxValue = range.last
+                this.value = value.coerceIn(range)
+                this.wrapSelectorWheel = wrapSelectorWheel
+                setFormatter { formatter(it) }
+                setOnValueChangedListener { _, _, newValue -> onValueChanged(newValue) }
+            }
+        },
+        update = { picker ->
+            picker.minValue = range.first
+            picker.maxValue = range.last
+            picker.value = value.coerceIn(range)
+            picker.wrapSelectorWheel = wrapSelectorWheel
+            picker.setFormatter { formatter(it) }
+            picker.setOnValueChangedListener { _, _, newValue -> onValueChanged(newValue) }
+        }
+    )
 }
 
 @Composable

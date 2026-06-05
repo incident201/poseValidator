@@ -130,4 +130,9 @@
     <string name="onboarding_previous">Back</string>
     <string name="onboarding_done">Start</string>
     <string name="view_instructions">View instructions</string>
+    <string name="set_timer">Set timer</string>
+    <string name="hours">Hours</string>
+    <string name="minutes">Minutes</string>
+    <string name="cancel">Cancel</string>
+    <string name="apply">Apply</string>
 </resources>

@@ -130,4 +130,9 @@
     <string name="onboarding_previous">Назад</string>
     <string name="onboarding_done">Начать</string>
     <string name="view_instructions">Посмотреть инструкции</string>
+    <string name="set_timer">Установить таймер</string>
+    <string name="hours">Часы</string>
+    <string name="minutes">Минуты</string>
+    <string name="cancel">Отмена</string>
+    <string name="apply">Применить</string>
 </resources>
