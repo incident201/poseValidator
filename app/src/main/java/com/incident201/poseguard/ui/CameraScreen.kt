@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Environment
 import android.speech.tts.TextToSpeech
 import android.os.SystemClock
+import android.view.View
 import android.provider.MediaStore
 import android.util.Log
 import androidx.activity.compose.BackHandler
@@ -50,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -88,6 +90,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.Locale
 import java.util.Date
 import android.util.Size
+import android.widget.EditText
 import android.widget.NumberPicker
 import android.widget.Toast
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -1815,9 +1818,11 @@ fun BottomHUDEngine(
                     if (canStart) {
                         TimerStepButton(
                             symbol = "−",
-                            enabled = selectedDurationSeconds > 1,
+                            enabled = selectedDurationSeconds > 60,
                             contentDescription = localizedString(language, R.string.decrease),
-                            onClick = { onDurationSecondsChanged((selectedDurationSeconds - 60).coerceAtLeast(1)) }
+                            onClick = {
+                                onDurationSecondsChanged((selectedDurationSeconds - 60).coerceAtLeast(60))
+                            }
                         )
                     }
 
@@ -1838,9 +1843,10 @@ fun BottomHUDEngine(
                                 .then(
                                     if (canStart) {
                                         Modifier.clickable {
-                                            val safeSelectedSeconds = selectedDurationSeconds.coerceAtLeast(0)
-                                            pickerHours = safeSelectedSeconds / 3600
-                                            pickerMinutes = (safeSelectedSeconds % 3600) / 60
+                                            val safeSelectedSeconds = selectedDurationSeconds.coerceAtLeast(1)
+                                            val totalPickerMinutes = (safeSelectedSeconds + 59) / 60
+                                            pickerHours = totalPickerMinutes / 60
+                                            pickerMinutes = totalPickerMinutes % 60
                                             showTimerSheet = true
                                         }
                                     } else {
@@ -1957,6 +1963,8 @@ private fun DurationNumberPicker(
     modifier: Modifier = Modifier,
     wrapSelectorWheel: Boolean = false
 ) {
+    val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
+
     AndroidView(
         modifier = modifier.height(160.dp),
         factory = { context ->
@@ -1968,6 +1976,7 @@ private fun DurationNumberPicker(
                 this.wrapSelectorWheel = wrapSelectorWheel
                 setFormatter { formatter(it) }
                 setOnValueChangedListener { _, _, newValue -> onValueChanged(newValue) }
+                applyTimerPickerStyle(textColor)
             }
         },
         update = { picker ->
@@ -1977,8 +1986,26 @@ private fun DurationNumberPicker(
             picker.wrapSelectorWheel = wrapSelectorWheel
             picker.setFormatter { formatter(it) }
             picker.setOnValueChangedListener { _, _, newValue -> onValueChanged(newValue) }
+            picker.applyTimerPickerStyle(textColor)
         }
     )
+}
+
+private fun NumberPicker.applyTimerPickerStyle(textColor: Int) {
+    setBackgroundColor(android.graphics.Color.TRANSPARENT)
+
+    for (index in 0 until childCount) {
+        val child = getChildAt(index)
+        if (child is EditText) {
+            child.setTextColor(textColor)
+            child.textAlignment = View.TEXT_ALIGNMENT_CENTER
+            child.typeface = android.graphics.Typeface.create(
+                android.graphics.Typeface.MONOSPACE,
+                android.graphics.Typeface.BOLD
+            )
+            child.textSize = 24f
+        }
+    }
 }
 
 @Composable
