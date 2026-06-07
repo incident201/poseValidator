@@ -27,12 +27,6 @@ jobs:
         with:
           gradle-version: '9.3.1' # Совместимая версия для AGP 9.1.1+ в окружении сборки
 
-      - name: Create Mock secrets.properties if required
-        run: |
-          # Предотвращает возможные падения плагина Secrets Gradle Plugin по умолчанию
-          touch local.properties
-          echo "GEMINI_API_KEY=mock_key_for_testing" >> local.properties
-
       - name: Restore or Generate Debug Keystore
         run: |
           if [ -f "debug.keystore.base64" ]; then
