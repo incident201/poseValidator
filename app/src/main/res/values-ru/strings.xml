@@ -137,6 +137,7 @@
 
     <string name="settings_customize_audio">Звуки и реакции</string>
     <string name="settings_customize_audio_description">Реакции на события</string>
+    <string name="settings_configure">Настроить</string>
     <string name="audio_cue_place_device_still">Поставить неподвижно</string>
     <string name="audio_cue_take_position">Занять позу</string>
     <string name="audio_cue_time_started_hold_position">Старт / держать позу</string>
