@@ -1,5 +1,9 @@
 package com.incident201.poseguard.ui
 
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -13,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
@@ -20,6 +25,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.incident201.poseguard.R
+import com.incident201.poseguard.audio.AudioCue
+import com.incident201.poseguard.audio.AudioCueMode
+import com.incident201.poseguard.audio.AudioCueSettings
 import com.incident201.poseguard.viewmodel.AppLanguage
 import com.incident201.poseguard.viewmodel.FaceCheckMode
 import com.incident201.poseguard.viewmodel.GameSettings
@@ -51,6 +59,8 @@ internal fun SettingsScreen(
     onPoseSmootherBetaChanged: (Float) -> Unit,
     onPoseSmootherDerivativeCutoffChanged: (Float) -> Unit,
     onWristDriftWeightChanged: (Float) -> Unit,
+    onCustomizeAudioEnabledChanged: (Boolean) -> Unit,
+    onAudioCueSettingsChanged: (AudioCue, AudioCueSettings) -> Unit,
     onShowInstructions: () -> Unit
  ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -88,6 +98,13 @@ internal fun SettingsScreen(
         LanguageSelectorCard(
             language = settings.language,
             onLanguageChanged = onLanguageChanged,
+            colorScheme = colorScheme
+        )
+        Spacer(Modifier.height(12.dp))
+        CustomizeAudioCard(
+            settings = settings,
+            onEnabledChanged = onCustomizeAudioEnabledChanged,
+            onSettingsChanged = onAudioCueSettingsChanged,
             colorScheme = colorScheme
         )
         Spacer(Modifier.height(12.dp))
@@ -354,6 +371,151 @@ internal fun SettingsScreen(
         }
         Spacer(Modifier.height(20.dp))
     }
+}
+
+@Composable
+private fun CustomizeAudioCard(
+    settings: GameSettings,
+    onEnabledChanged: (Boolean) -> Unit,
+    onSettingsChanged: (AudioCue, AudioCueSettings) -> Unit,
+    colorScheme: ColorScheme
+) {
+    val context = LocalContext.current
+    var selectedCue by remember { mutableStateOf<AudioCue?>(null) }
+    var cueAwaitingFile by remember { mutableStateOf<AudioCue?>(null) }
+    val audioFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        val cue = cueAwaitingFile
+        cueAwaitingFile = null
+        if (cue == null || uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        }
+        val existing = settings.audioCueSettings[cue] ?: AudioCueSettings()
+        onSettingsChanged(
+            cue,
+            existing.copy(mode = AudioCueMode.AudioFile, audioFileUri = uri.toString())
+        )
+    }
+
+    Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    localizedString(settings.language, R.string.settings_customize_audio),
+                    color = colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(12.dp))
+                Switch(
+                    checked = settings.customizeAudioEnabled,
+                    onCheckedChange = onEnabledChanged
+                )
+            }
+            Text(
+                localizedString(settings.language, R.string.settings_customize_audio_description),
+                color = colorScheme.onSurfaceVariant
+            )
+            if (settings.customizeAudioEnabled) {
+                Spacer(Modifier.height(8.dp))
+                AudioCue.entries.forEach { cue ->
+                    val cueSettings = settings.audioCueSettings[cue] ?: AudioCueSettings()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { selectedCue = cue }
+                            .padding(horizontal = 4.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            localizedString(settings.language, cue.labelRes()),
+                            color = colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            localizedString(settings.language, cueSettings.mode.labelRes()),
+                            color = colorScheme.primary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    selectedCue?.let { cue ->
+        val current = settings.audioCueSettings[cue] ?: AudioCueSettings()
+        AlertDialog(
+            onDismissRequest = { selectedCue = null },
+            title = { Text(localizedString(settings.language, cue.labelRes())) },
+            text = {
+                Column {
+                    AudioCueMode.entries.forEach { mode ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    selectedCue = null
+                                    if (mode == AudioCueMode.AudioFile) {
+                                        cueAwaitingFile = cue
+                                        audioFilePicker.launch(arrayOf("audio/*"))
+                                    } else {
+                                        onSettingsChanged(cue, current.copy(mode = mode))
+                                    }
+                                }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = current.mode == mode,
+                                onClick = null
+                            )
+                            Text(localizedString(settings.language, mode.labelRes()))
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { selectedCue = null }) {
+                    Text(localizedString(settings.language, R.string.cancel))
+                }
+            }
+        )
+    }
+}
+
+private fun AudioCue.labelRes(): Int = when (this) {
+    AudioCue.PlaceDeviceStill -> R.string.audio_cue_place_device_still
+    AudioCue.TakePosition -> R.string.audio_cue_take_position
+    AudioCue.TimeStartedHoldPosition -> R.string.audio_cue_time_started_hold_position
+    AudioCue.TimeIsUp -> R.string.audio_cue_time_is_up
+    AudioCue.DefeatTryAgain -> R.string.audio_cue_defeat_try_again
+    AudioCue.MotionViolation -> R.string.audio_cue_motion_violation
+    AudioCue.DriftViolation -> R.string.audio_cue_drift_violation
+    AudioCue.ViolationRecorded -> R.string.audio_cue_violation_recorded
+    AudioCue.FaceTurnedAway -> R.string.audio_cue_face_turned_away
+    AudioCue.FaceLookedAtCamera -> R.string.audio_cue_face_looked_at_camera
+}
+
+private fun AudioCueMode.labelRes(): Int = when (this) {
+    AudioCueMode.UseTts -> R.string.audio_cue_mode_use_tts
+    AudioCueMode.AudioFile -> R.string.audio_cue_mode_choose_audio_file
+    AudioCueMode.Vibration -> R.string.audio_cue_mode_use_vibration
+    AudioCueMode.Off -> R.string.audio_cue_mode_off
 }
 
 @Composable
