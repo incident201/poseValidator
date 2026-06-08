@@ -1,6 +1,7 @@
 package com.incident201.poseguard.ui
 
 import android.content.Intent
+import android.media.MediaPlayer
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,6 +14,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -373,6 +376,7 @@ internal fun SettingsScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CustomizeAudioCard(
     settings: GameSettings,
@@ -381,8 +385,63 @@ private fun CustomizeAudioCard(
     colorScheme: ColorScheme
 ) {
     val context = LocalContext.current
-    var selectedCue by remember { mutableStateOf<AudioCue?>(null) }
     var cueAwaitingFile by remember { mutableStateOf<AudioCue?>(null) }
+    var previewingCue by remember { mutableStateOf<AudioCue?>(null) }
+    var previewPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+
+    fun releasePreview(player: MediaPlayer) {
+        if (previewPlayer === player) {
+            previewPlayer = null
+            previewingCue = null
+        }
+        runCatching { player.stop() }
+        runCatching { player.release() }
+    }
+
+    fun stopPreview() {
+        previewPlayer?.let(::releasePreview)
+    }
+
+    fun togglePreview(cue: AudioCue, uriValue: String) {
+        if (previewingCue == cue) {
+            stopPreview()
+            return
+        }
+
+        stopPreview()
+        val player = MediaPlayer()
+        previewPlayer = player
+        previewingCue = cue
+        runCatching {
+            player.setDataSource(context.applicationContext, Uri.parse(uriValue))
+            player.setOnPreparedListener { prepared ->
+                if (previewPlayer === prepared) {
+                    runCatching { prepared.start() }.onFailure { releasePreview(prepared) }
+                } else {
+                    releasePreview(prepared)
+                }
+            }
+            player.setOnCompletionListener { completed -> releasePreview(completed) }
+            player.setOnErrorListener { failed, _, _ ->
+                releasePreview(failed)
+                true
+            }
+            player.prepareAsync()
+        }.onFailure {
+            stopPreview()
+        }
+    }
+
+    val currentPreviewPlayer by rememberUpdatedState(previewPlayer)
+    DisposableEffect(Unit) {
+        onDispose {
+            currentPreviewPlayer?.let { player ->
+                runCatching { player.stop() }
+                runCatching { player.release() }
+            }
+        }
+    }
+
     val audioFilePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -395,6 +454,7 @@ private fun CustomizeAudioCard(
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
         }
+        if (previewingCue == cue) stopPreview()
         val existing = settings.audioCueSettings[cue] ?: AudioCueSettings()
         onSettingsChanged(
             cue,
@@ -418,7 +478,10 @@ private fun CustomizeAudioCard(
                 Spacer(Modifier.width(12.dp))
                 Switch(
                     checked = settings.customizeAudioEnabled,
-                    onCheckedChange = onEnabledChanged
+                    onCheckedChange = {
+                        if (!it) stopPreview()
+                        onEnabledChanged(it)
+                    }
                 )
             }
             Text(
@@ -426,75 +489,113 @@ private fun CustomizeAudioCard(
                 color = colorScheme.onSurfaceVariant
             )
             if (settings.customizeAudioEnabled) {
-                Spacer(Modifier.height(8.dp))
-                AudioCue.entries.forEach { cue ->
+                Spacer(Modifier.height(12.dp))
+                AudioCue.entries.forEachIndexed { index, cue ->
                     val cueSettings = settings.audioCueSettings[cue] ?: AudioCueSettings()
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { selectedCue = cue }
-                            .padding(horizontal = 4.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            localizedString(settings.language, cue.labelRes()),
-                            color = colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            localizedString(settings.language, cueSettings.mode.labelRes()),
-                            color = colorScheme.primary,
-                            fontWeight = FontWeight.Medium
+                    AudioCueSettingRow(
+                        language = settings.language,
+                        cue = cue,
+                        cueSettings = cueSettings,
+                        isPreviewing = previewingCue == cue,
+                        onModeSelected = { mode ->
+                            if (previewingCue == cue) stopPreview()
+                            if (mode == AudioCueMode.AudioFile) {
+                                cueAwaitingFile = cue
+                                audioFilePicker.launch(arrayOf("audio/*"))
+                            } else {
+                                onSettingsChanged(cue, cueSettings.copy(mode = mode))
+                            }
+                        },
+                        onPreviewClick = {
+                            cueSettings.audioFileUri?.let { togglePreview(cue, it) }
+                        },
+                        colorScheme = colorScheme
+                    )
+                    if (index != AudioCue.entries.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            color = colorScheme.outlineVariant.copy(alpha = 0.65f)
                         )
                     }
                 }
             }
         }
     }
+}
 
-    selectedCue?.let { cue ->
-        val current = settings.audioCueSettings[cue] ?: AudioCueSettings()
-        AlertDialog(
-            onDismissRequest = { selectedCue = null },
-            title = { Text(localizedString(settings.language, cue.labelRes())) },
-            text = {
-                Column {
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AudioCueSettingRow(
+    language: AppLanguage,
+    cue: AudioCue,
+    cueSettings: AudioCueSettings,
+    isPreviewing: Boolean,
+    onModeSelected: (AudioCueMode) -> Unit,
+    onPreviewClick: () -> Unit,
+    colorScheme: ColorScheme
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val hasAudioFile = cueSettings.mode == AudioCueMode.AudioFile &&
+        !cueSettings.audioFileUri.isNullOrBlank()
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = localizedString(language, cue.labelRes()),
+            color = colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Medium
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { expanded = !expanded },
+                modifier = Modifier.weight(1f)
+            ) {
+                OutlinedTextField(
+                    value = localizedString(language, cueSettings.mode.labelRes()),
+                    onValueChange = {},
+                    readOnly = true,
+                    singleLine = true,
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                    },
+                    colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                    modifier = Modifier
+                        .menuAnchor()
+                        .fillMaxWidth()
+                )
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
                     AudioCueMode.entries.forEach { mode ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable {
-                                    selectedCue = null
-                                    if (mode == AudioCueMode.AudioFile) {
-                                        cueAwaitingFile = cue
-                                        audioFilePicker.launch(arrayOf("audio/*"))
-                                    } else {
-                                        onSettingsChanged(cue, current.copy(mode = mode))
-                                    }
-                                }
-                                .padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = current.mode == mode,
-                                onClick = null
-                            )
-                            Text(localizedString(settings.language, mode.labelRes()))
-                        }
+                        DropdownMenuItem(
+                            text = { Text(localizedString(language, mode.labelRes())) },
+                            onClick = {
+                                expanded = false
+                                onModeSelected(mode)
+                            }
+                        )
                     }
                 }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { selectedCue = null }) {
-                    Text(localizedString(settings.language, R.string.cancel))
+            }
+            if (hasAudioFile) {
+                Spacer(Modifier.width(8.dp))
+                FilledTonalIconButton(onClick = onPreviewClick) {
+                    Icon(
+                        imageVector = if (isPreviewing) Icons.Filled.Stop else Icons.Filled.PlayArrow,
+                        contentDescription = localizedString(
+                            language,
+                            if (isPreviewing) R.string.audio_cue_stop_preview
+                            else R.string.audio_cue_play_preview
+                        )
+                    )
                 }
             }
-        )
+        }
     }
 }
 
