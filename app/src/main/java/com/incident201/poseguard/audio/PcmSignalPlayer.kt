@@ -12,9 +12,13 @@ class PcmSignalPlayer : AutoCloseable {
     private var audioTrack: AudioTrack? = null
     private var closed = false
 
-    fun play(settings: PcmSignalSettings) {
+    fun play(
+        settings: PcmSignalSettings,
+        onCompletion: (() -> Unit)? = null
+    ) {
         val normalized = settings.normalized()
         val samples = generateStereoBuffer(normalized)
+        val markerFrameCount = (samples.size / STEREO_CHANNEL_COUNT).coerceAtLeast(1)
         val track = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -35,7 +39,7 @@ class PcmSignalPlayer : AutoCloseable {
 
         synchronized(lock) {
             if (closed) {
-                track.release()
+                releaseTrack(track)
                 return
             }
             releaseCurrentTrackLocked()
@@ -43,6 +47,24 @@ class PcmSignalPlayer : AutoCloseable {
             try {
                 val written = track.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
                 if (written == samples.size) {
+                    track.setNotificationMarkerPosition(markerFrameCount)
+                    track.setPlaybackPositionUpdateListener(
+                        object : AudioTrack.OnPlaybackPositionUpdateListener {
+                            override fun onMarkerReached(completedTrack: AudioTrack) {
+                                var completionCallback: (() -> Unit)? = null
+                                synchronized(lock) {
+                                    if (audioTrack === completedTrack) {
+                                        audioTrack = null
+                                        releaseTrack(completedTrack)
+                                        completionCallback = onCompletion
+                                    }
+                                }
+                                completionCallback?.invoke()
+                            }
+
+                            override fun onPeriodicNotification(track: AudioTrack) = Unit
+                        }
+                    )
                     track.play()
                 } else {
                     releaseCurrentTrackLocked()
@@ -70,6 +92,10 @@ class PcmSignalPlayer : AutoCloseable {
     private fun releaseCurrentTrackLocked() {
         val track = audioTrack ?: return
         audioTrack = null
+        releaseTrack(track)
+    }
+
+    private fun releaseTrack(track: AudioTrack) {
         runCatching { track.stop() }
         runCatching { track.flush() }
         runCatching { track.release() }

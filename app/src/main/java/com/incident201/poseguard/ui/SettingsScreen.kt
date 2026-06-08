@@ -38,6 +38,7 @@ import com.incident201.poseguard.audio.PcmSignalSettings
 import com.incident201.poseguard.viewmodel.AppLanguage
 import com.incident201.poseguard.viewmodel.FaceCheckMode
 import com.incident201.poseguard.viewmodel.GameSettings
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 @Composable
@@ -389,6 +390,7 @@ private fun CustomizeAudioCard(
     colorScheme: ColorScheme
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val pcmPreviewPlayer = remember { PcmSignalPlayer() }
     var cueAwaitingFile by remember { mutableStateOf<AudioCue?>(null) }
     var audioPreviewingCue by remember { mutableStateOf<AudioCue?>(null) }
@@ -456,7 +458,15 @@ private fun CustomizeAudioCard(
         }
 
         stopAllPreviews()
-        runCatching { pcmPreviewPlayer.play(pcmSettings) }
+        runCatching {
+            pcmPreviewPlayer.play(pcmSettings) {
+                coroutineScope.launch {
+                    if (pcmPreviewingCue == cue) {
+                        pcmPreviewingCue = null
+                    }
+                }
+            }
+        }
             .onSuccess { pcmPreviewingCue = cue }
             .onFailure { stopPcmPreview() }
     }
