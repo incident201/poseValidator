@@ -68,6 +68,7 @@ import androidx.compose.ui.zIndex
 import androidx.annotation.StringRes
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.incident201.poseguard.audio.AudioCuePlaybackSettings
 import com.incident201.poseguard.audio.AudioCuePlayer
 import com.incident201.poseguard.tracker.Point3D
 import com.incident201.poseguard.tracker.PoseLandmarkerService
@@ -635,6 +636,7 @@ fun CameraScreen(
             onPoseSmootherBetaChanged = viewModel::updatePoseSmootherBeta,
             onPoseSmootherDerivativeCutoffChanged = viewModel::updatePoseSmootherDerivativeCutoff,
             onWristDriftWeightChanged = viewModel::updateWristDriftWeight,
+            onCustomizeAudioEnabledChanged = viewModel::updateCustomizeAudioEnabled,
             onAudioCueSettingsChanged = viewModel::updateAudioCueSettings,
             onShowInstructions = {
                 showSettings = false
@@ -1549,9 +1551,14 @@ private fun DrawScope.drawPoseDebugOverlay(
 @Composable
 private fun AudioCueAnnouncer(viewModel: GameViewModel, settings: GameSettings) {
     val context = LocalContext.current
-    val currentCueSettings = rememberUpdatedState(settings.audioCueSettings)
+    val currentPlaybackSettings = rememberUpdatedState(
+        AudioCuePlaybackSettings(
+            customizeAudioEnabled = settings.customizeAudioEnabled,
+            cueSettings = settings.audioCueSettings
+        )
+    )
     val player = remember(context) {
-        AudioCuePlayer(context) { currentCueSettings.value }
+        AudioCuePlayer(context) { currentPlaybackSettings.value }
     }
 
     LaunchedEffect(player, settings.language) {

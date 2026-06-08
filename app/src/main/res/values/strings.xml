@@ -136,6 +136,7 @@
     <string name="apply">Apply</string>
 
     <string name="settings_customize_audio">Customize Audio</string>
+    <string name="settings_customize_audio_description">Choose custom reactions for app events</string>
     <string name="audio_cue_place_device_still">Place device still</string>
     <string name="audio_cue_take_position">Take position</string>
     <string name="audio_cue_time_started_hold_position">Time started / hold position</string>

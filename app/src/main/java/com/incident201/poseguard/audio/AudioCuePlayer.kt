@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 class AudioCuePlayer(
     context: Context,
-    private val settingsProvider: () -> Map<AudioCue, AudioCueSettings>
+    private val settingsProvider: () -> AudioCuePlaybackSettings
 ) : AutoCloseable {
     private val appContext = context.applicationContext
     private val pendingTtsMessages = ConcurrentLinkedQueue<String>()
@@ -48,54 +48,51 @@ class AudioCuePlayer(
 
     fun play(cue: AudioCue, ttsText: String) {
         if (closed) return
-        val settings = settingsProvider()[cue] ?: AudioCueSettings()
+        val playbackSettings = settingsProvider()
+        if (!playbackSettings.customizeAudioEnabled) {
+            speak(ttsText)
+            return
+        }
+
+        val settings = playbackSettings.cueSettings[cue] ?: AudioCueSettings()
         when (settings.mode) {
             AudioCueMode.UseTts -> speak(ttsText)
-            AudioCueMode.AudioFile -> playAudioFile(settings.audioFileUri, ttsText)
+            AudioCueMode.AudioFile -> playAudioFile(settings.audioFileUri)
             AudioCueMode.Vibration -> vibrate()
             AudioCueMode.Off -> Unit
         }
     }
 
-    private fun playAudioFile(uriValue: String?, fallbackText: String) {
-        if (uriValue.isNullOrBlank()) {
-            speak(fallbackText)
-            return
-        }
+    private fun playAudioFile(uriValue: String?) {
+        if (uriValue.isNullOrBlank()) return
 
         releaseMediaPlayer()
-        val fallbackUsed = AtomicBoolean(false)
-        fun fallback() {
-            if (fallbackUsed.compareAndSet(false, true)) speak(fallbackText)
-        }
-
-        val player = runCatching {
-            MediaPlayer().apply {
-                setDataSource(appContext, Uri.parse(uriValue))
-                setOnPreparedListener { prepared ->
-                    runCatching { prepared.start() }.onFailure {
-                        if (mediaPlayer === prepared) mediaPlayer = null
-                        runCatching { prepared.release() }
-                        fallback()
-                    }
-                }
-                setOnCompletionListener { completed ->
-                    if (mediaPlayer === completed) mediaPlayer = null
-                    completed.release()
-                }
-                setOnErrorListener { failed, _, _ ->
-                    if (mediaPlayer === failed) mediaPlayer = null
-                    failed.release()
-                    fallback()
-                    true
-                }
-                prepareAsync()
-            }
-        }.getOrElse {
-            fallback()
-            null
-        }
+        val player = MediaPlayer()
         mediaPlayer = player
+        try {
+            player.setDataSource(appContext, Uri.parse(uriValue))
+            player.setOnPreparedListener { prepared ->
+                runCatching { prepared.start() }.onFailure {
+                    releaseMediaPlayer(prepared)
+                }
+            }
+            player.setOnCompletionListener { completed ->
+                releaseMediaPlayer(completed)
+            }
+            player.setOnErrorListener { failed, _, _ ->
+                releaseMediaPlayer(failed)
+                true
+            }
+            player.prepareAsync()
+        } catch (_: Exception) {
+            releaseMediaPlayer(player)
+        }
+    }
+
+    private fun releaseMediaPlayer(player: MediaPlayer) {
+        if (mediaPlayer === player) mediaPlayer = null
+        runCatching { player.stop() }
+        runCatching { player.release() }
     }
 
     private fun vibrate() {
@@ -132,12 +129,7 @@ class AudioCuePlayer(
     }
 
     private fun releaseMediaPlayer() {
-        val player = mediaPlayer
-        mediaPlayer = null
-        if (player != null) {
-            runCatching { player.stop() }
-            runCatching { player.release() }
-        }
+        mediaPlayer?.let(::releaseMediaPlayer)
     }
 
     override fun close() {

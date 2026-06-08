@@ -25,6 +25,12 @@ data class AudioCueSettings(
     val audioFileUri: String? = null
 )
 
+data class AudioCuePlaybackSettings(
+    val customizeAudioEnabled: Boolean = false,
+    val cueSettings: Map<AudioCue, AudioCueSettings> =
+        AudioCue.entries.associateWith { AudioCueSettings() }
+)
+
 data class AudioCueEvent(
     val cue: AudioCue,
     val ttsText: String

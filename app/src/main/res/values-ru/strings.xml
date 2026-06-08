@@ -136,6 +136,7 @@
     <string name="apply">Применить</string>
 
     <string name="settings_customize_audio">Настроить реакции</string>
+    <string name="settings_customize_audio_description">Выберите реакции для событий приложения</string>
     <string name="audio_cue_place_device_still">Установить устройство неподвижно</string>
     <string name="audio_cue_take_position">Занять позицию</string>
     <string name="audio_cue_time_started_hold_position">Время пошло / удерживать позицию</string>

@@ -59,6 +59,7 @@ internal fun SettingsScreen(
     onPoseSmootherBetaChanged: (Float) -> Unit,
     onPoseSmootherDerivativeCutoffChanged: (Float) -> Unit,
     onWristDriftWeightChanged: (Float) -> Unit,
+    onCustomizeAudioEnabledChanged: (Boolean) -> Unit,
     onAudioCueSettingsChanged: (AudioCue, AudioCueSettings) -> Unit,
     onShowInstructions: () -> Unit
  ) {
@@ -102,6 +103,7 @@ internal fun SettingsScreen(
         Spacer(Modifier.height(12.dp))
         CustomizeAudioCard(
             settings = settings,
+            onEnabledChanged = onCustomizeAudioEnabledChanged,
             onSettingsChanged = onAudioCueSettingsChanged,
             colorScheme = colorScheme
         )
@@ -374,6 +376,7 @@ internal fun SettingsScreen(
 @Composable
 private fun CustomizeAudioCard(
     settings: GameSettings,
+    onEnabledChanged: (Boolean) -> Unit,
     onSettingsChanged: (AudioCue, AudioCueSettings) -> Unit,
     colorScheme: ColorScheme
 ) {
@@ -401,34 +404,52 @@ private fun CustomizeAudioCard(
 
     Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
         Column(Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    localizedString(settings.language, R.string.settings_customize_audio),
+                    color = colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(12.dp))
+                Switch(
+                    checked = settings.customizeAudioEnabled,
+                    onCheckedChange = onEnabledChanged
+                )
+            }
             Text(
-                localizedString(settings.language, R.string.settings_customize_audio),
-                color = colorScheme.onSurfaceVariant,
-                fontWeight = FontWeight.SemiBold
+                localizedString(settings.language, R.string.settings_customize_audio_description),
+                color = colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.height(8.dp))
-            AudioCue.entries.forEach { cue ->
-                val cueSettings = settings.audioCueSettings[cue] ?: AudioCueSettings()
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { selectedCue = cue }
-                        .padding(horizontal = 4.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        localizedString(settings.language, cue.labelRes()),
-                        color = colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        localizedString(settings.language, cueSettings.mode.labelRes()),
-                        color = colorScheme.primary,
-                        fontWeight = FontWeight.Medium
-                    )
+            if (settings.customizeAudioEnabled) {
+                Spacer(Modifier.height(8.dp))
+                AudioCue.entries.forEach { cue ->
+                    val cueSettings = settings.audioCueSettings[cue] ?: AudioCueSettings()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { selectedCue = cue }
+                            .padding(horizontal = 4.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            localizedString(settings.language, cue.labelRes()),
+                            color = colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            localizedString(settings.language, cueSettings.mode.labelRes()),
+                            color = colorScheme.primary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             }
         }

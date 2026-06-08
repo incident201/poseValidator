@@ -69,6 +69,7 @@ private const val PREF_SENSITIVITY_PRESETS_VERSION = "sensitivity_presets_versio
 private const val CURRENT_SENSITIVITY_PRESETS_VERSION = 2
 private const val MAX_POSE_DROPOUT_HOLD_FRAMES = 5
 private const val MAX_POSE_DROPOUT_HOLD_MS = 180L
+private const val PREF_CUSTOMIZE_AUDIO_ENABLED = "customize_audio_enabled"
 private const val PREF_AUDIO_CUE_MODE_PREFIX = "audio_cue_mode_"
 private const val PREF_AUDIO_CUE_URI_PREFIX = "audio_cue_uri_"
 
@@ -113,6 +114,7 @@ data class GameSettings(
     val poseSmootherBeta: Float = PoseSmoother.DEFAULT_BETA,
     val poseSmootherDerivativeCutoff: Float = PoseSmoother.DEFAULT_DERIVATIVE_CUTOFF,
     val debugModeEnabled: Boolean = false,
+    val customizeAudioEnabled: Boolean = false,
     val audioCueSettings: Map<AudioCue, AudioCueSettings> =
         AudioCue.entries.associateWith { AudioCueSettings() }
 )
@@ -351,6 +353,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 PoseSmoother.DEFAULT_DERIVATIVE_CUTOFF
             ).coerceIn(PoseSmoother.MIN_CUTOFF_RANGE, PoseSmoother.MAX_CUTOFF_RANGE),
             debugModeEnabled = prefs.getBoolean(PREF_DEBUG_MODE_ENABLED, false),
+            customizeAudioEnabled = prefs.getBoolean(PREF_CUSTOMIZE_AUDIO_ENABLED, false),
             audioCueSettings = loadAudioCueSettings()
         )
     }
@@ -579,6 +582,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     fun updatePenaltiesEnabled(enabled: Boolean) {
         _gameSettings.value = _gameSettings.value.copy(penaltiesEnabled = enabled)
         prefs.edit().putBoolean("penalties_enabled", enabled).apply()
+    }
+
+    fun updateCustomizeAudioEnabled(enabled: Boolean) {
+        _gameSettings.value = _gameSettings.value.copy(customizeAudioEnabled = enabled)
+        prefs.edit().putBoolean(PREF_CUSTOMIZE_AUDIO_ENABLED, enabled).apply()
     }
 
     fun updateAudioCueSettings(cue: AudioCue, settings: AudioCueSettings) {
