@@ -135,21 +135,23 @@
     <string name="cancel">Отмена</string>
     <string name="apply">Применить</string>
 
-    <string name="settings_customize_audio">Настроить реакции</string>
-    <string name="settings_customize_audio_description">Выберите реакции для событий приложения</string>
-    <string name="audio_cue_place_device_still">Установить устройство неподвижно</string>
-    <string name="audio_cue_take_position">Занять позицию</string>
-    <string name="audio_cue_time_started_hold_position">Время пошло / удерживать позицию</string>
+    <string name="settings_customize_audio">Звуки и реакции</string>
+    <string name="settings_customize_audio_description">Реакции на события</string>
+    <string name="audio_cue_place_device_still">Поставить неподвижно</string>
+    <string name="audio_cue_take_position">Занять позу</string>
+    <string name="audio_cue_time_started_hold_position">Старт / держать позу</string>
     <string name="audio_cue_time_is_up">Время вышло</string>
-    <string name="audio_cue_defeat_try_again">Поражение / попробовать снова</string>
-    <string name="audio_cue_motion_violation">Нарушение движения</string>
-    <string name="audio_cue_drift_violation">Изменение позы</string>
-    <string name="audio_cue_violation_recorded">Нарушение зафиксировано</string>
-    <string name="audio_cue_face_turned_away">Лицо отвернулось</string>
-    <string name="audio_cue_face_looked_at_camera">Лицо посмотрело в камеру</string>
-    <string name="audio_cue_mode_use_tts">Использовать TTS</string>
-    <string name="audio_cue_mode_choose_audio_file">Выбрать аудиофайл</string>
-    <string name="audio_cue_mode_use_vibration">Использовать вибрацию</string>
-    <string name="audio_cue_mode_off">Выключить</string>
+    <string name="audio_cue_defeat_try_again">Поражение / повтор</string>
+    <string name="audio_cue_motion_violation">Движение</string>
+    <string name="audio_cue_drift_violation">Смена позы</string>
+    <string name="audio_cue_violation_recorded">Нарушение</string>
+    <string name="audio_cue_face_turned_away">Лицо отвернуто</string>
+    <string name="audio_cue_face_looked_at_camera">Взгляд в камеру</string>
+    <string name="audio_cue_mode_use_tts">TTS</string>
+    <string name="audio_cue_mode_choose_audio_file">Аудиофайл</string>
+    <string name="audio_cue_mode_use_vibration">Вибрация</string>
+    <string name="audio_cue_mode_off">Выкл.</string>
+    <string name="audio_cue_play_preview">Прослушать</string>
+    <string name="audio_cue_stop_preview">Остановить</string>
 
 </resources>

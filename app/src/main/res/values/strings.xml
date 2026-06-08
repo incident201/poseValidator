@@ -147,9 +147,11 @@
     <string name="audio_cue_violation_recorded">Violation recorded</string>
     <string name="audio_cue_face_turned_away">Face turned away</string>
     <string name="audio_cue_face_looked_at_camera">Face looked at camera</string>
-    <string name="audio_cue_mode_use_tts">Use TTS</string>
-    <string name="audio_cue_mode_choose_audio_file">Choose audio file</string>
-    <string name="audio_cue_mode_use_vibration">Use vibration</string>
+    <string name="audio_cue_mode_use_tts">TTS</string>
+    <string name="audio_cue_mode_choose_audio_file">Audio file</string>
+    <string name="audio_cue_mode_use_vibration">Vibration</string>
     <string name="audio_cue_mode_off">Off</string>
+    <string name="audio_cue_play_preview">Play audio</string>
+    <string name="audio_cue_stop_preview">Stop audio</string>
 
 </resources>
