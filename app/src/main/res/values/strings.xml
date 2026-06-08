@@ -153,5 +153,20 @@
     <string name="audio_cue_mode_off">Off</string>
     <string name="audio_cue_play_preview">Play audio</string>
     <string name="audio_cue_stop_preview">Stop audio</string>
+    <string name="audio_cue_mode_pcm">PCM</string>
+    <string name="audio_cue_pcm_configure">Configure</string>
+    <string name="audio_cue_pcm_frequency">Frequency</string>
+    <string name="audio_cue_pcm_duration_seconds">Duration (seconds)</string>
+    <string name="audio_cue_pcm_channel">Channel</string>
+    <string name="audio_cue_pcm_channel_left">Left</string>
+    <string name="audio_cue_pcm_channel_right">Right</string>
+    <string name="audio_cue_pcm_channel_both">Both</string>
+    <string name="audio_cue_pcm_amplitude_percent">Amplitude (%)</string>
+    <string name="audio_cue_pcm_fade_in_ms">Fade in (ms)</string>
+    <string name="audio_cue_pcm_fade_out_ms">Fade out (ms)</string>
+    <string name="audio_cue_pcm_pattern">Pattern</string>
+    <string name="audio_cue_pcm_pattern_single_tone">Single tone</string>
+    <string name="audio_cue_pcm_pattern_double_beep">Double beep</string>
+    <string name="audio_cue_pcm_settings_title">PCM signal</string>
 
 </resources>

@@ -20,6 +20,7 @@ class AudioCuePlayer(
     private val ttsReady = AtomicBoolean(false)
     private val ttsInitialized = AtomicBoolean(false)
     private var mediaPlayer: MediaPlayer? = null
+    private val pcmSignalPlayer = PcmSignalPlayer()
     private var closed = false
     private val ttsRef = AtomicReference<TextToSpeech?>(null)
     private val desiredLocale = AtomicReference(Locale.US)
@@ -57,7 +58,14 @@ class AudioCuePlayer(
         val settings = playbackSettings.cueSettings[cue] ?: AudioCueSettings()
         when (settings.mode) {
             AudioCueMode.UseTts -> speak(ttsText)
-            AudioCueMode.AudioFile -> playAudioFile(settings.audioFileUri)
+            AudioCueMode.AudioFile -> {
+                pcmSignalPlayer.stop()
+                playAudioFile(settings.audioFileUri)
+            }
+            AudioCueMode.Pcm -> {
+                releaseMediaPlayer()
+                runCatching { pcmSignalPlayer.play(settings.pcmSettings) }
+            }
             AudioCueMode.Vibration -> vibrate()
             AudioCueMode.Off -> Unit
         }
@@ -135,6 +143,7 @@ class AudioCuePlayer(
     override fun close() {
         closed = true
         releaseMediaPlayer()
+        pcmSignalPlayer.close()
         ttsRef.getAndSet(null)?.run {
             stop()
             shutdown()

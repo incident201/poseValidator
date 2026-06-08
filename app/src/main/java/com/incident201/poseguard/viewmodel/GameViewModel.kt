@@ -17,6 +17,9 @@ import com.incident201.poseguard.audio.AudioCue
 import com.incident201.poseguard.audio.AudioCueEvent
 import com.incident201.poseguard.audio.AudioCueMode
 import com.incident201.poseguard.audio.AudioCueSettings
+import com.incident201.poseguard.audio.PcmChannel
+import com.incident201.poseguard.audio.PcmPattern
+import com.incident201.poseguard.audio.PcmSignalSettings
 import com.incident201.poseguard.tracker.FaceDetectionStatus
 import com.incident201.poseguard.tracker.FaceCandidateCropper
 import com.incident201.poseguard.tracker.FaceDetectorService
@@ -72,6 +75,13 @@ private const val MAX_POSE_DROPOUT_HOLD_MS = 180L
 private const val PREF_CUSTOMIZE_AUDIO_ENABLED = "customize_audio_enabled"
 private const val PREF_AUDIO_CUE_MODE_PREFIX = "audio_cue_mode_"
 private const val PREF_AUDIO_CUE_URI_PREFIX = "audio_cue_uri_"
+private const val PREF_AUDIO_CUE_PCM_FREQUENCY_PREFIX = "audio_cue_pcm_frequency_"
+private const val PREF_AUDIO_CUE_PCM_DURATION_PREFIX = "audio_cue_pcm_duration_"
+private const val PREF_AUDIO_CUE_PCM_CHANNEL_PREFIX = "audio_cue_pcm_channel_"
+private const val PREF_AUDIO_CUE_PCM_AMPLITUDE_PREFIX = "audio_cue_pcm_amplitude_"
+private const val PREF_AUDIO_CUE_PCM_FADE_IN_PREFIX = "audio_cue_pcm_fade_in_"
+private const val PREF_AUDIO_CUE_PCM_FADE_OUT_PREFIX = "audio_cue_pcm_fade_out_"
+private const val PREF_AUDIO_CUE_PCM_PATTERN_PREFIX = "audio_cue_pcm_pattern_"
 
 enum class GameState {
     Idle,
@@ -366,9 +376,52 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                         ?: AudioCueMode.UseTts.name
                 )
             }.getOrDefault(AudioCueMode.UseTts)
+            val defaultPcmSettings = PcmSignalSettings()
+            val pcmChannel = runCatching {
+                PcmChannel.valueOf(
+                    prefs.getString(
+                        PREF_AUDIO_CUE_PCM_CHANNEL_PREFIX + cue.name,
+                        defaultPcmSettings.channel.name
+                    ) ?: defaultPcmSettings.channel.name
+                )
+            }.getOrDefault(defaultPcmSettings.channel)
+            val pcmPattern = runCatching {
+                PcmPattern.valueOf(
+                    prefs.getString(
+                        PREF_AUDIO_CUE_PCM_PATTERN_PREFIX + cue.name,
+                        defaultPcmSettings.pattern.name
+                    ) ?: defaultPcmSettings.pattern.name
+                )
+            }.getOrDefault(defaultPcmSettings.pattern)
             AudioCueSettings(
                 mode = mode,
-                audioFileUri = prefs.getString(PREF_AUDIO_CUE_URI_PREFIX + cue.name, null)
+                audioFileUri = prefs.getString(PREF_AUDIO_CUE_URI_PREFIX + cue.name, null),
+                pcmSettings = PcmSignalSettings(
+                    frequencyHz = prefs.getInt(
+                        PREF_AUDIO_CUE_PCM_FREQUENCY_PREFIX + cue.name,
+                        defaultPcmSettings.frequencyHz
+                    ).coerceIn(20, 20_000),
+                    durationSeconds = prefs.getFloat(
+                        PREF_AUDIO_CUE_PCM_DURATION_PREFIX + cue.name,
+                        defaultPcmSettings.durationSeconds
+                    ).takeIf(Float::isFinite)
+                        ?.coerceIn(0.05f, 10.0f)
+                        ?: defaultPcmSettings.durationSeconds,
+                    channel = pcmChannel,
+                    amplitudePercent = prefs.getInt(
+                        PREF_AUDIO_CUE_PCM_AMPLITUDE_PREFIX + cue.name,
+                        defaultPcmSettings.amplitudePercent
+                    ).coerceIn(0, 100),
+                    fadeInMs = prefs.getInt(
+                        PREF_AUDIO_CUE_PCM_FADE_IN_PREFIX + cue.name,
+                        defaultPcmSettings.fadeInMs
+                    ).coerceIn(0, 5_000),
+                    fadeOutMs = prefs.getInt(
+                        PREF_AUDIO_CUE_PCM_FADE_OUT_PREFIX + cue.name,
+                        defaultPcmSettings.fadeOutMs
+                    ).coerceIn(0, 5_000),
+                    pattern = pcmPattern
+                )
             )
         }
 
@@ -602,6 +655,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                     putString(PREF_AUDIO_CUE_URI_PREFIX + cue.name, settings.audioFileUri)
                 }
             }
+            .putInt(PREF_AUDIO_CUE_PCM_FREQUENCY_PREFIX + cue.name, settings.pcmSettings.frequencyHz)
+            .putFloat(PREF_AUDIO_CUE_PCM_DURATION_PREFIX + cue.name, settings.pcmSettings.durationSeconds)
+            .putString(PREF_AUDIO_CUE_PCM_CHANNEL_PREFIX + cue.name, settings.pcmSettings.channel.name)
+            .putInt(PREF_AUDIO_CUE_PCM_AMPLITUDE_PREFIX + cue.name, settings.pcmSettings.amplitudePercent)
+            .putInt(PREF_AUDIO_CUE_PCM_FADE_IN_PREFIX + cue.name, settings.pcmSettings.fadeInMs)
+            .putInt(PREF_AUDIO_CUE_PCM_FADE_OUT_PREFIX + cue.name, settings.pcmSettings.fadeOutMs)
+            .putString(PREF_AUDIO_CUE_PCM_PATTERN_PREFIX + cue.name, settings.pcmSettings.pattern.name)
             .apply()
     }
 
