@@ -31,9 +31,14 @@ import com.incident201.poseguard.R
 import com.incident201.poseguard.audio.AudioCue
 import com.incident201.poseguard.audio.AudioCueMode
 import com.incident201.poseguard.audio.AudioCueSettings
+import com.incident201.poseguard.audio.PcmChannel
+import com.incident201.poseguard.audio.PcmPattern
+import com.incident201.poseguard.audio.PcmSignalPlayer
+import com.incident201.poseguard.audio.PcmSignalSettings
 import com.incident201.poseguard.viewmodel.AppLanguage
 import com.incident201.poseguard.viewmodel.FaceCheckMode
 import com.incident201.poseguard.viewmodel.GameSettings
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 @Composable
@@ -385,60 +390,95 @@ private fun CustomizeAudioCard(
     colorScheme: ColorScheme
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val pcmPreviewPlayer = remember { PcmSignalPlayer() }
     var cueAwaitingFile by remember { mutableStateOf<AudioCue?>(null) }
-    var previewingCue by remember { mutableStateOf<AudioCue?>(null) }
-    var previewPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    var audioPreviewingCue by remember { mutableStateOf<AudioCue?>(null) }
+    var pcmPreviewingCue by remember { mutableStateOf<AudioCue?>(null) }
+    var pcmConfiguringCue by remember { mutableStateOf<AudioCue?>(null) }
+    var audioPreviewPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
 
-    fun releasePreview(player: MediaPlayer) {
-        if (previewPlayer === player) {
-            previewPlayer = null
-            previewingCue = null
+    fun releaseAudioPreview(player: MediaPlayer) {
+        if (audioPreviewPlayer === player) {
+            audioPreviewPlayer = null
+            audioPreviewingCue = null
         }
         runCatching { player.stop() }
         runCatching { player.release() }
     }
 
-    fun stopPreview() {
-        previewPlayer?.let(::releasePreview)
+    fun stopAudioPreview() {
+        audioPreviewPlayer?.let(::releaseAudioPreview)
     }
 
-    fun togglePreview(cue: AudioCue, uriValue: String) {
-        if (previewingCue == cue) {
-            stopPreview()
+    fun stopPcmPreview() {
+        pcmPreviewPlayer.stop()
+        pcmPreviewingCue = null
+    }
+
+    fun stopAllPreviews() {
+        stopAudioPreview()
+        stopPcmPreview()
+    }
+
+    fun toggleAudioPreview(cue: AudioCue, uriValue: String) {
+        if (audioPreviewingCue == cue) {
+            stopAudioPreview()
             return
         }
 
-        stopPreview()
+        stopAllPreviews()
         val player = MediaPlayer()
-        previewPlayer = player
-        previewingCue = cue
+        audioPreviewPlayer = player
+        audioPreviewingCue = cue
         runCatching {
             player.setDataSource(context.applicationContext, Uri.parse(uriValue))
             player.setOnPreparedListener { prepared ->
-                if (previewPlayer === prepared) {
-                    runCatching { prepared.start() }.onFailure { releasePreview(prepared) }
+                if (audioPreviewPlayer === prepared) {
+                    runCatching { prepared.start() }.onFailure { releaseAudioPreview(prepared) }
                 } else {
-                    releasePreview(prepared)
+                    releaseAudioPreview(prepared)
                 }
             }
-            player.setOnCompletionListener { completed -> releasePreview(completed) }
+            player.setOnCompletionListener { completed -> releaseAudioPreview(completed) }
             player.setOnErrorListener { failed, _, _ ->
-                releasePreview(failed)
+                releaseAudioPreview(failed)
                 true
             }
             player.prepareAsync()
         }.onFailure {
-            stopPreview()
+            stopAudioPreview()
         }
     }
 
-    val currentPreviewPlayer by rememberUpdatedState(previewPlayer)
+    fun togglePcmPreview(cue: AudioCue, pcmSettings: PcmSignalSettings) {
+        if (pcmPreviewingCue == cue) {
+            stopPcmPreview()
+            return
+        }
+
+        stopAllPreviews()
+        runCatching {
+            pcmPreviewPlayer.play(pcmSettings) {
+                coroutineScope.launch {
+                    if (pcmPreviewingCue == cue) {
+                        pcmPreviewingCue = null
+                    }
+                }
+            }
+        }
+            .onSuccess { pcmPreviewingCue = cue }
+            .onFailure { stopPcmPreview() }
+    }
+
+    val currentAudioPreviewPlayer by rememberUpdatedState(audioPreviewPlayer)
     DisposableEffect(Unit) {
         onDispose {
-            currentPreviewPlayer?.let { player ->
+            currentAudioPreviewPlayer?.let { player ->
                 runCatching { player.stop() }
                 runCatching { player.release() }
             }
+            pcmPreviewPlayer.close()
         }
     }
 
@@ -454,7 +494,7 @@ private fun CustomizeAudioCard(
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
         }
-        if (previewingCue == cue) stopPreview()
+        stopAllPreviews()
         val existing = settings.audioCueSettings[cue] ?: AudioCueSettings()
         onSettingsChanged(
             cue,
@@ -479,7 +519,7 @@ private fun CustomizeAudioCard(
                 Switch(
                     checked = settings.customizeAudioEnabled,
                     onCheckedChange = {
-                        if (!it) stopPreview()
+                        if (!it) stopAllPreviews()
                         onEnabledChanged(it)
                     }
                 )
@@ -496,9 +536,10 @@ private fun CustomizeAudioCard(
                         language = settings.language,
                         cue = cue,
                         cueSettings = cueSettings,
-                        isPreviewing = previewingCue == cue,
+                        isAudioFilePreviewing = audioPreviewingCue == cue,
+                        isPcmPreviewing = pcmPreviewingCue == cue,
                         onModeSelected = { mode ->
-                            if (previewingCue == cue) stopPreview()
+                            stopAllPreviews()
                             if (mode == AudioCueMode.AudioFile) {
                                 cueAwaitingFile = cue
                                 audioFilePicker.launch(arrayOf("audio/*"))
@@ -506,8 +547,15 @@ private fun CustomizeAudioCard(
                                 onSettingsChanged(cue, cueSettings.copy(mode = mode))
                             }
                         },
-                        onPreviewClick = {
-                            cueSettings.audioFileUri?.let { togglePreview(cue, it) }
+                        onAudioFilePreviewClick = {
+                            cueSettings.audioFileUri?.let { toggleAudioPreview(cue, it) }
+                        },
+                        onPcmPreviewClick = {
+                            togglePcmPreview(cue, cueSettings.pcmSettings)
+                        },
+                        onPcmConfigureClick = {
+                            stopAllPreviews()
+                            pcmConfiguringCue = cue
                         },
                         colorScheme = colorScheme
                     )
@@ -521,6 +569,25 @@ private fun CustomizeAudioCard(
             }
         }
     }
+
+    pcmConfiguringCue?.let { cue ->
+        val cueSettings = settings.audioCueSettings[cue] ?: AudioCueSettings()
+        PcmSettingsDialog(
+            language = settings.language,
+            initialSettings = cueSettings.pcmSettings,
+            onDismiss = { pcmConfiguringCue = null },
+            onApply = { updatedPcmSettings ->
+                onSettingsChanged(
+                    cue,
+                    cueSettings.copy(
+                        mode = AudioCueMode.Pcm,
+                        pcmSettings = updatedPcmSettings
+                    )
+                )
+                pcmConfiguringCue = null
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -529,14 +596,18 @@ private fun AudioCueSettingRow(
     language: AppLanguage,
     cue: AudioCue,
     cueSettings: AudioCueSettings,
-    isPreviewing: Boolean,
+    isAudioFilePreviewing: Boolean,
+    isPcmPreviewing: Boolean,
     onModeSelected: (AudioCueMode) -> Unit,
-    onPreviewClick: () -> Unit,
+    onAudioFilePreviewClick: () -> Unit,
+    onPcmPreviewClick: () -> Unit,
+    onPcmConfigureClick: () -> Unit,
     colorScheme: ColorScheme
 ) {
     var expanded by remember { mutableStateOf(false) }
     val hasAudioFile = cueSettings.mode == AudioCueMode.AudioFile &&
         !cueSettings.audioFileUri.isNullOrBlank()
+    val isPcm = cueSettings.mode == AudioCueMode.Pcm
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -582,9 +653,12 @@ private fun AudioCueSettingRow(
                     }
                 }
             }
-            if (hasAudioFile) {
+            if (hasAudioFile || isPcm) {
                 Spacer(Modifier.width(8.dp))
-                FilledTonalIconButton(onClick = onPreviewClick) {
+                val isPreviewing = if (isPcm) isPcmPreviewing else isAudioFilePreviewing
+                FilledTonalIconButton(
+                    onClick = if (isPcm) onPcmPreviewClick else onAudioFilePreviewClick
+                ) {
                     Icon(
                         imageVector = if (isPreviewing) Icons.Filled.Stop else Icons.Filled.PlayArrow,
                         contentDescription = localizedString(
@@ -594,6 +668,187 @@ private fun AudioCueSettingRow(
                         )
                     )
                 }
+            }
+            if (isPcm) {
+                Spacer(Modifier.width(4.dp))
+                TextButton(onClick = onPcmConfigureClick) {
+                    Text(localizedString(language, R.string.audio_cue_pcm_configure))
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PcmSettingsDialog(
+    language: AppLanguage,
+    initialSettings: PcmSignalSettings,
+    onDismiss: () -> Unit,
+    onApply: (PcmSignalSettings) -> Unit
+) {
+    var frequencyText by remember(initialSettings) {
+        mutableStateOf(initialSettings.frequencyHz.toString())
+    }
+    var durationText by remember(initialSettings) {
+        mutableStateOf(initialSettings.durationSeconds.toString())
+    }
+    var amplitudeText by remember(initialSettings) {
+        mutableStateOf(initialSettings.amplitudePercent.toString())
+    }
+    var fadeInText by remember(initialSettings) {
+        mutableStateOf(initialSettings.fadeInMs.toString())
+    }
+    var fadeOutText by remember(initialSettings) {
+        mutableStateOf(initialSettings.fadeOutMs.toString())
+    }
+    var channel by remember(initialSettings) { mutableStateOf(initialSettings.channel) }
+    var pattern by remember(initialSettings) { mutableStateOf(initialSettings.pattern) }
+    var channelExpanded by remember { mutableStateOf(false) }
+    var patternExpanded by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(localizedString(language, R.string.audio_cue_pcm_settings_title)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = frequencyText,
+                    onValueChange = { frequencyText = it.filter(Char::isDigit) },
+                    label = { Text(localizedString(language, R.string.audio_cue_pcm_frequency)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = durationText,
+                    onValueChange = { durationText = it },
+                    label = {
+                        Text(localizedString(language, R.string.audio_cue_pcm_duration_seconds))
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                PcmEnumSettingField(
+                    label = localizedString(language, R.string.audio_cue_pcm_channel),
+                    value = localizedString(language, channel.labelRes()),
+                    expanded = channelExpanded,
+                    onExpandedChange = { channelExpanded = it },
+                    options = PcmChannel.entries.map { option ->
+                        localizedString(language, option.labelRes()) to { channel = option }
+                    }
+                )
+                OutlinedTextField(
+                    value = amplitudeText,
+                    onValueChange = { amplitudeText = it.filter(Char::isDigit) },
+                    label = {
+                        Text(localizedString(language, R.string.audio_cue_pcm_amplitude_percent))
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = fadeInText,
+                    onValueChange = { fadeInText = it.filter(Char::isDigit) },
+                    label = { Text(localizedString(language, R.string.audio_cue_pcm_fade_in_ms)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = fadeOutText,
+                    onValueChange = { fadeOutText = it.filter(Char::isDigit) },
+                    label = { Text(localizedString(language, R.string.audio_cue_pcm_fade_out_ms)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                PcmEnumSettingField(
+                    label = localizedString(language, R.string.audio_cue_pcm_pattern),
+                    value = localizedString(language, pattern.labelRes()),
+                    expanded = patternExpanded,
+                    onExpandedChange = { patternExpanded = it },
+                    options = PcmPattern.entries.map { option ->
+                        localizedString(language, option.labelRes()) to { pattern = option }
+                    }
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onApply(
+                        PcmSignalSettings(
+                            frequencyHz = (frequencyText.toIntOrNull()
+                                ?: initialSettings.frequencyHz).coerceIn(20, 20_000),
+                            durationSeconds = (durationText.toFloatOrNull()
+                                ?.takeIf(Float::isFinite)
+                                ?: initialSettings.durationSeconds).coerceIn(0.05f, 10.0f),
+                            channel = channel,
+                            amplitudePercent = (amplitudeText.toIntOrNull()
+                                ?: initialSettings.amplitudePercent).coerceIn(0, 100),
+                            fadeInMs = (fadeInText.toIntOrNull()
+                                ?: initialSettings.fadeInMs).coerceIn(0, 5_000),
+                            fadeOutMs = (fadeOutText.toIntOrNull()
+                                ?: initialSettings.fadeOutMs).coerceIn(0, 5_000),
+                            pattern = pattern
+                        )
+                    )
+                }
+            ) {
+                Text(localizedString(language, R.string.apply))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(localizedString(language, R.string.cancel))
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PcmEnumSettingField(
+    label: String,
+    value: String,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    options: List<Pair<String, () -> Unit>>
+) {
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = onExpandedChange,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { onExpandedChange(false) }
+        ) {
+            options.forEach { (optionLabel, onSelected) ->
+                DropdownMenuItem(
+                    text = { Text(optionLabel) },
+                    onClick = {
+                        onSelected()
+                        onExpandedChange(false)
+                    }
+                )
             }
         }
     }
@@ -615,8 +870,20 @@ private fun AudioCue.labelRes(): Int = when (this) {
 private fun AudioCueMode.labelRes(): Int = when (this) {
     AudioCueMode.UseTts -> R.string.audio_cue_mode_use_tts
     AudioCueMode.AudioFile -> R.string.audio_cue_mode_choose_audio_file
+    AudioCueMode.Pcm -> R.string.audio_cue_mode_pcm
     AudioCueMode.Vibration -> R.string.audio_cue_mode_use_vibration
     AudioCueMode.Off -> R.string.audio_cue_mode_off
+}
+
+private fun PcmChannel.labelRes(): Int = when (this) {
+    PcmChannel.Left -> R.string.audio_cue_pcm_channel_left
+    PcmChannel.Right -> R.string.audio_cue_pcm_channel_right
+    PcmChannel.Both -> R.string.audio_cue_pcm_channel_both
+}
+
+private fun PcmPattern.labelRes(): Int = when (this) {
+    PcmPattern.SingleTone -> R.string.audio_cue_pcm_pattern_single_tone
+    PcmPattern.DoubleBeep -> R.string.audio_cue_pcm_pattern_double_beep
 }
 
 @Composable
