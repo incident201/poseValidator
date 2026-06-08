@@ -63,7 +63,7 @@
     <string name="sensitivity_normal">Обычная</string>
     <string name="sensitivity_low">Низкая</string>
     <string name="sensitivity_very_low">Очень низкая</string>
-    <string name="pose_deviation_tolerance">Допуск отклонение позы</string>
+    <string name="pose_deviation_tolerance">Допуск отклонения позы</string>
     <string name="pose_tolerance_very_easy">Очень простой</string>
     <string name="pose_tolerance_easy">Простой</string>
     <string name="pose_tolerance_normal">Обычный</string>
@@ -107,7 +107,6 @@
     <string name="final_actual_timer">Фактическое время таймера</string>
     <string name="final_errors">Ошибки</string>
     <string name="final_session_settings">Настройки сессии</string>
-    <string name="final_sensitivity">Чувствительность</string>
     <string name="final_face_direction">Положение лица</string>
     <string name="final_save_timelapse">Сохранить timelapse-видео</string>
     <string name="final_timelapse_preparing">Timelapse-видео подготавливается...</string>

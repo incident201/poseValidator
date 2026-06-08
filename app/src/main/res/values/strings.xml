@@ -107,7 +107,6 @@
     <string name="final_actual_timer">Actual timer</string>
     <string name="final_errors">Errors</string>
     <string name="final_session_settings">Session settings</string>
-    <string name="final_sensitivity">Sensitivity</string>
     <string name="final_face_direction">Face direction</string>
     <string name="final_save_timelapse">Save timelapse video</string>
     <string name="final_timelapse_preparing">Timelapse video is preparing...</string>
