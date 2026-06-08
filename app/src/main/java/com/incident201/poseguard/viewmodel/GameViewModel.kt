@@ -13,6 +13,10 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.incident201.poseguard.R
+import com.incident201.poseguard.audio.AudioCue
+import com.incident201.poseguard.audio.AudioCueEvent
+import com.incident201.poseguard.audio.AudioCueMode
+import com.incident201.poseguard.audio.AudioCueSettings
 import com.incident201.poseguard.tracker.FaceDetectionStatus
 import com.incident201.poseguard.tracker.FaceCandidateCropper
 import com.incident201.poseguard.tracker.FaceDetectorService
@@ -65,6 +69,8 @@ private const val PREF_SENSITIVITY_PRESETS_VERSION = "sensitivity_presets_versio
 private const val CURRENT_SENSITIVITY_PRESETS_VERSION = 2
 private const val MAX_POSE_DROPOUT_HOLD_FRAMES = 5
 private const val MAX_POSE_DROPOUT_HOLD_MS = 180L
+private const val PREF_AUDIO_CUE_MODE_PREFIX = "audio_cue_mode_"
+private const val PREF_AUDIO_CUE_URI_PREFIX = "audio_cue_uri_"
 
 enum class GameState {
     Idle,
@@ -106,7 +112,9 @@ data class GameSettings(
     val poseSmootherMinCutoff: Float = PoseSmoother.DEFAULT_MIN_CUTOFF,
     val poseSmootherBeta: Float = PoseSmoother.DEFAULT_BETA,
     val poseSmootherDerivativeCutoff: Float = PoseSmoother.DEFAULT_DERIVATIVE_CUTOFF,
-    val debugModeEnabled: Boolean = false
+    val debugModeEnabled: Boolean = false,
+    val audioCueSettings: Map<AudioCue, AudioCueSettings> =
+        AudioCue.entries.associateWith { AudioCueSettings() }
 )
 
 private fun GameSettings.toPoseOcclusionGuardConfig(): PoseOcclusionGuardConfig {
@@ -206,8 +214,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     val startDelayRemainingSeconds: StateFlow<Int> = _startDelayRemainingSeconds.asStateFlow()
     private val _poseOverlayState = MutableStateFlow(PoseOverlayState())
     val poseOverlayState: StateFlow<PoseOverlayState> = _poseOverlayState.asStateFlow()
-    private val _voiceEvents = MutableSharedFlow<String>(extraBufferCapacity = 8)
-    val voiceEvents: SharedFlow<String> = _voiceEvents.asSharedFlow()
+    private val _audioCueEvents = MutableSharedFlow<AudioCueEvent>(extraBufferCapacity = 8)
+    val audioCueEvents: SharedFlow<AudioCueEvent> = _audioCueEvents.asSharedFlow()
     private val _gameSettings = MutableStateFlow(loadSettings())
     val gameSettings: StateFlow<GameSettings> = _gameSettings.asStateFlow()
     private val _onboardingCompleted = MutableStateFlow(
@@ -342,9 +350,24 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 PREF_POSE_SMOOTHER_DERIVATIVE_CUTOFF,
                 PoseSmoother.DEFAULT_DERIVATIVE_CUTOFF
             ).coerceIn(PoseSmoother.MIN_CUTOFF_RANGE, PoseSmoother.MAX_CUTOFF_RANGE),
-            debugModeEnabled = prefs.getBoolean(PREF_DEBUG_MODE_ENABLED, false)
+            debugModeEnabled = prefs.getBoolean(PREF_DEBUG_MODE_ENABLED, false),
+            audioCueSettings = loadAudioCueSettings()
         )
     }
+
+    private fun loadAudioCueSettings(): Map<AudioCue, AudioCueSettings> =
+        AudioCue.entries.associateWith { cue ->
+            val mode = runCatching {
+                AudioCueMode.valueOf(
+                    prefs.getString(PREF_AUDIO_CUE_MODE_PREFIX + cue.name, AudioCueMode.UseTts.name)
+                        ?: AudioCueMode.UseTts.name
+                )
+            }.getOrDefault(AudioCueMode.UseTts)
+            AudioCueSettings(
+                mode = mode,
+                audioFileUri = prefs.getString(PREF_AUDIO_CUE_URI_PREFIX + cue.name, null)
+            )
+        }
 
     private fun loadSensitivityThresholds(): Pair<Float, Float> {
         val rawDrift = prefs.getFloat("pose_drift_factor_v2", 0.160f).coerceIn(0.05f, 0.40f)
@@ -556,6 +579,22 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     fun updatePenaltiesEnabled(enabled: Boolean) {
         _gameSettings.value = _gameSettings.value.copy(penaltiesEnabled = enabled)
         prefs.edit().putBoolean("penalties_enabled", enabled).apply()
+    }
+
+    fun updateAudioCueSettings(cue: AudioCue, settings: AudioCueSettings) {
+        _gameSettings.value = _gameSettings.value.copy(
+            audioCueSettings = _gameSettings.value.audioCueSettings + (cue to settings)
+        )
+        prefs.edit()
+            .putString(PREF_AUDIO_CUE_MODE_PREFIX + cue.name, settings.mode.name)
+            .apply {
+                if (settings.audioFileUri == null) {
+                    remove(PREF_AUDIO_CUE_URI_PREFIX + cue.name)
+                } else {
+                    putString(PREF_AUDIO_CUE_URI_PREFIX + cue.name, settings.audioFileUri)
+                }
+            }
+            .apply()
     }
 
     fun updateTimelapseRecordingEnabled(enabled: Boolean) {
@@ -863,7 +902,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                     tr(R.string.defeat_face_not_to_camera)
                 else tr(R.string.defeat_face_to_camera)
             }
-            triggerDefeat(defeatReason, tr(R.string.defeat_try_again))
+            triggerDefeat(defeatReason)
             return true
         }
 
@@ -913,26 +952,32 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 tr(R.string.you_looked_at_camera)
             }
             _statusMessage.value = statusText
-            if (_gameSettings.value.penaltiesEnabled) {
-                speak("$prefix. ${tr(R.string.penalty_added_to_timer, minutes)}")
+            val cue = if (_gameSettings.value.faceCheckMode == FaceCheckMode.FaceToCamera) {
+                AudioCue.FaceTurnedAway
             } else {
-                speak(prefix)
+                AudioCue.FaceLookedAtCamera
             }
+            val cueText = if (_gameSettings.value.penaltiesEnabled) {
+                "$prefix. ${tr(R.string.penalty_added_to_timer, minutes)}"
+            } else {
+                prefix
+            }
+            playAudioCue(cue, cueText)
             return
         }
 
-        val voicePrefix = when (type) {
-            RuleViolationType.Motion -> tr(R.string.motion_violation_voice)
-            RuleViolationType.Drift -> tr(R.string.drift_violation_voice)
-            else -> tr(R.string.violation_recorded)
+        val (cue, voicePrefix) = when (type) {
+            RuleViolationType.Motion -> AudioCue.MotionViolation to tr(R.string.motion_violation_voice)
+            RuleViolationType.Drift -> AudioCue.DriftViolation to tr(R.string.drift_violation_voice)
+            else -> AudioCue.ViolationRecorded to tr(R.string.violation_recorded)
         }
 
         if (_gameSettings.value.penaltiesEnabled) {
             _statusMessage.value = tr(R.string.violation_recorded_with_penalty, minutes)
-            speak("$voicePrefix. ${tr(R.string.penalty_added_to_timer, minutes)}")
+            playAudioCue(cue, "$voicePrefix. ${tr(R.string.penalty_added_to_timer, minutes)}")
         } else {
             _statusMessage.value = tr(R.string.violation_recorded)
-            speak(voicePrefix)
+            playAudioCue(cue, voicePrefix)
         }
     }
 
@@ -1098,7 +1143,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 _gameState.value = GameState.Success
                 resetMovementGaugeState()
                 _statusMessage.value = tr(R.string.victory)
-                speak(tr(R.string.time_is_up))
+                playAudioCue(AudioCue.TimeIsUp, tr(R.string.time_is_up))
             }
         }
     }
@@ -1131,7 +1176,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         timerJob?.cancel()
 
         if (gyroscopeSensor == null) {
-            triggerDefeat(tr(R.string.gyroscope_unavailable), tr(R.string.gyroscope_unavailable))
+            startPoseCountdownAfterDeviceStabilized()
             return
         }
 
@@ -1139,13 +1184,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationCompleted = false
         _gameState.value = GameState.WaitingForStabilization
         _statusMessage.value = tr(R.string.place_device_still)
-        speak(tr(R.string.place_device_still))
+        playAudioCue(AudioCue.PlaceDeviceStill, tr(R.string.place_device_still))
         sensorManager.unregisterListener(this)
         sensorManager.registerListener(this, gyroscopeSensor, SensorManager.SENSOR_DELAY_GAME)
     }
 
     private fun startPoseCountdownAfterDeviceStabilized() {
-        speak(tr(R.string.take_position))
+        playAudioCue(AudioCue.TakePosition, tr(R.string.take_position))
         synchronized(processingLock) {
             poseOcclusionGuard.reset()
         }
@@ -1182,7 +1227,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             _gameState.value = GameState.HoldingPose
             _statusMessage.value = tr(R.string.time_started_hold_position)
             startTimerLoop()
-            speak(tr(R.string.time_started_hold_position))
+            playAudioCue(AudioCue.TimeStartedHoldPosition, tr(R.string.time_started_hold_position))
         }
     }
 
@@ -1221,7 +1266,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private fun resetMovementGaugeState() { _movementGaugeState.value = MovementGaugeState() }
 
-    fun triggerDefeat(reason: String, voiceMessage: String = tr(R.string.defeat_try_again)) {
+    fun triggerDefeat(reason: String) {
         val alreadyFailed = _gameState.value == GameState.Failed
         startDelayJob?.cancel()
         timerJob?.cancel()
@@ -1249,9 +1294,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _gameState.value = GameState.Failed
         _defeatReason.value = reason
         _statusMessage.value = tr(R.string.check_failed)
-        if (!alreadyFailed) speak(voiceMessage)
+        if (!alreadyFailed) playAudioCue(AudioCue.DefeatTryAgain, tr(R.string.defeat_try_again))
     }
-    private fun speak(text: String) { _voiceEvents.tryEmit(text) }
+
+    private fun playAudioCue(cue: AudioCue, ttsText: String) {
+        _audioCueEvents.tryEmit(AudioCueEvent(cue, ttsText))
+    }
 
     fun dismissFinalScreen() {
         if (_gameState.value != GameState.Success && _gameState.value != GameState.Failed) return

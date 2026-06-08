@@ -51,7 +51,6 @@
     <string name="victory">Victory</string>
     <string name="time_is_up">Time is up</string>
     <string name="check_failed">Check failed</string>
-    <string name="gyroscope_unavailable">Gyroscope is unavailable on this device</string>
 
     <string name="face_detection_threshold">Face detection threshold</string>
     <string name="first_violation_min">First violation (min)</string>
@@ -135,4 +134,21 @@
     <string name="minutes">Minutes</string>
     <string name="cancel">Cancel</string>
     <string name="apply">Apply</string>
+
+    <string name="settings_customize_audio">Customize Audio</string>
+    <string name="audio_cue_place_device_still">Place device still</string>
+    <string name="audio_cue_take_position">Take position</string>
+    <string name="audio_cue_time_started_hold_position">Time started / hold position</string>
+    <string name="audio_cue_time_is_up">Time is up</string>
+    <string name="audio_cue_defeat_try_again">Defeat / try again</string>
+    <string name="audio_cue_motion_violation">Motion violation</string>
+    <string name="audio_cue_drift_violation">Drift violation</string>
+    <string name="audio_cue_violation_recorded">Violation recorded</string>
+    <string name="audio_cue_face_turned_away">Face turned away</string>
+    <string name="audio_cue_face_looked_at_camera">Face looked at camera</string>
+    <string name="audio_cue_mode_use_tts">Use TTS</string>
+    <string name="audio_cue_mode_choose_audio_file">Choose audio file</string>
+    <string name="audio_cue_mode_use_vibration">Use vibration</string>
+    <string name="audio_cue_mode_off">Off</string>
+
 </resources>

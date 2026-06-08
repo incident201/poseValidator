@@ -10,7 +10,6 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
-import android.speech.tts.TextToSpeech
 import android.os.SystemClock
 import android.view.View
 import android.provider.MediaStore
@@ -69,10 +68,12 @@ import androidx.compose.ui.zIndex
 import androidx.annotation.StringRes
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.incident201.poseguard.audio.AudioCuePlayer
 import com.incident201.poseguard.tracker.Point3D
 import com.incident201.poseguard.tracker.PoseLandmarkerService
 import com.incident201.poseguard.viewmodel.AppLanguage
 import com.incident201.poseguard.viewmodel.FaceCheckMode
+import com.incident201.poseguard.viewmodel.GameSettings
 import com.incident201.poseguard.viewmodel.GameState
 import com.incident201.poseguard.viewmodel.GameViewModel
 import com.incident201.poseguard.viewmodel.MovementGaugeState
@@ -84,10 +85,7 @@ import com.incident201.poseguard.util.formatDurationHms
 import com.incident201.poseguard.R
 import java.io.File
 import java.text.SimpleDateFormat
-import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.RejectedExecutionException
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicLong
 import java.util.Locale
 import java.util.Date
@@ -214,7 +212,7 @@ fun CameraScreen(
         return
     }
 
-    VoiceAnnouncer(viewModel = viewModel, language = gameSettings.language)
+    AudioCueAnnouncer(viewModel = viewModel, settings = gameSettings)
     val currentGameState = rememberUpdatedState(gameState)
     val currentTimelapseRecordingEnabled = rememberUpdatedState(gameSettings.timelapseRecordingEnabled)
     val debugModeEnabled = gameSettings.debugModeEnabled
@@ -637,6 +635,7 @@ fun CameraScreen(
             onPoseSmootherBetaChanged = viewModel::updatePoseSmootherBeta,
             onPoseSmootherDerivativeCutoffChanged = viewModel::updatePoseSmootherDerivativeCutoff,
             onWristDriftWeightChanged = viewModel::updateWristDriftWeight,
+            onAudioCueSettingsChanged = viewModel::updateAudioCueSettings,
             onShowInstructions = {
                 showSettings = false
                 showOnboarding = true
@@ -1548,64 +1547,28 @@ private fun DrawScope.drawPoseDebugOverlay(
 }
 
 @Composable
-private fun VoiceAnnouncer(viewModel: GameViewModel, language: AppLanguage) {
+private fun AudioCueAnnouncer(viewModel: GameViewModel, settings: GameSettings) {
     val context = LocalContext.current
-    val pendingMessages = remember { ConcurrentLinkedQueue<String>() }
-    val ttsRef = remember { AtomicReference<TextToSpeech?>(null) }
-    val isReady = remember { AtomicBoolean(false) }
+    val currentCueSettings = rememberUpdatedState(settings.audioCueSettings)
+    val player = remember(context) {
+        AudioCuePlayer(context) { currentCueSettings.value }
+    }
 
-    DisposableEffect(context, language) {
-        val engine = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                val tts = ttsRef.get() ?: return@TextToSpeech
-                val locale = if (language == AppLanguage.Russian) Locale("ru", "RU") else Locale.US
-                val result = tts.setLanguage(locale)
-                val ready = result != TextToSpeech.LANG_MISSING_DATA &&
-                    result != TextToSpeech.LANG_NOT_SUPPORTED
-                isReady.set(ready)
+    LaunchedEffect(player, settings.language) {
+        val locale = if (settings.language == AppLanguage.Russian) Locale("ru", "RU") else Locale.US
+        player.setLanguage(locale)
+    }
 
-                if (ready) {
-                    while (true) {
-                        val message = pendingMessages.poll() ?: break
-                        tts.speak(
-                            message,
-                            TextToSpeech.QUEUE_FLUSH,
-                            null,
-                            "voice_${System.currentTimeMillis()}"
-                        )
-                    }
-                }
-            }
-        }
-        ttsRef.set(engine)
-
-        onDispose {
-            engine.stop()
-            engine.shutdown()
-            ttsRef.set(null)
-            isReady.set(false)
-            pendingMessages.clear()
+    LaunchedEffect(viewModel, player) {
+        viewModel.audioCueEvents.collect { event ->
+            player.play(event.cue, event.ttsText)
         }
     }
 
-    LaunchedEffect(viewModel) {
-        viewModel.voiceEvents.collect { message ->
-            val engine = ttsRef.get()
-            if (isReady.get() && engine != null) {
-                engine.speak(
-                    message,
-                    TextToSpeech.QUEUE_FLUSH,
-                    null,
-                    "voice_${System.currentTimeMillis()}"
-                )
-            } else {
-                pendingMessages.add(message)
-            }
-        }
-
+    DisposableEffect(player) {
+        onDispose { player.close() }
     }
 }
-
 
 
 @OptIn(ExperimentalMaterial3Api::class)
