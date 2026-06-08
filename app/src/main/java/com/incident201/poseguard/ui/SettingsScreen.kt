@@ -74,6 +74,18 @@ internal fun SettingsScreen(
     val colorScheme = MaterialTheme.colorScheme
     val selectedDriftTolerance = driftTolerancePresetFor(settings.driftThresholdFactor)
     val selectedMotionSensitivity = motionSensitivityPresetFor(settings.motionThresholdFactor)
+    var showAudioSettings by remember { mutableStateOf(false) }
+
+    if (showAudioSettings) {
+        CustomizeAudioSettingsScreen(
+            settings = settings,
+            onBack = { showAudioSettings = false },
+            onEnabledChanged = onCustomizeAudioEnabledChanged,
+            onSettingsChanged = onAudioCueSettingsChanged,
+            colorScheme = colorScheme
+        )
+        return
+    }
 
     Column(
         modifier = Modifier
@@ -109,10 +121,10 @@ internal fun SettingsScreen(
             colorScheme = colorScheme
         )
         Spacer(Modifier.height(12.dp))
-        CustomizeAudioCard(
+        CompactCustomizeAudioCard(
             settings = settings,
             onEnabledChanged = onCustomizeAudioEnabledChanged,
-            onSettingsChanged = onAudioCueSettingsChanged,
+            onConfigureClick = { showAudioSettings = true },
             colorScheme = colorScheme
         )
         Spacer(Modifier.height(12.dp))
@@ -381,10 +393,52 @@ internal fun SettingsScreen(
     }
 }
 
+@Composable
+private fun CompactCustomizeAudioCard(
+    settings: GameSettings,
+    onEnabledChanged: (Boolean) -> Unit,
+    onConfigureClick: () -> Unit,
+    colorScheme: ColorScheme
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    localizedString(settings.language, R.string.settings_customize_audio),
+                    color = colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(12.dp))
+                Switch(
+                    checked = settings.customizeAudioEnabled,
+                    onCheckedChange = onEnabledChanged
+                )
+            }
+            Text(
+                localizedString(settings.language, R.string.settings_customize_audio_description),
+                color = colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+            FilledTonalButton(
+                onClick = onConfigureClick,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(localizedString(settings.language, R.string.settings_configure))
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CustomizeAudioCard(
+private fun CustomizeAudioSettingsScreen(
     settings: GameSettings,
+    onBack: () -> Unit,
     onEnabledChanged: (Boolean) -> Unit,
     onSettingsChanged: (AudioCue, AudioCueSettings) -> Unit,
     colorScheme: ColorScheme
@@ -502,72 +556,97 @@ private fun CustomizeAudioCard(
         )
     }
 
-    Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
-        Column(Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    localizedString(settings.language, R.string.settings_customize_audio),
-                    color = colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(Modifier.width(12.dp))
-                Switch(
-                    checked = settings.customizeAudioEnabled,
-                    onCheckedChange = {
-                        if (!it) stopAllPreviews()
-                        onEnabledChanged(it)
-                    }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colorScheme.background)
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 16.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = localizedString(settings.language, R.string.back),
+                    tint = colorScheme.onBackground
                 )
             }
             Text(
-                localizedString(settings.language, R.string.settings_customize_audio_description),
-                color = colorScheme.onSurfaceVariant
+                localizedString(settings.language, R.string.settings_customize_audio),
+                color = colorScheme.onBackground,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold
             )
-            if (settings.customizeAudioEnabled) {
-                Spacer(Modifier.height(12.dp))
-                AudioCue.entries.forEachIndexed { index, cue ->
-                    val cueSettings = settings.audioCueSettings[cue] ?: AudioCueSettings()
-                    AudioCueSettingRow(
-                        language = settings.language,
-                        cue = cue,
-                        cueSettings = cueSettings,
-                        isAudioFilePreviewing = audioPreviewingCue == cue,
-                        isPcmPreviewing = pcmPreviewingCue == cue,
-                        onModeSelected = { mode ->
-                            stopAllPreviews()
-                            if (mode == AudioCueMode.AudioFile) {
-                                cueAwaitingFile = cue
-                                audioFilePicker.launch(arrayOf("audio/*"))
-                            } else {
-                                onSettingsChanged(cue, cueSettings.copy(mode = mode))
-                            }
-                        },
-                        onAudioFilePreviewClick = {
-                            cueSettings.audioFileUri?.let { toggleAudioPreview(cue, it) }
-                        },
-                        onPcmPreviewClick = {
-                            togglePcmPreview(cue, cueSettings.pcmSettings)
-                        },
-                        onPcmConfigureClick = {
-                            stopAllPreviews()
-                            pcmConfiguringCue = cue
-                        },
-                        colorScheme = colorScheme
+        }
+        Spacer(Modifier.height(12.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
+            Column(Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        localizedString(settings.language, R.string.settings_customize_audio_description),
+                        color = colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
                     )
-                    if (index != AudioCue.entries.lastIndex) {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 8.dp),
-                            color = colorScheme.outlineVariant.copy(alpha = 0.65f)
+                    Spacer(Modifier.width(12.dp))
+                    Switch(
+                        checked = settings.customizeAudioEnabled,
+                        onCheckedChange = {
+                            if (!it) stopAllPreviews()
+                            onEnabledChanged(it)
+                        }
+                    )
+                }
+                if (settings.customizeAudioEnabled) {
+                    Spacer(Modifier.height(12.dp))
+                    AudioCue.entries.forEachIndexed { index, cue ->
+                        val cueSettings = settings.audioCueSettings[cue] ?: AudioCueSettings()
+                        AudioCueSettingRow(
+                            language = settings.language,
+                            cue = cue,
+                            cueSettings = cueSettings,
+                            isAudioFilePreviewing = audioPreviewingCue == cue,
+                            isPcmPreviewing = pcmPreviewingCue == cue,
+                            onModeSelected = { mode ->
+                                stopAllPreviews()
+                                if (mode == AudioCueMode.AudioFile) {
+                                    cueAwaitingFile = cue
+                                    audioFilePicker.launch(arrayOf("audio/*"))
+                                } else {
+                                    onSettingsChanged(cue, cueSettings.copy(mode = mode))
+                                }
+                            },
+                            onAudioFilePreviewClick = {
+                                cueSettings.audioFileUri?.let { toggleAudioPreview(cue, it) }
+                            },
+                            onPcmPreviewClick = {
+                                togglePcmPreview(cue, cueSettings.pcmSettings)
+                            },
+                            onPcmConfigureClick = {
+                                stopAllPreviews()
+                                pcmConfiguringCue = cue
+                            },
+                            colorScheme = colorScheme
                         )
+                        if (index != AudioCue.entries.lastIndex) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                color = colorScheme.outlineVariant.copy(alpha = 0.65f)
+                            )
+                        }
                     }
                 }
             }
         }
+        Spacer(Modifier.height(20.dp))
     }
 
     pcmConfiguringCue?.let { cue ->
