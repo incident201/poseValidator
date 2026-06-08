@@ -203,6 +203,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private var stabilizationStableSinceMs: Long? = null
     private var stabilizationCompleted = false
+    private var stabilizationFallbackJob: Job? = null
 
     private val prefs: SharedPreferences = application.getSharedPreferences("game_settings", Context.MODE_PRIVATE)
 
@@ -1242,11 +1243,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         }
         startDelayJob?.cancel()
         timerJob?.cancel()
-
-        if (gyroscopeSensor == null) {
-            startPoseCountdownAfterDeviceStabilized()
-            return
-        }
+        stabilizationFallbackJob?.cancel()
 
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
@@ -1254,7 +1251,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _statusMessage.value = tr(R.string.place_device_still)
         playAudioCue(AudioCue.PlaceDeviceStill, tr(R.string.place_device_still))
         sensorManager.unregisterListener(this)
-        sensorManager.registerListener(this, gyroscopeSensor, SensorManager.SENSOR_DELAY_GAME)
+
+        val gyroscopeRegistered = gyroscopeSensor?.let { sensor ->
+            runCatching {
+                sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME)
+            }.onFailure { error ->
+                Log.w(tag, "Unable to register gyroscope listener; using timed stabilization", error)
+            }.getOrDefault(false)
+        } ?: false
+        if (!gyroscopeRegistered) {
+            stabilizationFallbackJob = viewModelScope.launch {
+                delay(stabilizationDurationMs)
+                completeDeviceStabilization()
+            }
+        }
     }
 
     private fun startPoseCountdownAfterDeviceStabilized() {
@@ -1302,6 +1312,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private fun completeDeviceStabilization() {
         if (_gameState.value != GameState.WaitingForStabilization || stabilizationCompleted) return
         stabilizationCompleted = true
+        stabilizationFallbackJob?.cancel()
+        stabilizationFallbackJob = null
         sensorManager.unregisterListener(this)
         stabilizationStableSinceMs = null
         startPoseCountdownAfterDeviceStabilized()
@@ -1338,6 +1350,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         val alreadyFailed = _gameState.value == GameState.Failed
         startDelayJob?.cancel()
         timerJob?.cancel()
+        stabilizationFallbackJob?.cancel()
+        stabilizationFallbackJob = null
         sensorManager.unregisterListener(this)
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
@@ -1373,6 +1387,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         if (_gameState.value != GameState.Success && _gameState.value != GameState.Failed) return
         startDelayJob?.cancel()
         timerJob?.cancel()
+        stabilizationFallbackJob?.cancel()
+        stabilizationFallbackJob = null
         sensorManager.unregisterListener(this)
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
@@ -1402,6 +1418,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     fun stopSession() {
         startDelayJob?.cancel()
         timerJob?.cancel()
+        stabilizationFallbackJob?.cancel()
+        stabilizationFallbackJob = null
         sensorManager.unregisterListener(this)
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
@@ -1427,7 +1445,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _defeatReason.value = ""
         _timerSeconds.value = _selectedDurationSeconds.value
     }
-    override fun onCleared() { isCleared = true; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseIdentityStabilizer.reset(); poseSmoother.reset(); movementTracker.reset(); poseOcclusionGuard.reset(); resetPoseDropoutHoldState() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
+    override fun onCleared() { isCleared = true; stabilizationFallbackJob?.cancel(); stabilizationFallbackJob = null; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseIdentityStabilizer.reset(); poseSmoother.reset(); movementTracker.reset(); poseOcclusionGuard.reset(); resetPoseDropoutHoldState() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
 }
 
 private fun Bitmap.recycleIfNeeded() {
