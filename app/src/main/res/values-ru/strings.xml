@@ -148,13 +148,13 @@
     <string name="audio_cue_violation_recorded">Нарушение</string>
     <string name="audio_cue_face_turned_away">Лицо отвернуто</string>
     <string name="audio_cue_face_looked_at_camera">Взгляд в камеру</string>
-    <string name="audio_cue_mode_use_tts">TTS</string>
+    <string name="audio_cue_mode_use_tts">TTS Голос</string>
     <string name="audio_cue_mode_choose_audio_file">Аудиофайл</string>
     <string name="audio_cue_mode_use_vibration">Вибрация</string>
     <string name="audio_cue_mode_off">Выкл.</string>
     <string name="audio_cue_play_preview">Прослушать</string>
     <string name="audio_cue_stop_preview">Остановить</string>
-    <string name="audio_cue_mode_pcm">PCM</string>
+    <string name="audio_cue_mode_pcm">PCM сигнал</string>
     <string name="audio_cue_pcm_configure">Настроить</string>
     <string name="audio_cue_pcm_frequency">Frequency</string>
     <string name="audio_cue_pcm_duration_seconds">Duration (секунды)</string>
@@ -162,7 +162,7 @@
     <string name="audio_cue_pcm_channel_left">Left</string>
     <string name="audio_cue_pcm_channel_right">Right</string>
     <string name="audio_cue_pcm_channel_both">Both</string>
-    <string name="audio_cue_pcm_amplitude_percent">Amplitude (%)</string>
+    <string name="audio_cue_pcm_amplitude_percent">Амплитуда / Громкость</string>
     <string name="audio_cue_pcm_fade_in_ms">Fade in (ms)</string>
     <string name="audio_cue_pcm_fade_out_ms">Fade out (ms)</string>
     <string name="audio_cue_pcm_pattern">Pattern</string>
