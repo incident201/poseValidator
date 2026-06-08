@@ -3,6 +3,7 @@ package com.incident201.poseguard.ui
 import android.content.Intent
 import android.media.MediaPlayer
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -76,6 +77,10 @@ internal fun SettingsScreen(
     val selectedMotionSensitivity = motionSensitivityPresetFor(settings.motionThresholdFactor)
     var showAudioSettings by remember { mutableStateOf(false) }
 
+    BackHandler(enabled = showAudioSettings) {
+        showAudioSettings = false
+    }
+
     if (showAudioSettings) {
         CustomizeAudioSettingsScreen(
             settings = settings,
@@ -118,13 +123,6 @@ internal fun SettingsScreen(
         LanguageSelectorCard(
             language = settings.language,
             onLanguageChanged = onLanguageChanged,
-            colorScheme = colorScheme
-        )
-        Spacer(Modifier.height(12.dp))
-        CompactCustomizeAudioCard(
-            settings = settings,
-            onEnabledChanged = onCustomizeAudioEnabledChanged,
-            onConfigureClick = { showAudioSettings = true },
             colorScheme = colorScheme
         )
         Spacer(Modifier.height(12.dp))
@@ -209,6 +207,13 @@ internal fun SettingsScreen(
                 }
             }
         }
+        Spacer(Modifier.height(12.dp))
+        CompactCustomizeAudioCard(
+            settings = settings,
+            onEnabledChanged = onCustomizeAudioEnabledChanged,
+            onConfigureClick = { showAudioSettings = true },
+            colorScheme = colorScheme
+        )
         Spacer(Modifier.height(12.dp))
         Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
             Column(Modifier.padding(16.dp)) {

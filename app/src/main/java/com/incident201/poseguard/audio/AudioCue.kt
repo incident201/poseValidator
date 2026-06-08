@@ -36,7 +36,7 @@ data class PcmSignalSettings(
     val frequencyHz: Int = 300,
     val durationSeconds: Float = 1.0f,
     val channel: PcmChannel = PcmChannel.Both,
-    val amplitudePercent: Int = 10,
+    val amplitudePercent: Int = 80,
     val fadeInMs: Int = 0,
     val fadeOutMs: Int = 0,
     val pattern: PcmPattern = PcmPattern.SingleTone
