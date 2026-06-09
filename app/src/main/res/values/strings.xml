@@ -51,7 +51,6 @@
     <string name="victory">Victory</string>
     <string name="time_is_up">Time is up</string>
     <string name="check_failed">Check failed</string>
-    <string name="gyroscope_unavailable">Gyroscope is unavailable on this device</string>
 
     <string name="face_detection_threshold">Face detection threshold</string>
     <string name="first_violation_min">First violation (min)</string>
@@ -108,7 +107,6 @@
     <string name="final_actual_timer">Actual timer</string>
     <string name="final_errors">Errors</string>
     <string name="final_session_settings">Session settings</string>
-    <string name="final_sensitivity">Sensitivity</string>
     <string name="final_face_direction">Face direction</string>
     <string name="final_save_timelapse">Save timelapse video</string>
     <string name="final_timelapse_preparing">Timelapse video is preparing...</string>
@@ -135,4 +133,40 @@
     <string name="minutes">Minutes</string>
     <string name="cancel">Cancel</string>
     <string name="apply">Apply</string>
+
+    <string name="settings_customize_audio">Sounds and reactions</string>
+    <string name="settings_customize_audio_description">Custom reactions for app events</string>
+    <string name="settings_configure">Configure</string>
+    <string name="audio_cue_place_device_still">Place device still</string>
+    <string name="audio_cue_take_position">Take position</string>
+    <string name="audio_cue_time_started_hold_position">Time started / hold position</string>
+    <string name="audio_cue_time_is_up">Time is up</string>
+    <string name="audio_cue_defeat_try_again">Defeat / try again</string>
+    <string name="audio_cue_motion_violation">Motion violation</string>
+    <string name="audio_cue_drift_violation">Drift violation</string>
+    <string name="audio_cue_violation_recorded">Violation recorded</string>
+    <string name="audio_cue_face_turned_away">Face turned away</string>
+    <string name="audio_cue_face_looked_at_camera">Face looked at camera</string>
+    <string name="audio_cue_mode_use_tts">TTS Voice</string>
+    <string name="audio_cue_mode_choose_audio_file">Audio file</string>
+    <string name="audio_cue_mode_use_vibration">Vibration</string>
+    <string name="audio_cue_mode_off">Off</string>
+    <string name="audio_cue_play_preview">Play audio</string>
+    <string name="audio_cue_stop_preview">Stop audio</string>
+    <string name="audio_cue_mode_pcm">PCM Signal</string>
+    <string name="audio_cue_pcm_configure">Configure</string>
+    <string name="audio_cue_pcm_frequency">Frequency</string>
+    <string name="audio_cue_pcm_duration_seconds">Duration (seconds)</string>
+    <string name="audio_cue_pcm_channel">Channel</string>
+    <string name="audio_cue_pcm_channel_left">Left</string>
+    <string name="audio_cue_pcm_channel_right">Right</string>
+    <string name="audio_cue_pcm_channel_both">Both</string>
+    <string name="audio_cue_pcm_amplitude_percent">Amplitude / Volume</string>
+    <string name="audio_cue_pcm_fade_in_ms">Fade in (ms)</string>
+    <string name="audio_cue_pcm_fade_out_ms">Fade out (ms)</string>
+    <string name="audio_cue_pcm_pattern">Pattern</string>
+    <string name="audio_cue_pcm_pattern_single_tone">Single tone</string>
+    <string name="audio_cue_pcm_pattern_double_beep">Double beep</string>
+    <string name="audio_cue_pcm_settings_title">PCM signal</string>
+
 </resources>
