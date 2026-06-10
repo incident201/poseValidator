@@ -5,7 +5,6 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -150,17 +149,8 @@ class AudioCuePlayer(
         }
     }
 
-    private fun readSystemTtsEngineSettingFallback(): String? =
-        runCatching {
-            Settings.Secure.getString(
-                appContext.contentResolver,
-                Settings.Secure.TTS_DEFAULT_SYNTH
-            )
-        }.getOrNull()
-
     private fun readDefaultTtsEngine(engine: TextToSpeech?): String? =
         runCatching { engine?.defaultEngine }.getOrNull()
-            ?: readSystemTtsEngineSettingFallback()
 
     private fun createTtsEngine() {
         val generation = ttsGeneration.incrementAndGet()
