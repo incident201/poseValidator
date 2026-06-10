@@ -272,8 +272,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private var sessionInitialTimerSeconds = defaultDurationSeconds
     @Volatile private var sessionTimerMode = TimerMode.Exact
     @Volatile private var sessionTargetSeconds = defaultDurationSeconds
+
+    private enum class PendingTerminalResult {
+        Success,
+        Defeat
+    }
+
     // Guarded by sessionTargetLock.
-    private var sessionSuccessPending = false
+    private var pendingTerminalResult: PendingTerminalResult? = null
     private var sessionHoldingStartedAtElapsedMs: Long? = null
     private var sessionSettingsSnapshot = _gameSettings.value
 
@@ -1135,7 +1141,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 synchronized(sessionTargetLock) {
                     if (sessionTimerMode == TimerMode.Random &&
                         _gameState.value == GameState.HoldingPose &&
-                        !sessionSuccessPending
+                        pendingTerminalResult == null
                     ) {
                         sessionTargetSeconds += sec
                     }
@@ -1331,7 +1337,47 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         return elapsedSeconds.toInt()
     }
 
+    private fun tryReserveSessionSuccess(elapsedSeconds: Int? = null): Boolean = synchronized(sessionTargetLock) {
+        if (_gameState.value != GameState.HoldingPose ||
+            pendingTerminalResult != null
+        ) {
+            return@synchronized false
+        }
+
+        val canComplete = when (sessionTimerMode) {
+            TimerMode.Random -> elapsedSeconds != null && elapsedSeconds >= sessionTargetSeconds
+            TimerMode.Exact -> true
+        }
+
+        if (canComplete) {
+            pendingTerminalResult = PendingTerminalResult.Success
+            true
+        } else {
+            false
+        }
+    }
+
+    private fun tryReserveSessionDefeat(): Boolean = synchronized(sessionTargetLock) {
+        if (_gameState.value == GameState.HoldingPose &&
+            pendingTerminalResult == null
+        ) {
+            pendingTerminalResult = PendingTerminalResult.Defeat
+            true
+        } else {
+            false
+        }
+    }
+
     private fun completeSessionSuccess() {
+        val canComplete = synchronized(sessionTargetLock) {
+            pendingTerminalResult == PendingTerminalResult.Success &&
+                _gameState.value == GameState.HoldingPose
+        }
+
+        if (!canComplete) {
+            return
+        }
+
         _sessionSummary.value = SessionSummary(
             result = GameState.Success,
             initialTimerSeconds = sessionInitialTimerSeconds,
@@ -1352,17 +1398,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 while (_gameState.value == GameState.HoldingPose) {
                     val elapsedSeconds = sessionElapsedSecondsForSummary()
                     _timerSeconds.value = elapsedSeconds
-                    val shouldComplete = synchronized(sessionTargetLock) {
-                        val completed = sessionTimerMode == TimerMode.Random &&
-                            _gameState.value == GameState.HoldingPose &&
-                            elapsedSeconds >= sessionTargetSeconds
-
-                        if (completed) {
-                            sessionSuccessPending = true
-                        }
-
-                        completed
-                    }
+                    val shouldComplete = tryReserveSessionSuccess(elapsedSeconds)
                     if (shouldComplete) {
                         completeSessionSuccess()
                         return@launch
@@ -1379,8 +1415,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 _timerSeconds.value = (_timerSeconds.value - 1).coerceAtLeast(0)
             }
 
-            if (_gameState.value == GameState.HoldingPose && _timerSeconds.value <= 0) {
+            if (_timerSeconds.value <= 0 && tryReserveSessionSuccess()) {
                 completeSessionSuccess()
+                return@launch
             }
         }
     }
@@ -1399,7 +1436,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         }
         synchronized(sessionTargetLock) {
             sessionTargetSeconds = sessionInitialTimerSeconds
-            sessionSuccessPending = false
+            pendingTerminalResult = null
         }
         sessionHoldingStartedAtElapsedMs = null
         sessionSettingsSnapshot = _gameSettings.value
@@ -1529,6 +1566,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private fun resetMovementGaugeState() { _movementGaugeState.value = MovementGaugeState() }
 
     fun triggerDefeat(reason: String) {
+        if (!tryReserveSessionDefeat()) {
+            return
+        }
+
         val alreadyFailed = _gameState.value == GameState.Failed
         startDelayJob?.cancel()
         timerJob?.cancel()
@@ -1538,9 +1579,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
         _startDelayRemainingSeconds.value = 0
-        synchronized(sessionTargetLock) {
-            sessionSuccessPending = false
-        }
         synchronized(processingLock) {
             processingGeneration += 1
             poseIdentityStabilizer.reset()
@@ -1603,7 +1641,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationCompleted = false
         _startDelayRemainingSeconds.value = 0
         synchronized(sessionTargetLock) {
-            sessionSuccessPending = false
+            pendingTerminalResult = null
         }
         synchronized(processingLock) {
             processingGeneration += 1
@@ -1637,7 +1675,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationCompleted = false
         _startDelayRemainingSeconds.value = 0
         synchronized(sessionTargetLock) {
-            sessionSuccessPending = false
+            pendingTerminalResult = null
         }
         synchronized(processingLock) {
             processingGeneration += 1
@@ -1668,7 +1706,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
         synchronized(sessionTargetLock) {
-            sessionSuccessPending = false
+            pendingTerminalResult = null
         }
         synchronized(processingLock) {
             processingGeneration += 1
