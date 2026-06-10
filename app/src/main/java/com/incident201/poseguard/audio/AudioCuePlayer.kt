@@ -6,7 +6,6 @@ import android.net.Uri
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.speech.tts.TextToSpeech
-import android.speech.tts.Voice
 import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
@@ -26,18 +25,12 @@ class AudioCuePlayer(
     private val ttsRef = AtomicReference<TextToSpeech?>(null)
     private val desiredLocale = AtomicReference(Locale.US)
     private val desiredVoiceMode = AtomicReference(TtsVoiceMode.DefaultVoice)
-    private val initialSystemVoice = AtomicReference<Voice?>(null)
 
     init {
         val engine = TextToSpeech(appContext) { status ->
             val initializedEngine = ttsRef.get() ?: return@TextToSpeech
             ttsInitialized.set(true)
             if (status == TextToSpeech.SUCCESS) {
-                if (initialSystemVoice.get() == null) {
-                    initialSystemVoice.set(
-                        runCatching { initializedEngine.defaultVoice }.getOrNull()
-                    )
-                }
                 val ready = applyTtsConfiguration(
                     initializedEngine,
                     desiredLocale.get(),
@@ -149,15 +142,21 @@ class AudioCuePlayer(
         voiceMode: TtsVoiceMode
     ): Boolean = when (voiceMode) {
         TtsVoiceMode.DefaultVoice -> setTtsLanguage(engine, locale)
-        TtsVoiceMode.SystemVoice -> {
-            val appliedSystemVoice = initialSystemVoice.get()?.let { systemVoice ->
-                runCatching {
-                    engine.setVoice(systemVoice) == TextToSpeech.SUCCESS
-                }.getOrDefault(false)
-            } ?: false
+        TtsVoiceMode.SystemVoice -> setSystemTtsVoice(engine)
+    }
 
-            appliedSystemVoice || setTtsLanguage(engine, locale)
+    private fun setSystemTtsVoice(engine: TextToSpeech): Boolean {
+        val defaultVoice = runCatching { engine.defaultVoice }.getOrNull()
+        if (defaultVoice != null) {
+            val applied = runCatching {
+                engine.setVoice(defaultVoice) == TextToSpeech.SUCCESS
+            }.getOrDefault(false)
+
+            if (applied) return true
         }
+
+        val defaultLanguage = runCatching { engine.defaultLanguage }.getOrNull()
+        return defaultLanguage != null && setTtsLanguage(engine, defaultLanguage)
     }
 
     private fun setTtsLanguage(engine: TextToSpeech, locale: Locale): Boolean {
@@ -180,7 +179,6 @@ class AudioCuePlayer(
         }
         ttsReady.set(false)
         ttsInitialized.set(false)
-        initialSystemVoice.set(null)
         pendingTtsMessages.clear()
     }
 
