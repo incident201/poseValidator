@@ -150,10 +150,11 @@ class AudioCuePlayer(
     ): Boolean = when (voiceMode) {
         TtsVoiceMode.DefaultVoice -> setTtsLanguage(engine, locale)
         TtsVoiceMode.SystemVoice -> {
-            val appliedSystemVoice = runCatching {
-                val systemVoice = initialSystemVoice.get() ?: engine.defaultVoice
-                systemVoice != null && engine.setVoice(systemVoice) == TextToSpeech.SUCCESS
-            }.getOrDefault(false)
+            val appliedSystemVoice = initialSystemVoice.get()?.let { systemVoice ->
+                runCatching {
+                    engine.setVoice(systemVoice) == TextToSpeech.SUCCESS
+                }.getOrDefault(false)
+            } ?: false
 
             appliedSystemVoice || setTtsLanguage(engine, locale)
         }
