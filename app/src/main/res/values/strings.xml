@@ -128,6 +128,12 @@
     <string name="onboarding_previous">Back</string>
     <string name="onboarding_done">Start</string>
     <string name="view_instructions">View instructions</string>
+    <string name="timer_mode_exact">Exact time</string>
+    <string name="timer_mode_random">Random time</string>
+    <string name="timer_minimum">Minimum</string>
+    <string name="timer_maximum">Maximum</string>
+    <string name="random_timer_range">Random timer range</string>
+    <string name="random_timer_hidden_hint">The exact time will be revealed after the session.</string>
     <string name="set_timer">Set timer</string>
     <string name="hours">Hours</string>
     <string name="minutes">Minutes</string>

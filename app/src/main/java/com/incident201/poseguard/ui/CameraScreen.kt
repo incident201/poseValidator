@@ -81,6 +81,7 @@ import com.incident201.poseguard.viewmodel.MovementGaugeState
 import com.incident201.poseguard.viewmodel.PoseOverlayState
 import com.incident201.poseguard.viewmodel.RuleViolationCounts
 import com.incident201.poseguard.viewmodel.SessionSummary
+import com.incident201.poseguard.viewmodel.TimerMode
 import com.incident201.poseguard.video.TimelapseRecorder
 import com.incident201.poseguard.util.formatDurationHms
 import com.incident201.poseguard.R
@@ -178,6 +179,9 @@ fun CameraScreen(
     val statusMessage by viewModel.statusMessage.collectAsState()
     val defeatReason by viewModel.defeatReason.collectAsState()
     val selectedDurationSeconds by viewModel.selectedDurationSeconds.collectAsState()
+    val timerMode by viewModel.timerMode.collectAsState()
+    val randomMinDurationSeconds by viewModel.randomMinDurationSeconds.collectAsState()
+    val randomMaxDurationSeconds by viewModel.randomMaxDurationSeconds.collectAsState()
     val startDelayRemainingSeconds by viewModel.startDelayRemainingSeconds.collectAsState()
     val poseOverlayState by viewModel.poseOverlayState.collectAsState()
     val movementGaugeState by viewModel.movementGaugeState.collectAsState()
@@ -834,8 +838,13 @@ fun CameraScreen(
             defeatReason = defeatReason,
             timerSeconds = timerSeconds,
             selectedDurationSeconds = selectedDurationSeconds,
+            timerMode = timerMode,
+            randomMinDurationSeconds = randomMinDurationSeconds,
+            randomMaxDurationSeconds = randomMaxDurationSeconds,
             startDelayRemainingSeconds = startDelayRemainingSeconds,
             onDurationSecondsChanged = viewModel::updateSelectedDurationSeconds,
+            onTimerModeChanged = viewModel::updateTimerMode,
+            onRandomDurationRangeChanged = viewModel::updateRandomDurationRangeSeconds,
             isDemoMode = isDemoMode,
             debugModeEnabled = debugModeEnabled,
             onDemoClick = {
@@ -1593,8 +1602,13 @@ fun BottomHUDEngine(
     defeatReason: String,
     timerSeconds: Int,
     selectedDurationSeconds: Int,
+    timerMode: TimerMode,
+    randomMinDurationSeconds: Int,
+    randomMaxDurationSeconds: Int,
     startDelayRemainingSeconds: Int,
     onDurationSecondsChanged: (Int) -> Unit,
+    onTimerModeChanged: (TimerMode) -> Unit,
+    onRandomDurationRangeChanged: (Int, Int) -> Unit,
     isDemoMode: Boolean,
     debugModeEnabled: Boolean,
     onDemoClick: () -> Unit,
@@ -1606,13 +1620,45 @@ fun BottomHUDEngine(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val canStart = gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success
-    val displaySeconds = if (canStart) selectedDurationSeconds else timerSeconds
-    val currentSelectedHours = selectedDurationSeconds.coerceAtLeast(0) / 3600
+    val displayTimerText = if (canStart && timerMode == TimerMode.Random) {
+        "??:??:??"
+    } else {
+        formatDurationHms(if (canStart) selectedDurationSeconds else timerSeconds)
+    }
     var showTimerSheet by rememberSaveable { mutableStateOf(false) }
+    var pickerMode by rememberSaveable { mutableStateOf(timerMode) }
     var pickerHours by rememberSaveable { mutableStateOf(0) }
     var pickerMinutes by rememberSaveable { mutableStateOf(0) }
-    val hourRange = 0..maxOf(99, currentSelectedHours, pickerHours)
+    var randomMinPickerHours by rememberSaveable { mutableStateOf(0) }
+    var randomMinPickerMinutes by rememberSaveable { mutableStateOf(0) }
+    var randomMaxPickerHours by rememberSaveable { mutableStateOf(0) }
+    var randomMaxPickerMinutes by rememberSaveable { mutableStateOf(0) }
     val selectedPickerSeconds = (pickerHours * 3600) + (pickerMinutes * 60)
+    val randomMinPickerSeconds = (randomMinPickerHours * 3600) + (randomMinPickerMinutes * 60)
+    val randomMaxPickerSeconds = (randomMaxPickerHours * 3600) + (randomMaxPickerMinutes * 60)
+    val hourRange = 0..maxOf(
+        99,
+        selectedDurationSeconds / 3600,
+        randomMinDurationSeconds / 3600,
+        randomMaxDurationSeconds / 3600,
+        pickerHours,
+        randomMinPickerHours,
+        randomMaxPickerHours
+    )
+
+    fun openTimerSheet() {
+        pickerMode = timerMode
+        val exactMinutes = (selectedDurationSeconds.coerceAtLeast(1) + 59) / 60
+        pickerHours = exactMinutes / 60
+        pickerMinutes = exactMinutes % 60
+        val minMinutes = (randomMinDurationSeconds.coerceAtLeast(1) + 59) / 60
+        randomMinPickerHours = minMinutes / 60
+        randomMinPickerMinutes = minMinutes % 60
+        val maxMinutes = (randomMaxDurationSeconds.coerceAtLeast(randomMinDurationSeconds) + 59) / 60
+        randomMaxPickerHours = maxMinutes / 60
+        randomMaxPickerMinutes = maxMinutes % 60
+        showTimerSheet = true
+    }
 
     if (showTimerSheet) {
         ModalBottomSheet(
@@ -1623,6 +1669,7 @@ fun BottomHUDEngine(
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 24.dp)
                     .padding(bottom = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -1635,35 +1682,152 @@ fun BottomHUDEngine(
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center
                 )
-                Text(
-                    text = formatDurationHms(selectedPickerSeconds),
-                    color = colorScheme.primary,
-                    fontSize = 36.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
-                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(24.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    DurationPickerColumn(
-                        label = localizedString(language, R.string.hours),
-                        value = pickerHours,
-                        range = hourRange,
-                        wrapSelectorWheel = false,
-                        onValueChanged = { pickerHours = it },
+                    FilterChip(
+                        selected = pickerMode == TimerMode.Exact,
+                        onClick = { pickerMode = TimerMode.Exact },
+                        label = { Text(localizedString(language, R.string.timer_mode_exact)) },
                         modifier = Modifier.weight(1f)
                     )
-                    DurationPickerColumn(
-                        label = localizedString(language, R.string.minutes),
-                        value = pickerMinutes,
-                        range = 0..59,
-                        wrapSelectorWheel = true,
-                        onValueChanged = { pickerMinutes = it },
+                    FilterChip(
+                        selected = pickerMode == TimerMode.Random,
+                        onClick = { pickerMode = TimerMode.Random },
+                        label = { Text(localizedString(language, R.string.timer_mode_random)) },
                         modifier = Modifier.weight(1f)
                     )
+                }
+
+                if (pickerMode == TimerMode.Exact) {
+                    Text(
+                        text = formatDurationHms(selectedPickerSeconds),
+                        color = colorScheme.primary,
+                        fontSize = 36.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(24.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        DurationPickerColumn(
+                            label = localizedString(language, R.string.hours),
+                            value = pickerHours,
+                            range = hourRange,
+                            wrapSelectorWheel = false,
+                            onValueChanged = { pickerHours = it },
+                            modifier = Modifier.weight(1f)
+                        )
+                        DurationPickerColumn(
+                            label = localizedString(language, R.string.minutes),
+                            value = pickerMinutes,
+                            range = 0..59,
+                            wrapSelectorWheel = true,
+                            onValueChanged = { pickerMinutes = it },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                } else {
+                    Text(
+                        text = localizedString(language, R.string.random_timer_range),
+                        color = colorScheme.onSurface,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = localizedString(language, R.string.timer_minimum),
+                        color = colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(24.dp)
+                    ) {
+                        DurationPickerColumn(
+                            label = localizedString(language, R.string.hours),
+                            value = randomMinPickerHours,
+                            range = hourRange,
+                            wrapSelectorWheel = false,
+                            onValueChanged = { newHours ->
+                                randomMinPickerHours = newHours
+                                val newMin = newHours * 3600 + randomMinPickerMinutes * 60
+                                if (newMin > randomMaxPickerSeconds) {
+                                    randomMaxPickerHours = newHours
+                                    randomMaxPickerMinutes = randomMinPickerMinutes
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        DurationPickerColumn(
+                            label = localizedString(language, R.string.minutes),
+                            value = randomMinPickerMinutes,
+                            range = 0..59,
+                            wrapSelectorWheel = true,
+                            onValueChanged = { newMinutes ->
+                                randomMinPickerMinutes = newMinutes
+                                val newMin = randomMinPickerHours * 3600 + newMinutes * 60
+                                if (newMin > randomMaxPickerSeconds) {
+                                    randomMaxPickerHours = randomMinPickerHours
+                                    randomMaxPickerMinutes = newMinutes
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Text(
+                        text = localizedString(language, R.string.timer_maximum),
+                        color = colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(24.dp)
+                    ) {
+                        DurationPickerColumn(
+                            label = localizedString(language, R.string.hours),
+                            value = randomMaxPickerHours,
+                            range = hourRange,
+                            wrapSelectorWheel = false,
+                            onValueChanged = { newHours ->
+                                randomMaxPickerHours = newHours
+                                val newMax = newHours * 3600 + randomMaxPickerMinutes * 60
+                                if (newMax < randomMinPickerSeconds) {
+                                    randomMinPickerHours = newHours
+                                    randomMinPickerMinutes = randomMaxPickerMinutes
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        DurationPickerColumn(
+                            label = localizedString(language, R.string.minutes),
+                            value = randomMaxPickerMinutes,
+                            range = 0..59,
+                            wrapSelectorWheel = true,
+                            onValueChanged = { newMinutes ->
+                                randomMaxPickerMinutes = newMinutes
+                                val newMax = randomMaxPickerHours * 3600 + newMinutes * 60
+                                if (newMax < randomMinPickerSeconds) {
+                                    randomMinPickerHours = randomMaxPickerHours
+                                    randomMinPickerMinutes = newMinutes
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Text(
+                        text = localizedString(language, R.string.random_timer_hidden_hint),
+                        color = colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        fontSize = 14.sp
+                    )
+                }
+
+                val valuesValid = if (pickerMode == TimerMode.Exact) {
+                    selectedPickerSeconds > 0
+                } else {
+                    randomMinPickerSeconds > 0 && randomMaxPickerSeconds >= randomMinPickerSeconds
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1677,12 +1841,15 @@ fun BottomHUDEngine(
                     }
                     Button(
                         onClick = {
-                            if (selectedPickerSeconds > 0) {
+                            if (pickerMode == TimerMode.Exact) {
                                 onDurationSecondsChanged(selectedPickerSeconds)
-                                showTimerSheet = false
+                            } else {
+                                onRandomDurationRangeChanged(randomMinPickerSeconds, randomMaxPickerSeconds)
                             }
+                            onTimerModeChanged(pickerMode)
+                            showTimerSheet = false
                         },
-                        enabled = selectedPickerSeconds > 0,
+                        enabled = valuesValid,
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(localizedString(language, R.string.apply))
@@ -1805,7 +1972,7 @@ fun BottomHUDEngine(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        if (canStart) {
+                        if (canStart && timerMode == TimerMode.Exact) {
                             TimerStepButton(
                                 symbol = "−",
                                 enabled = selectedDurationSeconds > 60,
@@ -1818,7 +1985,7 @@ fun BottomHUDEngine(
                         }
 
                         Text(
-                            text = formatDurationHms(displaySeconds),
+                            text = displayTimerText,
                             color = colorScheme.onSurfaceVariant,
                             fontSize = timerFontSize,
                             fontFamily = FontFamily.Monospace,
@@ -1833,20 +2000,14 @@ fun BottomHUDEngine(
                                 .testTag("timer_display")
                                 .then(
                                     if (canStart) {
-                                        Modifier.clickable {
-                                            val safeSelectedSeconds = selectedDurationSeconds.coerceAtLeast(1)
-                                            val totalPickerMinutes = (safeSelectedSeconds + 59) / 60
-                                            pickerHours = totalPickerMinutes / 60
-                                            pickerMinutes = totalPickerMinutes % 60
-                                            showTimerSheet = true
-                                        }
+                                        Modifier.clickable { openTimerSheet() }
                                     } else {
                                         Modifier
                                     }
                                 )
                         )
 
-                        if (canStart) {
+                        if (canStart && timerMode == TimerMode.Exact) {
                             TimerStepButton(
                                 symbol = "+",
                                 enabled = true,

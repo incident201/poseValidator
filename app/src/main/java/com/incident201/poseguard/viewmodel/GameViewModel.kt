@@ -52,6 +52,7 @@ import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.sqrt
+import kotlin.random.Random
 
 private const val PREF_OCCLUSION_FREEZE_VIS_ALWAYS = "occlusion_freeze_visibility_always"
 private const val PREF_OCCLUSION_FREEZE_VIS_P10_ALWAYS = "occlusion_freeze_visibility_p10_always"
@@ -87,6 +88,9 @@ private const val PREF_AUDIO_CUE_PCM_AMPLITUDE_PREFIX = "audio_cue_pcm_amplitude
 private const val PREF_AUDIO_CUE_PCM_FADE_IN_PREFIX = "audio_cue_pcm_fade_in_"
 private const val PREF_AUDIO_CUE_PCM_FADE_OUT_PREFIX = "audio_cue_pcm_fade_out_"
 private const val PREF_AUDIO_CUE_PCM_PATTERN_PREFIX = "audio_cue_pcm_pattern_"
+private const val PREF_TIMER_MODE = "timer_mode"
+private const val PREF_RANDOM_MIN_DURATION_SECONDS = "random_min_duration_seconds"
+private const val PREF_RANDOM_MAX_DURATION_SECONDS = "random_max_duration_seconds"
 
 enum class GameState {
     Idle,
@@ -95,6 +99,11 @@ enum class GameState {
     HoldingPose,
     Success,
     Failed
+}
+
+enum class TimerMode {
+    Exact,
+    Random
 }
 
 enum class FaceCheckMode {
@@ -224,6 +233,21 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     val ruleViolationCounts: StateFlow<RuleViolationCounts> = _ruleViolationCounts.asStateFlow()
     private val _selectedDurationSeconds = MutableStateFlow(defaultDurationSeconds)
     val selectedDurationSeconds: StateFlow<Int> = _selectedDurationSeconds.asStateFlow()
+    private val _timerMode = MutableStateFlow(
+        runCatching {
+            TimerMode.valueOf(prefs.getString(PREF_TIMER_MODE, TimerMode.Exact.name) ?: TimerMode.Exact.name)
+        }.getOrDefault(TimerMode.Exact)
+    )
+    val timerMode: StateFlow<TimerMode> = _timerMode.asStateFlow()
+    private val _randomMinDurationSeconds = MutableStateFlow(
+        prefs.getInt(PREF_RANDOM_MIN_DURATION_SECONDS, defaultDurationSeconds).coerceAtLeast(1)
+    )
+    val randomMinDurationSeconds: StateFlow<Int> = _randomMinDurationSeconds.asStateFlow()
+    private val _randomMaxDurationSeconds = MutableStateFlow(
+        prefs.getInt(PREF_RANDOM_MAX_DURATION_SECONDS, defaultDurationSeconds)
+            .coerceAtLeast(_randomMinDurationSeconds.value)
+    )
+    val randomMaxDurationSeconds: StateFlow<Int> = _randomMaxDurationSeconds.asStateFlow()
     private val _statusMessage = MutableStateFlow("")
     val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
     private val _defeatReason = MutableStateFlow("")
@@ -246,6 +270,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     val sessionSummary: StateFlow<SessionSummary?> = _sessionSummary.asStateFlow()
 
     private var sessionInitialTimerSeconds = defaultDurationSeconds
+    @Volatile private var sessionTimerMode = TimerMode.Exact
+    @Volatile private var sessionTargetSeconds = defaultDurationSeconds
     private var sessionHoldingStartedAtElapsedMs: Long? = null
     private var sessionSettingsSnapshot = _gameSettings.value
 
@@ -776,12 +802,35 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _selectedDurationSeconds.value = normalizedSeconds
 
         if (
-            _gameState.value == GameState.Idle ||
-            _gameState.value == GameState.Failed ||
-            _gameState.value == GameState.Success
+            _timerMode.value == TimerMode.Exact &&
+            (_gameState.value == GameState.Idle ||
+                _gameState.value == GameState.Failed ||
+                _gameState.value == GameState.Success)
         ) {
             _timerSeconds.value = normalizedSeconds
         }
+    }
+
+    fun updateTimerMode(mode: TimerMode) {
+        _timerMode.value = mode
+        prefs.edit().putString(PREF_TIMER_MODE, mode.name).apply()
+        if (_gameState.value == GameState.Idle ||
+            _gameState.value == GameState.Failed ||
+            _gameState.value == GameState.Success
+        ) {
+            _timerSeconds.value = if (mode == TimerMode.Exact) _selectedDurationSeconds.value else 0
+        }
+    }
+
+    fun updateRandomDurationRangeSeconds(minSeconds: Int, maxSeconds: Int) {
+        val normalizedMin = minSeconds.coerceAtLeast(1)
+        val normalizedMax = maxSeconds.coerceAtLeast(normalizedMin)
+        _randomMinDurationSeconds.value = normalizedMin
+        _randomMaxDurationSeconds.value = normalizedMax
+        prefs.edit()
+            .putInt(PREF_RANDOM_MIN_DURATION_SECONDS, normalizedMin)
+            .putInt(PREF_RANDOM_MAX_DURATION_SECONDS, normalizedMax)
+            .apply()
     }
 
     fun updateSelectedDurationMinutes(minutes: Int) {
@@ -1079,7 +1128,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private fun applyPenalty(type: RuleViolationType, minutes: Int) {
         val sec = minutes * 60
         if (_gameSettings.value.penaltiesEnabled && sec > 0) {
-            _timerSeconds.value += sec
+            if (sessionTimerMode == TimerMode.Random) {
+                sessionTargetSeconds += sec
+            } else {
+                _timerSeconds.value += sec
+            }
         }
 
         if (type == RuleViolationType.FaceNotMatchingMode) {
@@ -1271,13 +1324,26 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private fun startTimerLoop() {
         timerJob?.cancel()
         timerJob = viewModelScope.launch {
-            while (_gameState.value == GameState.HoldingPose && _timerSeconds.value > 0) {
-                delay(1000)
-                if (_gameState.value != GameState.HoldingPose) return@launch
-                val next = (_timerSeconds.value - 1).coerceAtLeast(0)
-                _timerSeconds.value = next
+            if (sessionTimerMode == TimerMode.Random) {
+                while (_gameState.value == GameState.HoldingPose) {
+                    val elapsedSeconds = sessionElapsedSecondsForSummary()
+                    _timerSeconds.value = elapsedSeconds
+                    if (elapsedSeconds >= sessionTargetSeconds) break
+                    delay(250)
+                }
+            } else {
+                while (_gameState.value == GameState.HoldingPose && _timerSeconds.value > 0) {
+                    delay(1000)
+                    if (_gameState.value != GameState.HoldingPose) return@launch
+                    _timerSeconds.value = (_timerSeconds.value - 1).coerceAtLeast(0)
+                }
             }
-            if (_gameState.value == GameState.HoldingPose && _timerSeconds.value <= 0) {
+            val sessionCompleted = if (sessionTimerMode == TimerMode.Random) {
+                sessionElapsedSecondsForSummary() >= sessionTargetSeconds
+            } else {
+                _timerSeconds.value <= 0
+            }
+            if (_gameState.value == GameState.HoldingPose && sessionCompleted) {
                 _sessionSummary.value = SessionSummary(
                     result = GameState.Success,
                     initialTimerSeconds = sessionInitialTimerSeconds,
@@ -1297,10 +1363,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         if (_gameState.value != GameState.Idle && _gameState.value != GameState.Failed && _gameState.value != GameState.Success) return
 
         _sessionSummary.value = null
-        sessionInitialTimerSeconds = _selectedDurationSeconds.value
+        sessionTimerMode = _timerMode.value
+        sessionInitialTimerSeconds = if (sessionTimerMode == TimerMode.Random) {
+            val minSeconds = _randomMinDurationSeconds.value
+            val maxSeconds = _randomMaxDurationSeconds.value.coerceAtLeast(minSeconds)
+            Random.nextLong(minSeconds.toLong(), maxSeconds.toLong() + 1L).toInt()
+        } else {
+            _selectedDurationSeconds.value
+        }
+        sessionTargetSeconds = sessionInitialTimerSeconds
         sessionHoldingStartedAtElapsedMs = null
         sessionSettingsSnapshot = _gameSettings.value
-        _timerSeconds.value = _selectedDurationSeconds.value
+        _timerSeconds.value = if (sessionTimerMode == TimerMode.Exact) sessionInitialTimerSeconds else 0
         _defeatReason.value = ""
         resetMovementGaugeState()
         _startDelayRemainingSeconds.value = 0
@@ -1361,7 +1435,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             val initialPose = analyzedFrame?.pose
             if (analyzedFrame == null) { triggerDefeat(tr(R.string.camera_no_frame)); return@launch }
             if (initialPose == null || !initialPose.hasEnoughKeypoints()) { triggerDefeat(tr(R.string.camera_no_body)); return@launch }
-            _timerSeconds.value = sessionInitialTimerSeconds
+            _timerSeconds.value = if (sessionTimerMode == TimerMode.Exact) sessionInitialTimerSeconds else 0
             sessionHoldingStartedAtElapsedMs = SystemClock.elapsedRealtime()
             synchronized(processingLock) {
                 processingGeneration += 1
@@ -1515,7 +1589,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _gameState.value = GameState.Idle
         _statusMessage.value = tr(R.string.status_initial)
         _defeatReason.value = ""
-        _timerSeconds.value = _selectedDurationSeconds.value
+        _timerSeconds.value = if (_timerMode.value == TimerMode.Exact) _selectedDurationSeconds.value else 0
     }
 
     fun stopSession() {
@@ -1546,7 +1620,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _gameState.value = GameState.Idle
         _statusMessage.value = tr(R.string.status_initial)
         _defeatReason.value = ""
-        _timerSeconds.value = _selectedDurationSeconds.value
+        _timerSeconds.value = if (_timerMode.value == TimerMode.Exact) _selectedDurationSeconds.value else 0
     }
     override fun onCleared() { isCleared = true; stabilizationFallbackJob?.cancel(); stabilizationFallbackJob = null; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseIdentityStabilizer.reset(); poseSmoother.reset(); movementTracker.reset(); poseOcclusionGuard.reset(); resetPoseDropoutHoldState() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
 }

@@ -128,6 +128,12 @@
     <string name="onboarding_previous">Назад</string>
     <string name="onboarding_done">Начать</string>
     <string name="view_instructions">Посмотреть инструкции</string>
+    <string name="timer_mode_exact">Точное время</string>
+    <string name="timer_mode_random">Случайное время</string>
+    <string name="timer_minimum">Минимум</string>
+    <string name="timer_maximum">Максимум</string>
+    <string name="random_timer_range">Диапазон случайного таймера</string>
+    <string name="random_timer_hidden_hint">Точное время будет показано после завершения сессии.</string>
     <string name="set_timer">Установить таймер</string>
     <string name="hours">Часы</string>
     <string name="minutes">Минуты</string>
