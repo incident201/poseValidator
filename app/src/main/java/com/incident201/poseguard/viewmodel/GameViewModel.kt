@@ -296,6 +296,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private val frameLock = Any()
     private val processingLock = Any()
+    private val sessionTargetLock = Any()
     private var processingGeneration = 0L
     private val mediaPipeResultExecutor = Executors.newSingleThreadExecutor()
     @Volatile private var isCleared = false
@@ -1129,7 +1130,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         val sec = minutes * 60
         if (_gameSettings.value.penaltiesEnabled && sec > 0) {
             if (sessionTimerMode == TimerMode.Random) {
-                sessionTargetSeconds += sec
+                synchronized(sessionTargetLock) {
+                    if (sessionTimerMode == TimerMode.Random &&
+                        _gameState.value == GameState.HoldingPose
+                    ) {
+                        sessionTargetSeconds += sec
+                    }
+                }
             } else {
                 _timerSeconds.value += sec
             }
@@ -1342,15 +1349,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 while (_gameState.value == GameState.HoldingPose) {
                     val elapsedSeconds = sessionElapsedSecondsForSummary()
                     _timerSeconds.value = elapsedSeconds
-
-                    if (elapsedSeconds >= sessionTargetSeconds) {
-                        if (_gameState.value == GameState.HoldingPose &&
-                            sessionElapsedSecondsForSummary() >= sessionTargetSeconds
+                    val sessionCompleted = synchronized(sessionTargetLock) {
+                        if (sessionTimerMode == TimerMode.Random &&
+                            _gameState.value == GameState.HoldingPose &&
+                            elapsedSeconds >= sessionTargetSeconds
                         ) {
                             completeSessionSuccess()
-                            return@launch
+                            true
+                        } else {
+                            false
                         }
                     }
+                    if (sessionCompleted) return@launch
 
                     delay(250)
                 }
@@ -1381,7 +1391,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         } else {
             _selectedDurationSeconds.value
         }
-        sessionTargetSeconds = sessionInitialTimerSeconds
+        synchronized(sessionTargetLock) {
+            sessionTargetSeconds = sessionInitialTimerSeconds
+        }
         sessionHoldingStartedAtElapsedMs = null
         sessionSettingsSnapshot = _gameSettings.value
         _timerSeconds.value = if (sessionTimerMode == TimerMode.Exact) sessionInitialTimerSeconds else 0
