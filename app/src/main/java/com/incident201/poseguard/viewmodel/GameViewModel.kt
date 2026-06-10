@@ -272,6 +272,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private var sessionInitialTimerSeconds = defaultDurationSeconds
     @Volatile private var sessionTimerMode = TimerMode.Exact
     @Volatile private var sessionTargetSeconds = defaultDurationSeconds
+    // Guarded by sessionTargetLock.
+    private var sessionSuccessPending = false
     private var sessionHoldingStartedAtElapsedMs: Long? = null
     private var sessionSettingsSnapshot = _gameSettings.value
 
@@ -1132,7 +1134,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             if (sessionTimerMode == TimerMode.Random) {
                 synchronized(sessionTargetLock) {
                     if (sessionTimerMode == TimerMode.Random &&
-                        _gameState.value == GameState.HoldingPose
+                        _gameState.value == GameState.HoldingPose &&
+                        !sessionSuccessPending
                     ) {
                         sessionTargetSeconds += sec
                     }
@@ -1350,9 +1353,15 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                     val elapsedSeconds = sessionElapsedSecondsForSummary()
                     _timerSeconds.value = elapsedSeconds
                     val shouldComplete = synchronized(sessionTargetLock) {
-                        sessionTimerMode == TimerMode.Random &&
+                        val completed = sessionTimerMode == TimerMode.Random &&
                             _gameState.value == GameState.HoldingPose &&
                             elapsedSeconds >= sessionTargetSeconds
+
+                        if (completed) {
+                            sessionSuccessPending = true
+                        }
+
+                        completed
                     }
                     if (shouldComplete) {
                         completeSessionSuccess()
@@ -1390,6 +1399,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         }
         synchronized(sessionTargetLock) {
             sessionTargetSeconds = sessionInitialTimerSeconds
+            sessionSuccessPending = false
         }
         sessionHoldingStartedAtElapsedMs = null
         sessionSettingsSnapshot = _gameSettings.value
@@ -1528,6 +1538,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
         _startDelayRemainingSeconds.value = 0
+        synchronized(sessionTargetLock) {
+            sessionSuccessPending = false
+        }
         synchronized(processingLock) {
             processingGeneration += 1
             poseIdentityStabilizer.reset()
@@ -1589,6 +1602,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
         _startDelayRemainingSeconds.value = 0
+        synchronized(sessionTargetLock) {
+            sessionSuccessPending = false
+        }
         synchronized(processingLock) {
             processingGeneration += 1
             poseIdentityStabilizer.reset()
@@ -1620,6 +1636,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
         _startDelayRemainingSeconds.value = 0
+        synchronized(sessionTargetLock) {
+            sessionSuccessPending = false
+        }
         synchronized(processingLock) {
             processingGeneration += 1
             poseIdentityStabilizer.reset()
@@ -1641,7 +1660,30 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _defeatReason.value = ""
         _timerSeconds.value = if (_timerMode.value == TimerMode.Exact) _selectedDurationSeconds.value else 0
     }
-    override fun onCleared() { isCleared = true; stabilizationFallbackJob?.cancel(); stabilizationFallbackJob = null; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseIdentityStabilizer.reset(); poseSmoother.reset(); movementTracker.reset(); poseOcclusionGuard.reset(); resetPoseDropoutHoldState() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
+    override fun onCleared() {
+        isCleared = true
+        stabilizationFallbackJob?.cancel()
+        stabilizationFallbackJob = null
+        sensorManager.unregisterListener(this)
+        stabilizationStableSinceMs = null
+        stabilizationCompleted = false
+        synchronized(sessionTargetLock) {
+            sessionSuccessPending = false
+        }
+        synchronized(processingLock) {
+            processingGeneration += 1
+            poseIdentityStabilizer.reset()
+            poseSmoother.reset()
+            movementTracker.reset()
+            poseOcclusionGuard.reset()
+            resetPoseDropoutHoldState()
+        }
+        clearCameraFrameCache(recycle = true)
+        mediaPipeResultExecutor.shutdownNow()
+        runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }
+        faceDetectorService.close()
+        super.onCleared()
+    }
 }
 
 private fun Bitmap.recycleIfNeeded() {
