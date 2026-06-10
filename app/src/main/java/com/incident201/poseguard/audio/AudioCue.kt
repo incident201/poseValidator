@@ -56,7 +56,6 @@ data class AudioCueSettings(
 
 data class AudioCuePlaybackSettings(
     val customizeAudioEnabled: Boolean = false,
-    val ttsVoiceMode: TtsVoiceMode = TtsVoiceMode.DefaultVoice,
     val cueSettings: Map<AudioCue, AudioCueSettings> =
         AudioCue.entries.associateWith { AudioCueSettings() }
 )

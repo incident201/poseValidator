@@ -1559,7 +1559,6 @@ private fun AudioCueAnnouncer(viewModel: GameViewModel, settings: GameSettings) 
     val currentPlaybackSettings = rememberUpdatedState(
         AudioCuePlaybackSettings(
             customizeAudioEnabled = settings.customizeAudioEnabled,
-            ttsVoiceMode = settings.ttsVoiceMode,
             cueSettings = settings.audioCueSettings
         )
     )
