@@ -1194,10 +1194,7 @@ private fun TtsPhraseTemplate.defaultTextRes(): Int = when (this) {
 }
 
 private fun isValidTtsTemplate(template: TtsPhraseTemplate, text: String): Boolean =
-    when (template) {
-        TtsPhraseTemplate.PenaltyAddedToTimer -> text.contains("{minutes}")
-        else -> text.isNotBlank()
-    }
+    template != TtsPhraseTemplate.PenaltyAddedToTimer || text.contains("{minutes}")
 
 private fun AudioCue.labelRes(): Int = when (this) {
     AudioCue.PlaceDeviceStill -> R.string.audio_cue_place_device_still

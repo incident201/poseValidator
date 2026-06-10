@@ -686,7 +686,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     fun updateTtsPhraseTemplate(template: TtsPhraseTemplate, customText: String?) {
-        val normalized = customText?.takeIf { it.isNotBlank() }
+        val normalized = customText
+            ?.takeIf { it.isNotBlank() }
+            ?.takeIf {
+                template != TtsPhraseTemplate.PenaltyAddedToTimer || it.contains("{minutes}")
+            }
         _gameSettings.value = _gameSettings.value.copy(
             customTtsTemplates = if (normalized == null) {
                 _gameSettings.value.customTtsTemplates - template

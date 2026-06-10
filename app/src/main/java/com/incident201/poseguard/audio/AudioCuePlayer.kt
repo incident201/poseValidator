@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.speech.tts.TextToSpeech
+import android.speech.tts.Voice
 import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
@@ -25,12 +26,18 @@ class AudioCuePlayer(
     private val ttsRef = AtomicReference<TextToSpeech?>(null)
     private val desiredLocale = AtomicReference(Locale.US)
     private val desiredVoiceMode = AtomicReference(TtsVoiceMode.DefaultVoice)
+    private val initialSystemVoice = AtomicReference<Voice?>(null)
 
     init {
         val engine = TextToSpeech(appContext) { status ->
             val initializedEngine = ttsRef.get() ?: return@TextToSpeech
             ttsInitialized.set(true)
             if (status == TextToSpeech.SUCCESS) {
+                if (initialSystemVoice.get() == null) {
+                    initialSystemVoice.set(
+                        runCatching { initializedEngine.defaultVoice }.getOrNull()
+                    )
+                }
                 val ready = applyTtsConfiguration(
                     initializedEngine,
                     desiredLocale.get(),
@@ -144,7 +151,7 @@ class AudioCuePlayer(
         TtsVoiceMode.DefaultVoice -> setTtsLanguage(engine, locale)
         TtsVoiceMode.SystemVoice -> {
             val appliedSystemVoice = runCatching {
-                val systemVoice = engine.defaultVoice
+                val systemVoice = initialSystemVoice.get() ?: engine.defaultVoice
                 systemVoice != null && engine.setVoice(systemVoice) == TextToSpeech.SUCCESS
             }.getOrDefault(false)
 
@@ -172,6 +179,7 @@ class AudioCuePlayer(
         }
         ttsReady.set(false)
         ttsInitialized.set(false)
+        initialSystemVoice.set(null)
         pendingTtsMessages.clear()
     }
 
