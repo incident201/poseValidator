@@ -1349,18 +1349,15 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 while (_gameState.value == GameState.HoldingPose) {
                     val elapsedSeconds = sessionElapsedSecondsForSummary()
                     _timerSeconds.value = elapsedSeconds
-                    val sessionCompleted = synchronized(sessionTargetLock) {
-                        if (sessionTimerMode == TimerMode.Random &&
+                    val shouldComplete = synchronized(sessionTargetLock) {
+                        sessionTimerMode == TimerMode.Random &&
                             _gameState.value == GameState.HoldingPose &&
                             elapsedSeconds >= sessionTargetSeconds
-                        ) {
-                            completeSessionSuccess()
-                            true
-                        } else {
-                            false
-                        }
                     }
-                    if (sessionCompleted) return@launch
+                    if (shouldComplete) {
+                        completeSessionSuccess()
+                        return@launch
+                    }
 
                     delay(250)
                 }

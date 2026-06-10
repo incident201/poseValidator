@@ -138,14 +138,16 @@ class AudioCuePlayer(
     }
 
     private fun flushPendingTts(engine: TextToSpeech) {
+        var queueMode = TextToSpeech.QUEUE_FLUSH
         while (true) {
             val message = pendingTtsMessages.poll() ?: break
             engine.speak(
                 message,
-                TextToSpeech.QUEUE_FLUSH,
+                queueMode,
                 null,
                 "audio_cue_${System.currentTimeMillis()}"
             )
+            queueMode = TextToSpeech.QUEUE_ADD
         }
     }
 
