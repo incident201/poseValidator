@@ -20,6 +20,8 @@ import com.incident201.poseguard.audio.AudioCueSettings
 import com.incident201.poseguard.audio.PcmChannel
 import com.incident201.poseguard.audio.PcmPattern
 import com.incident201.poseguard.audio.PcmSignalSettings
+import com.incident201.poseguard.audio.TtsPhraseTemplate
+import com.incident201.poseguard.audio.TtsVoiceMode
 import com.incident201.poseguard.tracker.FaceDetectionStatus
 import com.incident201.poseguard.tracker.FaceCandidateCropper
 import com.incident201.poseguard.tracker.FaceDetectorService
@@ -50,6 +52,7 @@ import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.sqrt
+import kotlin.random.Random
 
 private const val PREF_OCCLUSION_FREEZE_VIS_ALWAYS = "occlusion_freeze_visibility_always"
 private const val PREF_OCCLUSION_FREEZE_VIS_P10_ALWAYS = "occlusion_freeze_visibility_p10_always"
@@ -73,8 +76,11 @@ private const val CURRENT_SENSITIVITY_PRESETS_VERSION = 2
 private const val MAX_POSE_DROPOUT_HOLD_FRAMES = 5
 private const val MAX_POSE_DROPOUT_HOLD_MS = 180L
 private const val PREF_CUSTOMIZE_AUDIO_ENABLED = "customize_audio_enabled"
+private const val PREF_TTS_VOICE_MODE = "tts_voice_mode"
 private const val PREF_AUDIO_CUE_MODE_PREFIX = "audio_cue_mode_"
 private const val PREF_AUDIO_CUE_URI_PREFIX = "audio_cue_uri_"
+private const val PREF_TTS_TEMPLATE_PREFIX = "tts_template_"
+private const val LEGACY_PREF_AUDIO_CUE_TTS_TEXT_PREFIX = "audio_cue_tts_text_"
 private const val PREF_AUDIO_CUE_PCM_FREQUENCY_PREFIX = "audio_cue_pcm_frequency_"
 private const val PREF_AUDIO_CUE_PCM_DURATION_PREFIX = "audio_cue_pcm_duration_"
 private const val PREF_AUDIO_CUE_PCM_CHANNEL_PREFIX = "audio_cue_pcm_channel_"
@@ -82,6 +88,9 @@ private const val PREF_AUDIO_CUE_PCM_AMPLITUDE_PREFIX = "audio_cue_pcm_amplitude
 private const val PREF_AUDIO_CUE_PCM_FADE_IN_PREFIX = "audio_cue_pcm_fade_in_"
 private const val PREF_AUDIO_CUE_PCM_FADE_OUT_PREFIX = "audio_cue_pcm_fade_out_"
 private const val PREF_AUDIO_CUE_PCM_PATTERN_PREFIX = "audio_cue_pcm_pattern_"
+private const val PREF_TIMER_MODE = "timer_mode"
+private const val PREF_RANDOM_MIN_DURATION_SECONDS = "random_min_duration_seconds"
+private const val PREF_RANDOM_MAX_DURATION_SECONDS = "random_max_duration_seconds"
 
 enum class GameState {
     Idle,
@@ -90,6 +99,11 @@ enum class GameState {
     HoldingPose,
     Success,
     Failed
+}
+
+enum class TimerMode {
+    Exact,
+    Random
 }
 
 enum class FaceCheckMode {
@@ -125,6 +139,8 @@ data class GameSettings(
     val poseSmootherDerivativeCutoff: Float = PoseSmoother.DEFAULT_DERIVATIVE_CUTOFF,
     val debugModeEnabled: Boolean = false,
     val customizeAudioEnabled: Boolean = false,
+    val ttsVoiceMode: TtsVoiceMode = TtsVoiceMode.DefaultVoice,
+    val customTtsTemplates: Map<TtsPhraseTemplate, String> = emptyMap(),
     val audioCueSettings: Map<AudioCue, AudioCueSettings> =
         AudioCue.entries.associateWith { AudioCueSettings() }
 )
@@ -217,6 +233,21 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     val ruleViolationCounts: StateFlow<RuleViolationCounts> = _ruleViolationCounts.asStateFlow()
     private val _selectedDurationSeconds = MutableStateFlow(defaultDurationSeconds)
     val selectedDurationSeconds: StateFlow<Int> = _selectedDurationSeconds.asStateFlow()
+    private val _timerMode = MutableStateFlow(
+        runCatching {
+            TimerMode.valueOf(prefs.getString(PREF_TIMER_MODE, TimerMode.Exact.name) ?: TimerMode.Exact.name)
+        }.getOrDefault(TimerMode.Exact)
+    )
+    val timerMode: StateFlow<TimerMode> = _timerMode.asStateFlow()
+    private val _randomMinDurationSeconds = MutableStateFlow(
+        prefs.getInt(PREF_RANDOM_MIN_DURATION_SECONDS, defaultDurationSeconds).coerceAtLeast(1)
+    )
+    val randomMinDurationSeconds: StateFlow<Int> = _randomMinDurationSeconds.asStateFlow()
+    private val _randomMaxDurationSeconds = MutableStateFlow(
+        prefs.getInt(PREF_RANDOM_MAX_DURATION_SECONDS, defaultDurationSeconds)
+            .coerceAtLeast(_randomMinDurationSeconds.value)
+    )
+    val randomMaxDurationSeconds: StateFlow<Int> = _randomMaxDurationSeconds.asStateFlow()
     private val _statusMessage = MutableStateFlow("")
     val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
     private val _defeatReason = MutableStateFlow("")
@@ -239,6 +270,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     val sessionSummary: StateFlow<SessionSummary?> = _sessionSummary.asStateFlow()
 
     private var sessionInitialTimerSeconds = defaultDurationSeconds
+    @Volatile private var sessionTimerMode = TimerMode.Exact
+    @Volatile private var sessionTargetSeconds = defaultDurationSeconds
+
+    private enum class PendingTerminalResult {
+        Success,
+        Defeat
+    }
+
+    // Guarded by sessionTargetLock.
+    private var pendingTerminalResult: PendingTerminalResult? = null
     private var sessionHoldingStartedAtElapsedMs: Long? = null
     private var sessionSettingsSnapshot = _gameSettings.value
 
@@ -263,6 +304,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private val frameLock = Any()
     private val processingLock = Any()
+    private val sessionTargetLock = Any()
     private var processingGeneration = 0L
     private val mediaPipeResultExecutor = Executors.newSingleThreadExecutor()
     @Volatile private var isCleared = false
@@ -301,6 +343,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         val mode = runCatching { FaceCheckMode.valueOf(prefs.getString("face_mode", FaceCheckMode.Disabled.name) ?: FaceCheckMode.Disabled.name) }
             .getOrDefault(FaceCheckMode.Disabled)
         val language = runCatching { AppLanguage.valueOf(prefs.getString("app_language", AppLanguage.English.name) ?: AppLanguage.English.name) }.getOrDefault(AppLanguage.English)
+        val ttsVoiceMode = runCatching {
+            TtsVoiceMode.valueOf(
+                prefs.getString(PREF_TTS_VOICE_MODE, TtsVoiceMode.DefaultVoice.name)
+                    ?: TtsVoiceMode.DefaultVoice.name
+            )
+        }.getOrDefault(TtsVoiceMode.DefaultVoice)
         val (driftThresholdFactor, motionThresholdFactor) = loadSensitivityThresholds()
         val occlusionFreezeVisibilityAlways =
             prefs.getFloat(
@@ -365,8 +413,37 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             ).coerceIn(PoseSmoother.MIN_CUTOFF_RANGE, PoseSmoother.MAX_CUTOFF_RANGE),
             debugModeEnabled = prefs.getBoolean(PREF_DEBUG_MODE_ENABLED, false),
             customizeAudioEnabled = prefs.getBoolean(PREF_CUSTOMIZE_AUDIO_ENABLED, false),
+            ttsVoiceMode = ttsVoiceMode,
+            customTtsTemplates = loadCustomTtsTemplates(),
             audioCueSettings = loadAudioCueSettings()
         )
+    }
+
+    private fun loadCustomTtsTemplates(): Map<TtsPhraseTemplate, String> =
+        TtsPhraseTemplate.entries.mapNotNull { template ->
+            val currentValue = prefs
+                .getString(PREF_TTS_TEMPLATE_PREFIX + template.name, null)
+                ?.takeIf { it.isNotBlank() }
+            val legacyValue = template.audioCueForLegacyMigration()?.let { cue ->
+                prefs.getString(LEGACY_PREF_AUDIO_CUE_TTS_TEXT_PREFIX + cue.name, null)
+                    ?.takeIf { it.isNotBlank() }
+            }
+
+            (currentValue ?: legacyValue)?.let { template to it }
+        }.toMap()
+
+    private fun TtsPhraseTemplate.audioCueForLegacyMigration(): AudioCue? = when (this) {
+        TtsPhraseTemplate.PlaceDeviceStill -> AudioCue.PlaceDeviceStill
+        TtsPhraseTemplate.TakePosition -> AudioCue.TakePosition
+        TtsPhraseTemplate.TimeStartedHoldPosition -> AudioCue.TimeStartedHoldPosition
+        TtsPhraseTemplate.TimeIsUp -> AudioCue.TimeIsUp
+        TtsPhraseTemplate.DefeatTryAgain -> AudioCue.DefeatTryAgain
+        TtsPhraseTemplate.MotionViolation -> AudioCue.MotionViolation
+        TtsPhraseTemplate.DriftViolation -> AudioCue.DriftViolation
+        TtsPhraseTemplate.ViolationRecorded -> AudioCue.ViolationRecorded
+        TtsPhraseTemplate.FaceTurnedAway -> AudioCue.FaceTurnedAway
+        TtsPhraseTemplate.FaceLookedAtCamera -> AudioCue.FaceLookedAtCamera
+        TtsPhraseTemplate.PenaltyAddedToTimer -> null
     }
 
     private fun loadAudioCueSettings(): Map<AudioCue, AudioCueSettings> =
@@ -638,6 +715,37 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         prefs.edit().putBoolean("penalties_enabled", enabled).apply()
     }
 
+    fun updateTtsVoiceMode(mode: TtsVoiceMode) {
+        _gameSettings.value = _gameSettings.value.copy(ttsVoiceMode = mode)
+        prefs.edit().putString(PREF_TTS_VOICE_MODE, mode.name).apply()
+    }
+
+    fun updateTtsPhraseTemplate(template: TtsPhraseTemplate, customText: String?) {
+        val normalized = customText
+            ?.takeIf { it.isNotBlank() }
+            ?.takeIf {
+                template != TtsPhraseTemplate.PenaltyAddedToTimer || it.contains("{minutes}")
+            }
+        _gameSettings.value = _gameSettings.value.copy(
+            customTtsTemplates = if (normalized == null) {
+                _gameSettings.value.customTtsTemplates - template
+            } else {
+                _gameSettings.value.customTtsTemplates + (template to normalized)
+            }
+        )
+
+        prefs.edit().apply {
+            if (normalized == null) {
+                remove(PREF_TTS_TEMPLATE_PREFIX + template.name)
+            } else {
+                putString(PREF_TTS_TEMPLATE_PREFIX + template.name, normalized)
+            }
+            template.audioCueForLegacyMigration()?.let { cue ->
+                remove(LEGACY_PREF_AUDIO_CUE_TTS_TEXT_PREFIX + cue.name)
+            }
+        }.apply()
+    }
+
     fun updateCustomizeAudioEnabled(enabled: Boolean) {
         _gameSettings.value = _gameSettings.value.copy(customizeAudioEnabled = enabled)
         prefs.edit().putBoolean(PREF_CUSTOMIZE_AUDIO_ENABLED, enabled).apply()
@@ -703,12 +811,35 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _selectedDurationSeconds.value = normalizedSeconds
 
         if (
-            _gameState.value == GameState.Idle ||
-            _gameState.value == GameState.Failed ||
-            _gameState.value == GameState.Success
+            _timerMode.value == TimerMode.Exact &&
+            (_gameState.value == GameState.Idle ||
+                _gameState.value == GameState.Failed ||
+                _gameState.value == GameState.Success)
         ) {
             _timerSeconds.value = normalizedSeconds
         }
+    }
+
+    fun updateTimerMode(mode: TimerMode) {
+        _timerMode.value = mode
+        prefs.edit().putString(PREF_TIMER_MODE, mode.name).apply()
+        if (_gameState.value == GameState.Idle ||
+            _gameState.value == GameState.Failed ||
+            _gameState.value == GameState.Success
+        ) {
+            _timerSeconds.value = if (mode == TimerMode.Exact) _selectedDurationSeconds.value else 0
+        }
+    }
+
+    fun updateRandomDurationRangeSeconds(minSeconds: Int, maxSeconds: Int) {
+        val normalizedMin = minSeconds.coerceAtLeast(1)
+        val normalizedMax = maxSeconds.coerceAtLeast(normalizedMin)
+        _randomMinDurationSeconds.value = normalizedMin
+        _randomMaxDurationSeconds.value = normalizedMax
+        prefs.edit()
+            .putInt(PREF_RANDOM_MIN_DURATION_SECONDS, normalizedMin)
+            .putInt(PREF_RANDOM_MAX_DURATION_SECONDS, normalizedMax)
+            .apply()
     }
 
     fun updateSelectedDurationMinutes(minutes: Int) {
@@ -1006,7 +1137,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private fun applyPenalty(type: RuleViolationType, minutes: Int) {
         val sec = minutes * 60
         if (_gameSettings.value.penaltiesEnabled && sec > 0) {
-            _timerSeconds.value += sec
+            if (sessionTimerMode == TimerMode.Random) {
+                synchronized(sessionTargetLock) {
+                    if (sessionTimerMode == TimerMode.Random &&
+                        _gameState.value == GameState.HoldingPose &&
+                        pendingTerminalResult == null
+                    ) {
+                        sessionTargetSeconds += sec
+                    }
+                }
+            } else {
+                _timerSeconds.value += sec
+            }
         }
 
         if (type == RuleViolationType.FaceNotMatchingMode) {
@@ -1015,10 +1157,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             } else {
                 tr(R.string.face_rule_violated)
             }
-            val prefix = if (_gameSettings.value.faceCheckMode == FaceCheckMode.FaceToCamera) {
-                tr(R.string.you_turned_away)
+            val prefixTemplate = if (_gameSettings.value.faceCheckMode == FaceCheckMode.FaceToCamera) {
+                TtsPhraseTemplate.FaceTurnedAway
             } else {
-                tr(R.string.you_looked_at_camera)
+                TtsPhraseTemplate.FaceLookedAtCamera
             }
             _statusMessage.value = statusText
             val cue = if (_gameSettings.value.faceCheckMode == FaceCheckMode.FaceToCamera) {
@@ -1027,26 +1169,29 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 AudioCue.FaceLookedAtCamera
             }
             val cueText = if (_gameSettings.value.penaltiesEnabled) {
-                "$prefix. ${tr(R.string.penalty_added_to_timer, minutes)}"
+                "${ttsText(prefixTemplate)}. ${ttsText(TtsPhraseTemplate.PenaltyAddedToTimer, minutes)}"
             } else {
-                prefix
+                ttsText(prefixTemplate)
             }
             playAudioCue(cue, cueText)
             return
         }
 
-        val (cue, voicePrefix) = when (type) {
-            RuleViolationType.Motion -> AudioCue.MotionViolation to tr(R.string.motion_violation_voice)
-            RuleViolationType.Drift -> AudioCue.DriftViolation to tr(R.string.drift_violation_voice)
-            else -> AudioCue.ViolationRecorded to tr(R.string.violation_recorded)
+        val (cue, voiceTemplate) = when (type) {
+            RuleViolationType.Motion -> AudioCue.MotionViolation to TtsPhraseTemplate.MotionViolation
+            RuleViolationType.Drift -> AudioCue.DriftViolation to TtsPhraseTemplate.DriftViolation
+            else -> AudioCue.ViolationRecorded to TtsPhraseTemplate.ViolationRecorded
         }
 
         if (_gameSettings.value.penaltiesEnabled) {
             _statusMessage.value = tr(R.string.violation_recorded_with_penalty, minutes)
-            playAudioCue(cue, "$voicePrefix. ${tr(R.string.penalty_added_to_timer, minutes)}")
+            playAudioCue(
+                cue,
+                "${ttsText(voiceTemplate)}. ${ttsText(TtsPhraseTemplate.PenaltyAddedToTimer, minutes)}"
+            )
         } else {
             _statusMessage.value = tr(R.string.violation_recorded)
-            playAudioCue(cue, voicePrefix)
+            playAudioCue(cue, ttsText(voiceTemplate))
         }
     }
 
@@ -1192,27 +1337,91 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         return elapsedSeconds.toInt()
     }
 
+    private fun tryReserveSessionSuccess(elapsedSeconds: Int? = null): Boolean = synchronized(sessionTargetLock) {
+        if (_gameState.value != GameState.HoldingPose ||
+            pendingTerminalResult != null
+        ) {
+            return@synchronized false
+        }
+
+        val canComplete = when (sessionTimerMode) {
+            TimerMode.Random -> elapsedSeconds != null && elapsedSeconds >= sessionTargetSeconds
+            TimerMode.Exact -> true
+        }
+
+        if (canComplete) {
+            pendingTerminalResult = PendingTerminalResult.Success
+            true
+        } else {
+            false
+        }
+    }
+
+    private fun tryReserveSessionDefeat(): Boolean = synchronized(sessionTargetLock) {
+        val canReserveDefeat = when (_gameState.value) {
+            GameState.HoldingPose,
+            GameState.StartingDelay -> true
+            else -> false
+        }
+
+        if (canReserveDefeat && pendingTerminalResult == null) {
+            pendingTerminalResult = PendingTerminalResult.Defeat
+            true
+        } else {
+            false
+        }
+    }
+
+    private fun completeSessionSuccess() {
+        val canComplete = synchronized(sessionTargetLock) {
+            pendingTerminalResult == PendingTerminalResult.Success &&
+                _gameState.value == GameState.HoldingPose
+        }
+
+        if (!canComplete) {
+            return
+        }
+
+        _sessionSummary.value = SessionSummary(
+            result = GameState.Success,
+            initialTimerSeconds = sessionInitialTimerSeconds,
+            actualTimerSeconds = sessionElapsedSecondsForSummary(),
+            violationCounts = _ruleViolationCounts.value,
+            settings = sessionSettingsSnapshot
+        )
+        _gameState.value = GameState.Success
+        resetMovementGaugeState()
+        _statusMessage.value = tr(R.string.victory)
+        playAudioCue(AudioCue.TimeIsUp, ttsText(TtsPhraseTemplate.TimeIsUp))
+    }
+
     private fun startTimerLoop() {
         timerJob?.cancel()
         timerJob = viewModelScope.launch {
+            if (sessionTimerMode == TimerMode.Random) {
+                while (_gameState.value == GameState.HoldingPose) {
+                    val elapsedSeconds = sessionElapsedSecondsForSummary()
+                    _timerSeconds.value = elapsedSeconds
+                    val shouldComplete = tryReserveSessionSuccess(elapsedSeconds)
+                    if (shouldComplete) {
+                        completeSessionSuccess()
+                        return@launch
+                    }
+
+                    delay(250)
+                }
+                return@launch
+            }
+
             while (_gameState.value == GameState.HoldingPose && _timerSeconds.value > 0) {
                 delay(1000)
                 if (_gameState.value != GameState.HoldingPose) return@launch
-                val next = (_timerSeconds.value - 1).coerceAtLeast(0)
-                _timerSeconds.value = next
+                _timerSeconds.value = (_timerSeconds.value - 1).coerceAtLeast(0)
             }
-            if (_gameState.value == GameState.HoldingPose && _timerSeconds.value <= 0) {
-                _sessionSummary.value = SessionSummary(
-                    result = GameState.Success,
-                    initialTimerSeconds = sessionInitialTimerSeconds,
-                    actualTimerSeconds = sessionElapsedSecondsForSummary(),
-                    violationCounts = _ruleViolationCounts.value,
-                    settings = sessionSettingsSnapshot
-                )
-                _gameState.value = GameState.Success
-                resetMovementGaugeState()
-                _statusMessage.value = tr(R.string.victory)
-                playAudioCue(AudioCue.TimeIsUp, tr(R.string.time_is_up))
+
+            if (_timerSeconds.value <= 0 && tryReserveSessionSuccess()) {
+                completeSessionSuccess()
+                return@launch
             }
         }
     }
@@ -1221,10 +1430,21 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         if (_gameState.value != GameState.Idle && _gameState.value != GameState.Failed && _gameState.value != GameState.Success) return
 
         _sessionSummary.value = null
-        sessionInitialTimerSeconds = _selectedDurationSeconds.value
+        sessionTimerMode = _timerMode.value
+        sessionInitialTimerSeconds = if (sessionTimerMode == TimerMode.Random) {
+            val minSeconds = _randomMinDurationSeconds.value
+            val maxSeconds = _randomMaxDurationSeconds.value.coerceAtLeast(minSeconds)
+            Random.nextLong(minSeconds.toLong(), maxSeconds.toLong() + 1L).toInt()
+        } else {
+            _selectedDurationSeconds.value
+        }
+        synchronized(sessionTargetLock) {
+            sessionTargetSeconds = sessionInitialTimerSeconds
+            pendingTerminalResult = null
+        }
         sessionHoldingStartedAtElapsedMs = null
         sessionSettingsSnapshot = _gameSettings.value
-        _timerSeconds.value = _selectedDurationSeconds.value
+        _timerSeconds.value = if (sessionTimerMode == TimerMode.Exact) sessionInitialTimerSeconds else 0
         _defeatReason.value = ""
         resetMovementGaugeState()
         _startDelayRemainingSeconds.value = 0
@@ -1249,7 +1469,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationCompleted = false
         _gameState.value = GameState.WaitingForStabilization
         _statusMessage.value = tr(R.string.place_device_still)
-        playAudioCue(AudioCue.PlaceDeviceStill, tr(R.string.place_device_still))
+        playAudioCue(AudioCue.PlaceDeviceStill, ttsText(TtsPhraseTemplate.PlaceDeviceStill))
         sensorManager.unregisterListener(this)
 
         val gyroscopeRegistered = gyroscopeSensor?.let { sensor ->
@@ -1268,7 +1488,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     private fun startPoseCountdownAfterDeviceStabilized() {
-        playAudioCue(AudioCue.TakePosition, tr(R.string.take_position))
+        playAudioCue(AudioCue.TakePosition, ttsText(TtsPhraseTemplate.TakePosition))
         synchronized(processingLock) {
             poseOcclusionGuard.reset()
         }
@@ -1285,7 +1505,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             val initialPose = analyzedFrame?.pose
             if (analyzedFrame == null) { triggerDefeat(tr(R.string.camera_no_frame)); return@launch }
             if (initialPose == null || !initialPose.hasEnoughKeypoints()) { triggerDefeat(tr(R.string.camera_no_body)); return@launch }
-            _timerSeconds.value = sessionInitialTimerSeconds
+            _timerSeconds.value = if (sessionTimerMode == TimerMode.Exact) sessionInitialTimerSeconds else 0
             sessionHoldingStartedAtElapsedMs = SystemClock.elapsedRealtime()
             synchronized(processingLock) {
                 processingGeneration += 1
@@ -1305,7 +1525,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             _gameState.value = GameState.HoldingPose
             _statusMessage.value = tr(R.string.time_started_hold_position)
             startTimerLoop()
-            playAudioCue(AudioCue.TimeStartedHoldPosition, tr(R.string.time_started_hold_position))
+            playAudioCue(
+                AudioCue.TimeStartedHoldPosition,
+                ttsText(TtsPhraseTemplate.TimeStartedHoldPosition)
+            )
         }
     }
 
@@ -1347,7 +1570,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private fun resetMovementGaugeState() { _movementGaugeState.value = MovementGaugeState() }
 
     fun triggerDefeat(reason: String) {
-        val alreadyFailed = _gameState.value == GameState.Failed
+        if (!tryReserveSessionDefeat()) {
+            return
+        }
+
         startDelayJob?.cancel()
         timerJob?.cancel()
         stabilizationFallbackJob?.cancel()
@@ -1376,8 +1602,30 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _gameState.value = GameState.Failed
         _defeatReason.value = reason
         _statusMessage.value = tr(R.string.check_failed)
-        if (!alreadyFailed) playAudioCue(AudioCue.DefeatTryAgain, tr(R.string.defeat_try_again))
+        playAudioCue(AudioCue.DefeatTryAgain, ttsText(TtsPhraseTemplate.DefeatTryAgain))
     }
+
+    private fun defaultTtsTemplateText(template: TtsPhraseTemplate): String = when (template) {
+        TtsPhraseTemplate.PlaceDeviceStill -> tr(R.string.place_device_still)
+        TtsPhraseTemplate.TakePosition -> tr(R.string.take_position)
+        TtsPhraseTemplate.TimeStartedHoldPosition -> tr(R.string.time_started_hold_position)
+        TtsPhraseTemplate.TimeIsUp -> tr(R.string.time_is_up)
+        TtsPhraseTemplate.DefeatTryAgain -> tr(R.string.defeat_try_again)
+        TtsPhraseTemplate.MotionViolation -> tr(R.string.motion_violation_voice)
+        TtsPhraseTemplate.DriftViolation -> tr(R.string.drift_violation_voice)
+        TtsPhraseTemplate.ViolationRecorded -> tr(R.string.violation_recorded)
+        TtsPhraseTemplate.FaceTurnedAway -> tr(R.string.you_turned_away)
+        TtsPhraseTemplate.FaceLookedAtCamera -> tr(R.string.you_looked_at_camera)
+        TtsPhraseTemplate.PenaltyAddedToTimer -> tr(R.string.penalty_added_to_timer_template)
+    }
+
+    private fun ttsText(template: TtsPhraseTemplate): String =
+        _gameSettings.value.customTtsTemplates[template]
+            ?.takeIf { it.isNotBlank() }
+            ?: defaultTtsTemplateText(template)
+
+    private fun ttsText(template: TtsPhraseTemplate, minutes: Int): String =
+        ttsText(template).replace("{minutes}", minutes.toString())
 
     private fun playAudioCue(cue: AudioCue, ttsText: String) {
         _audioCueEvents.tryEmit(AudioCueEvent(cue, ttsText))
@@ -1393,6 +1641,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
         _startDelayRemainingSeconds.value = 0
+        synchronized(sessionTargetLock) {
+            pendingTerminalResult = null
+        }
         synchronized(processingLock) {
             processingGeneration += 1
             poseIdentityStabilizer.reset()
@@ -1412,7 +1663,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _gameState.value = GameState.Idle
         _statusMessage.value = tr(R.string.status_initial)
         _defeatReason.value = ""
-        _timerSeconds.value = _selectedDurationSeconds.value
+        _timerSeconds.value = if (_timerMode.value == TimerMode.Exact) _selectedDurationSeconds.value else 0
     }
 
     fun stopSession() {
@@ -1424,6 +1675,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
         _startDelayRemainingSeconds.value = 0
+        synchronized(sessionTargetLock) {
+            pendingTerminalResult = null
+        }
         synchronized(processingLock) {
             processingGeneration += 1
             poseIdentityStabilizer.reset()
@@ -1443,9 +1697,32 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _gameState.value = GameState.Idle
         _statusMessage.value = tr(R.string.status_initial)
         _defeatReason.value = ""
-        _timerSeconds.value = _selectedDurationSeconds.value
+        _timerSeconds.value = if (_timerMode.value == TimerMode.Exact) _selectedDurationSeconds.value else 0
     }
-    override fun onCleared() { isCleared = true; stabilizationFallbackJob?.cancel(); stabilizationFallbackJob = null; sensorManager.unregisterListener(this); stabilizationStableSinceMs = null; stabilizationCompleted = false; synchronized(processingLock) { processingGeneration += 1; poseIdentityStabilizer.reset(); poseSmoother.reset(); movementTracker.reset(); poseOcclusionGuard.reset(); resetPoseDropoutHoldState() }; clearCameraFrameCache(recycle = true); mediaPipeResultExecutor.shutdownNow(); runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }; faceDetectorService.close(); super.onCleared() }
+    override fun onCleared() {
+        isCleared = true
+        stabilizationFallbackJob?.cancel()
+        stabilizationFallbackJob = null
+        sensorManager.unregisterListener(this)
+        stabilizationStableSinceMs = null
+        stabilizationCompleted = false
+        synchronized(sessionTargetLock) {
+            pendingTerminalResult = null
+        }
+        synchronized(processingLock) {
+            processingGeneration += 1
+            poseIdentityStabilizer.reset()
+            poseSmoother.reset()
+            movementTracker.reset()
+            poseOcclusionGuard.reset()
+            resetPoseDropoutHoldState()
+        }
+        clearCameraFrameCache(recycle = true)
+        mediaPipeResultExecutor.shutdownNow()
+        runCatching { mediaPipeResultExecutor.awaitTermination(200, TimeUnit.MILLISECONDS) }
+        faceDetectorService.close()
+        super.onCleared()
+    }
 }
 
 private fun Bitmap.recycleIfNeeded() {

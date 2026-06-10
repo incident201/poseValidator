@@ -128,6 +128,12 @@
     <string name="onboarding_previous">Back</string>
     <string name="onboarding_done">Start</string>
     <string name="view_instructions">View instructions</string>
+    <string name="timer_mode_exact">Exact time</string>
+    <string name="timer_mode_random">Random time</string>
+    <string name="timer_minimum">Minimum</string>
+    <string name="timer_maximum">Maximum</string>
+    <string name="random_timer_range">Random timer range</string>
+    <string name="random_timer_hidden_hint">The exact time will be revealed after the session.</string>
     <string name="set_timer">Set timer</string>
     <string name="hours">Hours</string>
     <string name="minutes">Minutes</string>
@@ -169,4 +175,15 @@
     <string name="audio_cue_pcm_pattern_double_beep">Double beep</string>
     <string name="audio_cue_pcm_settings_title">PCM signal</string>
 
+    <string name="tts_voice">TTS voice</string>
+    <string name="tts_voice_default">Default voice</string>
+    <string name="tts_voice_system">System voice</string>
+    <string name="audio_cue_tts_configure">Configure TTS phrase</string>
+    <string name="audio_cue_tts_settings_title">TTS phrase</string>
+    <string name="audio_cue_tts_text">Text</string>
+    <string name="audio_cue_tts_reset_default">Reset to default</string>
+    <string name="penalty_added_to_timer_template">Plus {minutes} minutes to the timer</string>
+    <string name="audio_cue_tts_template_minutes_hint">Use {minutes} where the number of minutes should appear.</string>
+    <string name="audio_cue_tts_template_minutes_error">Keep {minutes} in this template.</string>
+    <string name="audio_cue_penalty_added_to_timer">Penalty added to timer</string>
 </resources>

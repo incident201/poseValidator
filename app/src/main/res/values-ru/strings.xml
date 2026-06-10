@@ -128,6 +128,12 @@
     <string name="onboarding_previous">Назад</string>
     <string name="onboarding_done">Начать</string>
     <string name="view_instructions">Посмотреть инструкции</string>
+    <string name="timer_mode_exact">Точное время</string>
+    <string name="timer_mode_random">Случайное время</string>
+    <string name="timer_minimum">Минимум</string>
+    <string name="timer_maximum">Максимум</string>
+    <string name="random_timer_range">Диапазон случайного таймера</string>
+    <string name="random_timer_hidden_hint">Точное время будет показано после завершения сессии.</string>
     <string name="set_timer">Установить таймер</string>
     <string name="hours">Часы</string>
     <string name="minutes">Минуты</string>
@@ -169,4 +175,15 @@
     <string name="audio_cue_pcm_pattern_double_beep">Double beep</string>
     <string name="audio_cue_pcm_settings_title">PCM сигнал</string>
 
+    <string name="tts_voice">Голос TTS</string>
+    <string name="tts_voice_default">Голос по умолчанию</string>
+    <string name="tts_voice_system">Системный голос</string>
+    <string name="audio_cue_tts_configure">Настроить TTS-фразу</string>
+    <string name="audio_cue_tts_settings_title">TTS-фраза</string>
+    <string name="audio_cue_tts_text">Текст</string>
+    <string name="audio_cue_tts_reset_default">Вернуть по умолчанию</string>
+    <string name="penalty_added_to_timer_template">Плюс {minutes} минут к таймеру</string>
+    <string name="audio_cue_tts_template_minutes_hint">Используйте {minutes} там, где должно быть количество минут.</string>
+    <string name="audio_cue_tts_template_minutes_error">Оставьте {minutes} в этом шаблоне.</string>
+    <string name="audio_cue_penalty_added_to_timer">Штраф добавлен к таймеру</string>
 </resources>

@@ -9,6 +9,7 @@ import android.speech.tts.TextToSpeech
 import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 class AudioCuePlayer(
@@ -24,25 +25,43 @@ class AudioCuePlayer(
     private var closed = false
     private val ttsRef = AtomicReference<TextToSpeech?>(null)
     private val desiredLocale = AtomicReference(Locale.US)
+    private val desiredVoiceMode = AtomicReference(TtsVoiceMode.DefaultVoice)
+    private val currentSystemTtsEngine = AtomicReference<String?>(null)
+    private val ttsGeneration = AtomicLong(0)
 
     init {
-        val engine = TextToSpeech(appContext) { status ->
-            val initializedEngine = ttsRef.get() ?: return@TextToSpeech
-            ttsInitialized.set(true)
-            if (status == TextToSpeech.SUCCESS) {
-                val ready = setTtsLanguage(initializedEngine, desiredLocale.get())
-                ttsReady.set(ready)
-                if (ready) flushPendingTts(initializedEngine)
-            }
-        }
-        ttsRef.set(engine)
+        createTtsEngine()
     }
 
-    fun setLanguage(locale: Locale) {
+    fun setTtsConfig(locale: Locale, voiceMode: TtsVoiceMode) {
         desiredLocale.set(locale)
+        desiredVoiceMode.set(voiceMode)
         if (!ttsInitialized.get()) return
         val engine = ttsRef.get() ?: return
-        val ready = setTtsLanguage(engine, locale)
+        val ready = applyTtsConfiguration(engine, locale, voiceMode)
+        ttsReady.set(ready)
+        if (ready) flushPendingTts(engine)
+    }
+
+    fun refreshTtsEngineIfSystemDefaultChanged() {
+        if (closed) return
+
+        val engine = ttsRef.get()
+        val latestSystemEngine = readDefaultTtsEngine(engine)
+        val knownSystemEngine = currentSystemTtsEngine.get()
+
+        if (latestSystemEngine != knownSystemEngine) {
+            recreateTtsEngine()
+            return
+        }
+
+        if (engine == null || !ttsInitialized.get()) return
+
+        val ready = applyTtsConfiguration(
+            engine,
+            desiredLocale.get(),
+            desiredVoiceMode.get()
+        )
         ttsReady.set(ready)
         if (ready) flushPendingTts(engine)
     }
@@ -119,15 +138,85 @@ class AudioCuePlayer(
     }
 
     private fun flushPendingTts(engine: TextToSpeech) {
+        var queueMode = TextToSpeech.QUEUE_FLUSH
         while (true) {
             val message = pendingTtsMessages.poll() ?: break
             engine.speak(
                 message,
-                TextToSpeech.QUEUE_FLUSH,
+                queueMode,
                 null,
                 "audio_cue_${System.currentTimeMillis()}"
             )
+            queueMode = TextToSpeech.QUEUE_ADD
         }
+    }
+
+    private fun readDefaultTtsEngine(engine: TextToSpeech?): String? =
+        runCatching { engine?.defaultEngine }.getOrNull()
+
+    private fun createTtsEngine() {
+        val generation = ttsGeneration.incrementAndGet()
+
+        val engine = TextToSpeech(appContext) { status ->
+            if (generation != ttsGeneration.get()) return@TextToSpeech
+
+            val initializedEngine = ttsRef.get() ?: return@TextToSpeech
+            ttsInitialized.set(true)
+
+            if (status == TextToSpeech.SUCCESS) {
+                currentSystemTtsEngine.set(readDefaultTtsEngine(initializedEngine))
+
+                val ready = applyTtsConfiguration(
+                    initializedEngine,
+                    desiredLocale.get(),
+                    desiredVoiceMode.get()
+                )
+                ttsReady.set(ready)
+                if (ready) flushPendingTts(initializedEngine)
+            } else {
+                currentSystemTtsEngine.set(readDefaultTtsEngine(initializedEngine))
+                ttsReady.set(false)
+            }
+        }
+
+        ttsRef.set(engine)
+    }
+
+    private fun recreateTtsEngine() {
+        val oldEngine = ttsRef.getAndSet(null)
+
+        ttsReady.set(false)
+        ttsInitialized.set(false)
+
+        oldEngine?.let { engine ->
+            runCatching { engine.stop() }
+            runCatching { engine.shutdown() }
+        }
+
+        createTtsEngine()
+    }
+
+    private fun applyTtsConfiguration(
+        engine: TextToSpeech,
+        locale: Locale,
+        voiceMode: TtsVoiceMode
+    ): Boolean = when (voiceMode) {
+        TtsVoiceMode.DefaultVoice -> setTtsLanguage(engine, locale)
+        TtsVoiceMode.SystemVoice -> setSystemTtsVoice(engine)
+    }
+
+    private fun setSystemTtsVoice(engine: TextToSpeech): Boolean {
+        val defaultVoice = runCatching { engine.defaultVoice }.getOrNull()
+        if (defaultVoice != null) {
+            val applied = runCatching {
+                engine.setVoice(defaultVoice) == TextToSpeech.SUCCESS
+            }.getOrDefault(false)
+
+            if (applied) return true
+        }
+
+        val defaultLanguage = runCatching { engine.defaultLanguage }.getOrNull()
+        return defaultLanguage != null && setTtsLanguage(engine, defaultLanguage)
     }
 
     private fun setTtsLanguage(engine: TextToSpeech, locale: Locale): Boolean {
@@ -142,6 +231,7 @@ class AudioCuePlayer(
 
     override fun close() {
         closed = true
+        ttsGeneration.incrementAndGet()
         releaseMediaPlayer()
         pcmSignalPlayer.close()
         ttsRef.getAndSet(null)?.run {
