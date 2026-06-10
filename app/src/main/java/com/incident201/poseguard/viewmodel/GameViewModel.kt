@@ -1321,6 +1321,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         return elapsedSeconds.toInt()
     }
 
+    private fun completeSessionSuccess() {
+        _sessionSummary.value = SessionSummary(
+            result = GameState.Success,
+            initialTimerSeconds = sessionInitialTimerSeconds,
+            actualTimerSeconds = sessionElapsedSecondsForSummary(),
+            violationCounts = _ruleViolationCounts.value,
+            settings = sessionSettingsSnapshot
+        )
+        _gameState.value = GameState.Success
+        resetMovementGaugeState()
+        _statusMessage.value = tr(R.string.victory)
+        playAudioCue(AudioCue.TimeIsUp, ttsText(TtsPhraseTemplate.TimeIsUp))
+    }
+
     private fun startTimerLoop() {
         timerJob?.cancel()
         timerJob = viewModelScope.launch {
@@ -1328,33 +1342,29 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 while (_gameState.value == GameState.HoldingPose) {
                     val elapsedSeconds = sessionElapsedSecondsForSummary()
                     _timerSeconds.value = elapsedSeconds
-                    if (elapsedSeconds >= sessionTargetSeconds) break
+
+                    if (elapsedSeconds >= sessionTargetSeconds) {
+                        if (_gameState.value == GameState.HoldingPose &&
+                            sessionElapsedSecondsForSummary() >= sessionTargetSeconds
+                        ) {
+                            completeSessionSuccess()
+                            return@launch
+                        }
+                    }
+
                     delay(250)
                 }
-            } else {
-                while (_gameState.value == GameState.HoldingPose && _timerSeconds.value > 0) {
-                    delay(1000)
-                    if (_gameState.value != GameState.HoldingPose) return@launch
-                    _timerSeconds.value = (_timerSeconds.value - 1).coerceAtLeast(0)
-                }
+                return@launch
             }
-            val sessionCompleted = if (sessionTimerMode == TimerMode.Random) {
-                sessionElapsedSecondsForSummary() >= sessionTargetSeconds
-            } else {
-                _timerSeconds.value <= 0
+
+            while (_gameState.value == GameState.HoldingPose && _timerSeconds.value > 0) {
+                delay(1000)
+                if (_gameState.value != GameState.HoldingPose) return@launch
+                _timerSeconds.value = (_timerSeconds.value - 1).coerceAtLeast(0)
             }
-            if (_gameState.value == GameState.HoldingPose && sessionCompleted) {
-                _sessionSummary.value = SessionSummary(
-                    result = GameState.Success,
-                    initialTimerSeconds = sessionInitialTimerSeconds,
-                    actualTimerSeconds = sessionElapsedSecondsForSummary(),
-                    violationCounts = _ruleViolationCounts.value,
-                    settings = sessionSettingsSnapshot
-                )
-                _gameState.value = GameState.Success
-                resetMovementGaugeState()
-                _statusMessage.value = tr(R.string.victory)
-                playAudioCue(AudioCue.TimeIsUp, ttsText(TtsPhraseTemplate.TimeIsUp))
+
+            if (_gameState.value == GameState.HoldingPose && _timerSeconds.value <= 0) {
+                completeSessionSuccess()
             }
         }
     }
