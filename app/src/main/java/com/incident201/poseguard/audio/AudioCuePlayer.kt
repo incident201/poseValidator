@@ -47,7 +47,8 @@ class AudioCuePlayer(
     fun refreshTtsEngineIfSystemDefaultChanged() {
         if (closed) return
 
-        val latestSystemEngine = readSystemTtsEngine()
+        val engine = ttsRef.get()
+        val latestSystemEngine = readDefaultTtsEngine(engine)
         val knownSystemEngine = currentSystemTtsEngine.get()
 
         if (latestSystemEngine != knownSystemEngine) {
@@ -55,8 +56,7 @@ class AudioCuePlayer(
             return
         }
 
-        val engine = ttsRef.get() ?: return
-        if (!ttsInitialized.get()) return
+        if (engine == null || !ttsInitialized.get()) return
 
         val ready = applyTtsConfiguration(
             engine,
@@ -150,7 +150,7 @@ class AudioCuePlayer(
         }
     }
 
-    private fun readSystemTtsEngine(): String? =
+    private fun readSystemTtsEngineSettingFallback(): String? =
         runCatching {
             Settings.Secure.getString(
                 appContext.contentResolver,
@@ -158,9 +158,12 @@ class AudioCuePlayer(
             )
         }.getOrNull()
 
+    private fun readDefaultTtsEngine(engine: TextToSpeech?): String? =
+        runCatching { engine?.defaultEngine }.getOrNull()
+            ?: readSystemTtsEngineSettingFallback()
+
     private fun createTtsEngine() {
         val generation = ttsGeneration.incrementAndGet()
-        currentSystemTtsEngine.set(readSystemTtsEngine())
 
         val engine = TextToSpeech(appContext) { status ->
             if (generation != ttsGeneration.get()) return@TextToSpeech
@@ -169,6 +172,8 @@ class AudioCuePlayer(
             ttsInitialized.set(true)
 
             if (status == TextToSpeech.SUCCESS) {
+                currentSystemTtsEngine.set(readDefaultTtsEngine(initializedEngine))
+
                 val ready = applyTtsConfiguration(
                     initializedEngine,
                     desiredLocale.get(),
@@ -177,6 +182,7 @@ class AudioCuePlayer(
                 ttsReady.set(ready)
                 if (ready) flushPendingTts(initializedEngine)
             } else {
+                currentSystemTtsEngine.set(readDefaultTtsEngine(initializedEngine))
                 ttsReady.set(false)
             }
         }
