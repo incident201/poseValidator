@@ -1574,7 +1574,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             return
         }
 
-        val alreadyFailed = _gameState.value == GameState.Failed
         startDelayJob?.cancel()
         timerJob?.cancel()
         stabilizationFallbackJob?.cancel()
@@ -1603,9 +1602,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _gameState.value = GameState.Failed
         _defeatReason.value = reason
         _statusMessage.value = tr(R.string.check_failed)
-        if (!alreadyFailed) {
-            playAudioCue(AudioCue.DefeatTryAgain, ttsText(TtsPhraseTemplate.DefeatTryAgain))
-        }
+        playAudioCue(AudioCue.DefeatTryAgain, ttsText(TtsPhraseTemplate.DefeatTryAgain))
     }
 
     private fun defaultTtsTemplateText(template: TtsPhraseTemplate): String = when (template) {
