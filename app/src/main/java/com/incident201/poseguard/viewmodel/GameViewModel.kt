@@ -1358,9 +1358,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     private fun tryReserveSessionDefeat(): Boolean = synchronized(sessionTargetLock) {
-        if (_gameState.value == GameState.HoldingPose &&
-            pendingTerminalResult == null
-        ) {
+        val canReserveDefeat = when (_gameState.value) {
+            GameState.HoldingPose,
+            GameState.StartingDelay -> true
+            else -> false
+        }
+
+        if (canReserveDefeat && pendingTerminalResult == null) {
             pendingTerminalResult = PendingTerminalResult.Defeat
             true
         } else {
