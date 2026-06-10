@@ -20,6 +20,7 @@ import com.incident201.poseguard.audio.AudioCueSettings
 import com.incident201.poseguard.audio.PcmChannel
 import com.incident201.poseguard.audio.PcmPattern
 import com.incident201.poseguard.audio.PcmSignalSettings
+import com.incident201.poseguard.audio.TtsPhraseTemplate
 import com.incident201.poseguard.audio.TtsVoiceMode
 import com.incident201.poseguard.tracker.FaceDetectionStatus
 import com.incident201.poseguard.tracker.FaceCandidateCropper
@@ -77,7 +78,8 @@ private const val PREF_CUSTOMIZE_AUDIO_ENABLED = "customize_audio_enabled"
 private const val PREF_TTS_VOICE_MODE = "tts_voice_mode"
 private const val PREF_AUDIO_CUE_MODE_PREFIX = "audio_cue_mode_"
 private const val PREF_AUDIO_CUE_URI_PREFIX = "audio_cue_uri_"
-private const val PREF_AUDIO_CUE_TTS_TEXT_PREFIX = "audio_cue_tts_text_"
+private const val PREF_TTS_TEMPLATE_PREFIX = "tts_template_"
+private const val LEGACY_PREF_AUDIO_CUE_TTS_TEXT_PREFIX = "audio_cue_tts_text_"
 private const val PREF_AUDIO_CUE_PCM_FREQUENCY_PREFIX = "audio_cue_pcm_frequency_"
 private const val PREF_AUDIO_CUE_PCM_DURATION_PREFIX = "audio_cue_pcm_duration_"
 private const val PREF_AUDIO_CUE_PCM_CHANNEL_PREFIX = "audio_cue_pcm_channel_"
@@ -129,6 +131,7 @@ data class GameSettings(
     val debugModeEnabled: Boolean = false,
     val customizeAudioEnabled: Boolean = false,
     val ttsVoiceMode: TtsVoiceMode = TtsVoiceMode.DefaultVoice,
+    val customTtsTemplates: Map<TtsPhraseTemplate, String> = emptyMap(),
     val audioCueSettings: Map<AudioCue, AudioCueSettings> =
         AudioCue.entries.associateWith { AudioCueSettings() }
 )
@@ -376,8 +379,36 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             debugModeEnabled = prefs.getBoolean(PREF_DEBUG_MODE_ENABLED, false),
             customizeAudioEnabled = prefs.getBoolean(PREF_CUSTOMIZE_AUDIO_ENABLED, false),
             ttsVoiceMode = ttsVoiceMode,
+            customTtsTemplates = loadCustomTtsTemplates(),
             audioCueSettings = loadAudioCueSettings()
         )
+    }
+
+    private fun loadCustomTtsTemplates(): Map<TtsPhraseTemplate, String> =
+        TtsPhraseTemplate.entries.mapNotNull { template ->
+            val currentValue = prefs
+                .getString(PREF_TTS_TEMPLATE_PREFIX + template.name, null)
+                ?.takeIf { it.isNotBlank() }
+            val legacyValue = template.audioCueForLegacyMigration()?.let { cue ->
+                prefs.getString(LEGACY_PREF_AUDIO_CUE_TTS_TEXT_PREFIX + cue.name, null)
+                    ?.takeIf { it.isNotBlank() }
+            }
+
+            (currentValue ?: legacyValue)?.let { template to it }
+        }.toMap()
+
+    private fun TtsPhraseTemplate.audioCueForLegacyMigration(): AudioCue? = when (this) {
+        TtsPhraseTemplate.PlaceDeviceStill -> AudioCue.PlaceDeviceStill
+        TtsPhraseTemplate.TakePosition -> AudioCue.TakePosition
+        TtsPhraseTemplate.TimeStartedHoldPosition -> AudioCue.TimeStartedHoldPosition
+        TtsPhraseTemplate.TimeIsUp -> AudioCue.TimeIsUp
+        TtsPhraseTemplate.DefeatTryAgain -> AudioCue.DefeatTryAgain
+        TtsPhraseTemplate.MotionViolation -> AudioCue.MotionViolation
+        TtsPhraseTemplate.DriftViolation -> AudioCue.DriftViolation
+        TtsPhraseTemplate.ViolationRecorded -> AudioCue.ViolationRecorded
+        TtsPhraseTemplate.FaceTurnedAway -> AudioCue.FaceTurnedAway
+        TtsPhraseTemplate.FaceLookedAtCamera -> AudioCue.FaceLookedAtCamera
+        TtsPhraseTemplate.PenaltyAddedToTimer -> null
     }
 
     private fun loadAudioCueSettings(): Map<AudioCue, AudioCueSettings> =
@@ -408,9 +439,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             AudioCueSettings(
                 mode = mode,
                 audioFileUri = prefs.getString(PREF_AUDIO_CUE_URI_PREFIX + cue.name, null),
-                customTtsText = prefs
-                    .getString(PREF_AUDIO_CUE_TTS_TEXT_PREFIX + cue.name, null)
-                    ?.takeIf { it.isNotBlank() },
                 pcmSettings = PcmSignalSettings(
                     frequencyHz = prefs.getInt(
                         PREF_AUDIO_CUE_PCM_FREQUENCY_PREFIX + cue.name,
@@ -657,6 +685,28 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         prefs.edit().putString(PREF_TTS_VOICE_MODE, mode.name).apply()
     }
 
+    fun updateTtsPhraseTemplate(template: TtsPhraseTemplate, customText: String?) {
+        val normalized = customText?.takeIf { it.isNotBlank() }
+        _gameSettings.value = _gameSettings.value.copy(
+            customTtsTemplates = if (normalized == null) {
+                _gameSettings.value.customTtsTemplates - template
+            } else {
+                _gameSettings.value.customTtsTemplates + (template to normalized)
+            }
+        )
+
+        prefs.edit().apply {
+            if (normalized == null) {
+                remove(PREF_TTS_TEMPLATE_PREFIX + template.name)
+            } else {
+                putString(PREF_TTS_TEMPLATE_PREFIX + template.name, normalized)
+            }
+            template.audioCueForLegacyMigration()?.let { cue ->
+                remove(LEGACY_PREF_AUDIO_CUE_TTS_TEXT_PREFIX + cue.name)
+            }
+        }.apply()
+    }
+
     fun updateCustomizeAudioEnabled(enabled: Boolean) {
         _gameSettings.value = _gameSettings.value.copy(customizeAudioEnabled = enabled)
         prefs.edit().putBoolean(PREF_CUSTOMIZE_AUDIO_ENABLED, enabled).apply()
@@ -673,14 +723,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                     remove(PREF_AUDIO_CUE_URI_PREFIX + cue.name)
                 } else {
                     putString(PREF_AUDIO_CUE_URI_PREFIX + cue.name, settings.audioFileUri)
-                }
-            }
-            .apply {
-                val customTtsText = settings.customTtsText?.takeIf { it.isNotBlank() }
-                if (customTtsText == null) {
-                    remove(PREF_AUDIO_CUE_TTS_TEXT_PREFIX + cue.name)
-                } else {
-                    putString(PREF_AUDIO_CUE_TTS_TEXT_PREFIX + cue.name, customTtsText)
                 }
             }
             .putInt(PREF_AUDIO_CUE_PCM_FREQUENCY_PREFIX + cue.name, settings.pcmSettings.frequencyHz)
@@ -1042,10 +1084,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             } else {
                 tr(R.string.face_rule_violated)
             }
-            val prefix = if (_gameSettings.value.faceCheckMode == FaceCheckMode.FaceToCamera) {
-                tr(R.string.you_turned_away)
+            val prefixTemplate = if (_gameSettings.value.faceCheckMode == FaceCheckMode.FaceToCamera) {
+                TtsPhraseTemplate.FaceTurnedAway
             } else {
-                tr(R.string.you_looked_at_camera)
+                TtsPhraseTemplate.FaceLookedAtCamera
             }
             _statusMessage.value = statusText
             val cue = if (_gameSettings.value.faceCheckMode == FaceCheckMode.FaceToCamera) {
@@ -1054,26 +1096,29 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 AudioCue.FaceLookedAtCamera
             }
             val cueText = if (_gameSettings.value.penaltiesEnabled) {
-                "$prefix. ${tr(R.string.penalty_added_to_timer, minutes)}"
+                "${ttsText(prefixTemplate)}. ${ttsText(TtsPhraseTemplate.PenaltyAddedToTimer, minutes)}"
             } else {
-                prefix
+                ttsText(prefixTemplate)
             }
             playAudioCue(cue, cueText)
             return
         }
 
-        val (cue, voicePrefix) = when (type) {
-            RuleViolationType.Motion -> AudioCue.MotionViolation to tr(R.string.motion_violation_voice)
-            RuleViolationType.Drift -> AudioCue.DriftViolation to tr(R.string.drift_violation_voice)
-            else -> AudioCue.ViolationRecorded to tr(R.string.violation_recorded)
+        val (cue, voiceTemplate) = when (type) {
+            RuleViolationType.Motion -> AudioCue.MotionViolation to TtsPhraseTemplate.MotionViolation
+            RuleViolationType.Drift -> AudioCue.DriftViolation to TtsPhraseTemplate.DriftViolation
+            else -> AudioCue.ViolationRecorded to TtsPhraseTemplate.ViolationRecorded
         }
 
         if (_gameSettings.value.penaltiesEnabled) {
             _statusMessage.value = tr(R.string.violation_recorded_with_penalty, minutes)
-            playAudioCue(cue, "$voicePrefix. ${tr(R.string.penalty_added_to_timer, minutes)}")
+            playAudioCue(
+                cue,
+                "${ttsText(voiceTemplate)}. ${ttsText(TtsPhraseTemplate.PenaltyAddedToTimer, minutes)}"
+            )
         } else {
             _statusMessage.value = tr(R.string.violation_recorded)
-            playAudioCue(cue, voicePrefix)
+            playAudioCue(cue, ttsText(voiceTemplate))
         }
     }
 
@@ -1239,7 +1284,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 _gameState.value = GameState.Success
                 resetMovementGaugeState()
                 _statusMessage.value = tr(R.string.victory)
-                playAudioCue(AudioCue.TimeIsUp, tr(R.string.time_is_up))
+                playAudioCue(AudioCue.TimeIsUp, ttsText(TtsPhraseTemplate.TimeIsUp))
             }
         }
     }
@@ -1276,7 +1321,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationCompleted = false
         _gameState.value = GameState.WaitingForStabilization
         _statusMessage.value = tr(R.string.place_device_still)
-        playAudioCue(AudioCue.PlaceDeviceStill, tr(R.string.place_device_still))
+        playAudioCue(AudioCue.PlaceDeviceStill, ttsText(TtsPhraseTemplate.PlaceDeviceStill))
         sensorManager.unregisterListener(this)
 
         val gyroscopeRegistered = gyroscopeSensor?.let { sensor ->
@@ -1295,7 +1340,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     private fun startPoseCountdownAfterDeviceStabilized() {
-        playAudioCue(AudioCue.TakePosition, tr(R.string.take_position))
+        playAudioCue(AudioCue.TakePosition, ttsText(TtsPhraseTemplate.TakePosition))
         synchronized(processingLock) {
             poseOcclusionGuard.reset()
         }
@@ -1332,7 +1377,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             _gameState.value = GameState.HoldingPose
             _statusMessage.value = tr(R.string.time_started_hold_position)
             startTimerLoop()
-            playAudioCue(AudioCue.TimeStartedHoldPosition, tr(R.string.time_started_hold_position))
+            playAudioCue(
+                AudioCue.TimeStartedHoldPosition,
+                ttsText(TtsPhraseTemplate.TimeStartedHoldPosition)
+            )
         }
     }
 
@@ -1403,8 +1451,32 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _gameState.value = GameState.Failed
         _defeatReason.value = reason
         _statusMessage.value = tr(R.string.check_failed)
-        if (!alreadyFailed) playAudioCue(AudioCue.DefeatTryAgain, tr(R.string.defeat_try_again))
+        if (!alreadyFailed) {
+            playAudioCue(AudioCue.DefeatTryAgain, ttsText(TtsPhraseTemplate.DefeatTryAgain))
+        }
     }
+
+    private fun defaultTtsTemplateText(template: TtsPhraseTemplate): String = when (template) {
+        TtsPhraseTemplate.PlaceDeviceStill -> tr(R.string.place_device_still)
+        TtsPhraseTemplate.TakePosition -> tr(R.string.take_position)
+        TtsPhraseTemplate.TimeStartedHoldPosition -> tr(R.string.time_started_hold_position)
+        TtsPhraseTemplate.TimeIsUp -> tr(R.string.time_is_up)
+        TtsPhraseTemplate.DefeatTryAgain -> tr(R.string.defeat_try_again)
+        TtsPhraseTemplate.MotionViolation -> tr(R.string.motion_violation_voice)
+        TtsPhraseTemplate.DriftViolation -> tr(R.string.drift_violation_voice)
+        TtsPhraseTemplate.ViolationRecorded -> tr(R.string.violation_recorded)
+        TtsPhraseTemplate.FaceTurnedAway -> tr(R.string.you_turned_away)
+        TtsPhraseTemplate.FaceLookedAtCamera -> tr(R.string.you_looked_at_camera)
+        TtsPhraseTemplate.PenaltyAddedToTimer -> tr(R.string.penalty_added_to_timer_template)
+    }
+
+    private fun ttsText(template: TtsPhraseTemplate): String =
+        _gameSettings.value.customTtsTemplates[template]
+            ?.takeIf { it.isNotBlank() }
+            ?: defaultTtsTemplateText(template)
+
+    private fun ttsText(template: TtsPhraseTemplate, minutes: Int): String =
+        ttsText(template).replace("{minutes}", minutes.toString())
 
     private fun playAudioCue(cue: AudioCue, ttsText: String) {
         _audioCueEvents.tryEmit(AudioCueEvent(cue, ttsText))

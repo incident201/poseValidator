@@ -176,4 +176,8 @@
     <string name="audio_cue_tts_settings_title">TTS phrase</string>
     <string name="audio_cue_tts_text">Text</string>
     <string name="audio_cue_tts_reset_default">Reset to default</string>
+    <string name="penalty_added_to_timer_template">Plus {minutes} minutes to the timer</string>
+    <string name="audio_cue_tts_template_minutes_hint">Use {minutes} where the number of minutes should appear.</string>
+    <string name="audio_cue_tts_template_minutes_error">Keep {minutes} in this template.</string>
+    <string name="audio_cue_penalty_added_to_timer">Penalty added to timer</string>
 </resources>

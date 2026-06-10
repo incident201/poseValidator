@@ -176,4 +176,8 @@
     <string name="audio_cue_tts_settings_title">TTS-фраза</string>
     <string name="audio_cue_tts_text">Текст</string>
     <string name="audio_cue_tts_reset_default">Вернуть по умолчанию</string>
+    <string name="penalty_added_to_timer_template">Плюс {minutes} минут к таймеру</string>
+    <string name="audio_cue_tts_template_minutes_hint">Используйте {minutes} там, где должно быть количество минут.</string>
+    <string name="audio_cue_tts_template_minutes_error">Оставьте {minutes} в этом шаблоне.</string>
+    <string name="audio_cue_penalty_added_to_timer">Штраф добавлен к таймеру</string>
 </resources>

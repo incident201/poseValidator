@@ -638,6 +638,7 @@ fun CameraScreen(
             onWristDriftWeightChanged = viewModel::updateWristDriftWeight,
             onCustomizeAudioEnabledChanged = viewModel::updateCustomizeAudioEnabled,
             onTtsVoiceModeChanged = viewModel::updateTtsVoiceMode,
+            onTtsPhraseTemplateChanged = viewModel::updateTtsPhraseTemplate,
             onAudioCueSettingsChanged = viewModel::updateAudioCueSettings,
             onShowInstructions = {
                 showSettings = false

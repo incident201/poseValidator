@@ -26,6 +26,20 @@ enum class TtsVoiceMode {
     SystemVoice
 }
 
+enum class TtsPhraseTemplate {
+    PlaceDeviceStill,
+    TakePosition,
+    TimeStartedHoldPosition,
+    TimeIsUp,
+    DefeatTryAgain,
+    MotionViolation,
+    DriftViolation,
+    ViolationRecorded,
+    FaceTurnedAway,
+    FaceLookedAtCamera,
+    PenaltyAddedToTimer
+}
+
 enum class PcmChannel {
     Left,
     Right,
@@ -50,7 +64,6 @@ data class PcmSignalSettings(
 data class AudioCueSettings(
     val mode: AudioCueMode = AudioCueMode.UseTts,
     val audioFileUri: String? = null,
-    val customTtsText: String? = null,
     val pcmSettings: PcmSignalSettings = PcmSignalSettings()
 )
 

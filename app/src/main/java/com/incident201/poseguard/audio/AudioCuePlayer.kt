@@ -63,12 +63,7 @@ class AudioCuePlayer(
 
         val settings = playbackSettings.cueSettings[cue] ?: AudioCueSettings()
         when (settings.mode) {
-            AudioCueMode.UseTts -> {
-                val textToSpeak = settings.customTtsText
-                    ?.takeIf { it.isNotBlank() }
-                    ?: ttsText
-                speak(textToSpeak)
-            }
+            AudioCueMode.UseTts -> speak(ttsText)
             AudioCueMode.AudioFile -> {
                 pcmSignalPlayer.stop()
                 playAudioFile(settings.audioFileUri)
