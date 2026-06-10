@@ -637,6 +637,8 @@ fun CameraScreen(
             onPoseSmootherDerivativeCutoffChanged = viewModel::updatePoseSmootherDerivativeCutoff,
             onWristDriftWeightChanged = viewModel::updateWristDriftWeight,
             onCustomizeAudioEnabledChanged = viewModel::updateCustomizeAudioEnabled,
+            onTtsVoiceModeChanged = viewModel::updateTtsVoiceMode,
+            onTtsPhraseTemplateChanged = viewModel::updateTtsPhraseTemplate,
             onAudioCueSettingsChanged = viewModel::updateAudioCueSettings,
             onShowInstructions = {
                 showSettings = false
@@ -1565,9 +1567,9 @@ private fun AudioCueAnnouncer(viewModel: GameViewModel, settings: GameSettings) 
         AudioCuePlayer(context) { currentPlaybackSettings.value }
     }
 
-    LaunchedEffect(player, settings.language) {
+    LaunchedEffect(player, settings.language, settings.ttsVoiceMode) {
         val locale = if (settings.language == AppLanguage.Russian) Locale("ru", "RU") else Locale.US
-        player.setLanguage(locale)
+        player.setTtsConfig(locale, settings.ttsVoiceMode)
     }
 
     LaunchedEffect(viewModel, player) {

@@ -21,6 +21,25 @@ enum class AudioCueMode {
     Off
 }
 
+enum class TtsVoiceMode {
+    DefaultVoice,
+    SystemVoice
+}
+
+enum class TtsPhraseTemplate {
+    PlaceDeviceStill,
+    TakePosition,
+    TimeStartedHoldPosition,
+    TimeIsUp,
+    DefeatTryAgain,
+    MotionViolation,
+    DriftViolation,
+    ViolationRecorded,
+    FaceTurnedAway,
+    FaceLookedAtCamera,
+    PenaltyAddedToTimer
+}
+
 enum class PcmChannel {
     Left,
     Right,
