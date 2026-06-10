@@ -24,13 +24,18 @@ class AudioCuePlayer(
     private var closed = false
     private val ttsRef = AtomicReference<TextToSpeech?>(null)
     private val desiredLocale = AtomicReference(Locale.US)
+    private val desiredVoiceMode = AtomicReference(TtsVoiceMode.DefaultVoice)
 
     init {
         val engine = TextToSpeech(appContext) { status ->
             val initializedEngine = ttsRef.get() ?: return@TextToSpeech
             ttsInitialized.set(true)
             if (status == TextToSpeech.SUCCESS) {
-                val ready = setTtsLanguage(initializedEngine, desiredLocale.get())
+                val ready = applyTtsConfiguration(
+                    initializedEngine,
+                    desiredLocale.get(),
+                    desiredVoiceMode.get()
+                )
                 ttsReady.set(ready)
                 if (ready) flushPendingTts(initializedEngine)
             }
@@ -38,11 +43,12 @@ class AudioCuePlayer(
         ttsRef.set(engine)
     }
 
-    fun setLanguage(locale: Locale) {
+    fun setTtsConfig(locale: Locale, voiceMode: TtsVoiceMode) {
         desiredLocale.set(locale)
+        desiredVoiceMode.set(voiceMode)
         if (!ttsInitialized.get()) return
         val engine = ttsRef.get() ?: return
-        val ready = setTtsLanguage(engine, locale)
+        val ready = applyTtsConfiguration(engine, locale, voiceMode)
         ttsReady.set(ready)
         if (ready) flushPendingTts(engine)
     }
@@ -57,7 +63,12 @@ class AudioCuePlayer(
 
         val settings = playbackSettings.cueSettings[cue] ?: AudioCueSettings()
         when (settings.mode) {
-            AudioCueMode.UseTts -> speak(ttsText)
+            AudioCueMode.UseTts -> {
+                val textToSpeak = settings.customTtsText
+                    ?.takeIf { it.isNotBlank() }
+                    ?: ttsText
+                speak(textToSpeak)
+            }
             AudioCueMode.AudioFile -> {
                 pcmSignalPlayer.stop()
                 playAudioFile(settings.audioFileUri)
@@ -127,6 +138,22 @@ class AudioCuePlayer(
                 null,
                 "audio_cue_${System.currentTimeMillis()}"
             )
+        }
+    }
+
+    private fun applyTtsConfiguration(
+        engine: TextToSpeech,
+        locale: Locale,
+        voiceMode: TtsVoiceMode
+    ): Boolean = when (voiceMode) {
+        TtsVoiceMode.DefaultVoice -> setTtsLanguage(engine, locale)
+        TtsVoiceMode.SystemVoice -> {
+            val appliedSystemVoice = runCatching {
+                val systemVoice = engine.defaultVoice
+                systemVoice != null && engine.setVoice(systemVoice) == TextToSpeech.SUCCESS
+            }.getOrDefault(false)
+
+            appliedSystemVoice || setTtsLanguage(engine, locale)
         }
     }
 

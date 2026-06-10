@@ -169,4 +169,11 @@
     <string name="audio_cue_pcm_pattern_double_beep">Double beep</string>
     <string name="audio_cue_pcm_settings_title">PCM сигнал</string>
 
+    <string name="tts_voice">Голос TTS</string>
+    <string name="tts_voice_default">Голос по умолчанию</string>
+    <string name="tts_voice_system">Системный голос</string>
+    <string name="audio_cue_tts_configure">Настроить TTS-фразу</string>
+    <string name="audio_cue_tts_settings_title">TTS-фраза</string>
+    <string name="audio_cue_tts_text">Текст</string>
+    <string name="audio_cue_tts_reset_default">Вернуть по умолчанию</string>
 </resources>

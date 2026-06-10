@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -36,6 +37,7 @@ import com.incident201.poseguard.audio.PcmChannel
 import com.incident201.poseguard.audio.PcmPattern
 import com.incident201.poseguard.audio.PcmSignalPlayer
 import com.incident201.poseguard.audio.PcmSignalSettings
+import com.incident201.poseguard.audio.TtsVoiceMode
 import com.incident201.poseguard.viewmodel.AppLanguage
 import com.incident201.poseguard.viewmodel.FaceCheckMode
 import com.incident201.poseguard.viewmodel.GameSettings
@@ -69,6 +71,7 @@ internal fun SettingsScreen(
     onPoseSmootherDerivativeCutoffChanged: (Float) -> Unit,
     onWristDriftWeightChanged: (Float) -> Unit,
     onCustomizeAudioEnabledChanged: (Boolean) -> Unit,
+    onTtsVoiceModeChanged: (TtsVoiceMode) -> Unit,
     onAudioCueSettingsChanged: (AudioCue, AudioCueSettings) -> Unit,
     onShowInstructions: () -> Unit
  ) {
@@ -207,6 +210,13 @@ internal fun SettingsScreen(
                 }
             }
         }
+        Spacer(Modifier.height(12.dp))
+        TtsVoiceModeCard(
+            language = settings.language,
+            selectedMode = settings.ttsVoiceMode,
+            onModeChanged = onTtsVoiceModeChanged,
+            colorScheme = colorScheme
+        )
         Spacer(Modifier.height(12.dp))
         CompactCustomizeAudioCard(
             settings = settings,
@@ -399,6 +409,36 @@ internal fun SettingsScreen(
 }
 
 @Composable
+private fun TtsVoiceModeCard(
+    language: AppLanguage,
+    selectedMode: TtsVoiceMode,
+    onModeChanged: (TtsVoiceMode) -> Unit,
+    colorScheme: ColorScheme
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                localizedString(language, R.string.tts_voice),
+                color = colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(8.dp))
+            EnumSettingField(
+                label = localizedString(language, R.string.tts_voice),
+                value = localizedString(language, selectedMode.labelRes()),
+                expanded = expanded,
+                onExpandedChange = { expanded = it },
+                options = TtsVoiceMode.entries.map { mode ->
+                    localizedString(language, mode.labelRes()) to { onModeChanged(mode) }
+                }
+            )
+        }
+    }
+}
+
+@Composable
 private fun CompactCustomizeAudioCard(
     settings: GameSettings,
     onEnabledChanged: (Boolean) -> Unit,
@@ -455,6 +495,7 @@ private fun CustomizeAudioSettingsScreen(
     var audioPreviewingCue by remember { mutableStateOf<AudioCue?>(null) }
     var pcmPreviewingCue by remember { mutableStateOf<AudioCue?>(null) }
     var pcmConfiguringCue by remember { mutableStateOf<AudioCue?>(null) }
+    var ttsConfiguringCue by remember { mutableStateOf<AudioCue?>(null) }
     var audioPreviewPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
 
     fun releaseAudioPreview(player: MediaPlayer) {
@@ -639,6 +680,10 @@ private fun CustomizeAudioSettingsScreen(
                                 stopAllPreviews()
                                 pcmConfiguringCue = cue
                             },
+                            onTtsConfigureClick = {
+                                stopAllPreviews()
+                                ttsConfiguringCue = cue
+                            },
                             colorScheme = colorScheme
                         )
                         if (index != AudioCue.entries.lastIndex) {
@@ -672,6 +717,27 @@ private fun CustomizeAudioSettingsScreen(
             }
         )
     }
+
+    ttsConfiguringCue?.let { cue ->
+        val cueSettings = settings.audioCueSettings[cue] ?: AudioCueSettings()
+        TtsPhraseSettingsDialog(
+            language = settings.language,
+            cue = cue,
+            initialCustomText = cueSettings.customTtsText,
+            defaultText = localizedString(settings.language, cue.defaultTtsTextRes()),
+            onDismiss = { ttsConfiguringCue = null },
+            onApply = { customText ->
+                onSettingsChanged(
+                    cue,
+                    cueSettings.copy(
+                        mode = AudioCueMode.UseTts,
+                        customTtsText = customText?.takeIf { it.isNotBlank() }
+                    )
+                )
+                ttsConfiguringCue = null
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -686,12 +752,14 @@ private fun AudioCueSettingRow(
     onAudioFilePreviewClick: () -> Unit,
     onPcmPreviewClick: () -> Unit,
     onPcmConfigureClick: () -> Unit,
+    onTtsConfigureClick: () -> Unit,
     colorScheme: ColorScheme
 ) {
     var expanded by remember { mutableStateOf(false) }
     val hasAudioFile = cueSettings.mode == AudioCueMode.AudioFile &&
         !cueSettings.audioFileUri.isNullOrBlank()
     val isPcm = cueSettings.mode == AudioCueMode.Pcm
+    val isTts = cueSettings.mode == AudioCueMode.UseTts
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -759,8 +827,79 @@ private fun AudioCueSettingRow(
                     Text(localizedString(language, R.string.audio_cue_pcm_configure))
                 }
             }
+            if (isTts) {
+                Spacer(Modifier.width(4.dp))
+                IconButton(onClick = onTtsConfigureClick) {
+                    Icon(
+                        imageVector = Icons.Filled.Settings,
+                        contentDescription = localizedString(
+                            language,
+                            R.string.audio_cue_tts_configure
+                        )
+                    )
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun TtsPhraseSettingsDialog(
+    language: AppLanguage,
+    cue: AudioCue,
+    initialCustomText: String?,
+    defaultText: String,
+    onDismiss: () -> Unit,
+    onApply: (String?) -> Unit
+) {
+    var text by remember(cue, initialCustomText, defaultText) {
+        mutableStateOf(initialCustomText ?: defaultText)
+    }
+    var isDefault by remember(cue, initialCustomText, defaultText) {
+        mutableStateOf(initialCustomText == null)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(localizedString(language, R.string.audio_cue_tts_settings_title)) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = {
+                        text = it
+                        isDefault = false
+                    },
+                    label = { Text(localizedString(language, R.string.audio_cue_tts_text)) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                TextButton(
+                    onClick = {
+                        text = defaultText
+                        isDefault = true
+                    },
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text(localizedString(language, R.string.audio_cue_tts_reset_default))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onApply(if (isDefault || text.isBlank()) null else text)
+                }
+            ) {
+                Text(localizedString(language, R.string.apply))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(localizedString(language, R.string.cancel))
+            }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -817,7 +956,7 @@ private fun PcmSettingsDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                PcmEnumSettingField(
+                EnumSettingField(
                     label = localizedString(language, R.string.audio_cue_pcm_channel),
                     value = localizedString(language, channel.labelRes()),
                     expanded = channelExpanded,
@@ -852,7 +991,7 @@ private fun PcmSettingsDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                PcmEnumSettingField(
+                EnumSettingField(
                     label = localizedString(language, R.string.audio_cue_pcm_pattern),
                     value = localizedString(language, pattern.labelRes()),
                     expanded = patternExpanded,
@@ -898,7 +1037,7 @@ private fun PcmSettingsDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PcmEnumSettingField(
+private fun EnumSettingField(
     label: String,
     value: String,
     expanded: Boolean,
@@ -936,6 +1075,24 @@ private fun PcmEnumSettingField(
             }
         }
     }
+}
+
+private fun TtsVoiceMode.labelRes(): Int = when (this) {
+    TtsVoiceMode.DefaultVoice -> R.string.tts_voice_default
+    TtsVoiceMode.SystemVoice -> R.string.tts_voice_system
+}
+
+private fun AudioCue.defaultTtsTextRes(): Int = when (this) {
+    AudioCue.PlaceDeviceStill -> R.string.place_device_still
+    AudioCue.TakePosition -> R.string.take_position
+    AudioCue.TimeStartedHoldPosition -> R.string.time_started_hold_position
+    AudioCue.TimeIsUp -> R.string.time_is_up
+    AudioCue.DefeatTryAgain -> R.string.defeat_try_again
+    AudioCue.MotionViolation -> R.string.motion_violation_voice
+    AudioCue.DriftViolation -> R.string.drift_violation_voice
+    AudioCue.ViolationRecorded -> R.string.violation_recorded
+    AudioCue.FaceTurnedAway -> R.string.you_turned_away
+    AudioCue.FaceLookedAtCamera -> R.string.you_looked_at_camera
 }
 
 private fun AudioCue.labelRes(): Int = when (this) {

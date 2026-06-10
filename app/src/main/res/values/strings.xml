@@ -169,4 +169,11 @@
     <string name="audio_cue_pcm_pattern_double_beep">Double beep</string>
     <string name="audio_cue_pcm_settings_title">PCM signal</string>
 
+    <string name="tts_voice">TTS voice</string>
+    <string name="tts_voice_default">Default voice</string>
+    <string name="tts_voice_system">System voice</string>
+    <string name="audio_cue_tts_configure">Configure TTS phrase</string>
+    <string name="audio_cue_tts_settings_title">TTS phrase</string>
+    <string name="audio_cue_tts_text">Text</string>
+    <string name="audio_cue_tts_reset_default">Reset to default</string>
 </resources>

@@ -21,6 +21,11 @@ enum class AudioCueMode {
     Off
 }
 
+enum class TtsVoiceMode {
+    DefaultVoice,
+    SystemVoice
+}
+
 enum class PcmChannel {
     Left,
     Right,
@@ -45,11 +50,13 @@ data class PcmSignalSettings(
 data class AudioCueSettings(
     val mode: AudioCueMode = AudioCueMode.UseTts,
     val audioFileUri: String? = null,
+    val customTtsText: String? = null,
     val pcmSettings: PcmSignalSettings = PcmSignalSettings()
 )
 
 data class AudioCuePlaybackSettings(
     val customizeAudioEnabled: Boolean = false,
+    val ttsVoiceMode: TtsVoiceMode = TtsVoiceMode.DefaultVoice,
     val cueSettings: Map<AudioCue, AudioCueSettings> =
         AudioCue.entries.associateWith { AudioCueSettings() }
 )

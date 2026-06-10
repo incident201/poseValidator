@@ -20,6 +20,7 @@ import com.incident201.poseguard.audio.AudioCueSettings
 import com.incident201.poseguard.audio.PcmChannel
 import com.incident201.poseguard.audio.PcmPattern
 import com.incident201.poseguard.audio.PcmSignalSettings
+import com.incident201.poseguard.audio.TtsVoiceMode
 import com.incident201.poseguard.tracker.FaceDetectionStatus
 import com.incident201.poseguard.tracker.FaceCandidateCropper
 import com.incident201.poseguard.tracker.FaceDetectorService
@@ -73,8 +74,10 @@ private const val CURRENT_SENSITIVITY_PRESETS_VERSION = 2
 private const val MAX_POSE_DROPOUT_HOLD_FRAMES = 5
 private const val MAX_POSE_DROPOUT_HOLD_MS = 180L
 private const val PREF_CUSTOMIZE_AUDIO_ENABLED = "customize_audio_enabled"
+private const val PREF_TTS_VOICE_MODE = "tts_voice_mode"
 private const val PREF_AUDIO_CUE_MODE_PREFIX = "audio_cue_mode_"
 private const val PREF_AUDIO_CUE_URI_PREFIX = "audio_cue_uri_"
+private const val PREF_AUDIO_CUE_TTS_TEXT_PREFIX = "audio_cue_tts_text_"
 private const val PREF_AUDIO_CUE_PCM_FREQUENCY_PREFIX = "audio_cue_pcm_frequency_"
 private const val PREF_AUDIO_CUE_PCM_DURATION_PREFIX = "audio_cue_pcm_duration_"
 private const val PREF_AUDIO_CUE_PCM_CHANNEL_PREFIX = "audio_cue_pcm_channel_"
@@ -125,6 +128,7 @@ data class GameSettings(
     val poseSmootherDerivativeCutoff: Float = PoseSmoother.DEFAULT_DERIVATIVE_CUTOFF,
     val debugModeEnabled: Boolean = false,
     val customizeAudioEnabled: Boolean = false,
+    val ttsVoiceMode: TtsVoiceMode = TtsVoiceMode.DefaultVoice,
     val audioCueSettings: Map<AudioCue, AudioCueSettings> =
         AudioCue.entries.associateWith { AudioCueSettings() }
 )
@@ -301,6 +305,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         val mode = runCatching { FaceCheckMode.valueOf(prefs.getString("face_mode", FaceCheckMode.Disabled.name) ?: FaceCheckMode.Disabled.name) }
             .getOrDefault(FaceCheckMode.Disabled)
         val language = runCatching { AppLanguage.valueOf(prefs.getString("app_language", AppLanguage.English.name) ?: AppLanguage.English.name) }.getOrDefault(AppLanguage.English)
+        val ttsVoiceMode = runCatching {
+            TtsVoiceMode.valueOf(
+                prefs.getString(PREF_TTS_VOICE_MODE, TtsVoiceMode.DefaultVoice.name)
+                    ?: TtsVoiceMode.DefaultVoice.name
+            )
+        }.getOrDefault(TtsVoiceMode.DefaultVoice)
         val (driftThresholdFactor, motionThresholdFactor) = loadSensitivityThresholds()
         val occlusionFreezeVisibilityAlways =
             prefs.getFloat(
@@ -365,6 +375,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             ).coerceIn(PoseSmoother.MIN_CUTOFF_RANGE, PoseSmoother.MAX_CUTOFF_RANGE),
             debugModeEnabled = prefs.getBoolean(PREF_DEBUG_MODE_ENABLED, false),
             customizeAudioEnabled = prefs.getBoolean(PREF_CUSTOMIZE_AUDIO_ENABLED, false),
+            ttsVoiceMode = ttsVoiceMode,
             audioCueSettings = loadAudioCueSettings()
         )
     }
@@ -397,6 +408,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             AudioCueSettings(
                 mode = mode,
                 audioFileUri = prefs.getString(PREF_AUDIO_CUE_URI_PREFIX + cue.name, null),
+                customTtsText = prefs
+                    .getString(PREF_AUDIO_CUE_TTS_TEXT_PREFIX + cue.name, null)
+                    ?.takeIf { it.isNotBlank() },
                 pcmSettings = PcmSignalSettings(
                     frequencyHz = prefs.getInt(
                         PREF_AUDIO_CUE_PCM_FREQUENCY_PREFIX + cue.name,
@@ -638,6 +652,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         prefs.edit().putBoolean("penalties_enabled", enabled).apply()
     }
 
+    fun updateTtsVoiceMode(mode: TtsVoiceMode) {
+        _gameSettings.value = _gameSettings.value.copy(ttsVoiceMode = mode)
+        prefs.edit().putString(PREF_TTS_VOICE_MODE, mode.name).apply()
+    }
+
     fun updateCustomizeAudioEnabled(enabled: Boolean) {
         _gameSettings.value = _gameSettings.value.copy(customizeAudioEnabled = enabled)
         prefs.edit().putBoolean(PREF_CUSTOMIZE_AUDIO_ENABLED, enabled).apply()
@@ -654,6 +673,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                     remove(PREF_AUDIO_CUE_URI_PREFIX + cue.name)
                 } else {
                     putString(PREF_AUDIO_CUE_URI_PREFIX + cue.name, settings.audioFileUri)
+                }
+            }
+            .apply {
+                val customTtsText = settings.customTtsText?.takeIf { it.isNotBlank() }
+                if (customTtsText == null) {
+                    remove(PREF_AUDIO_CUE_TTS_TEXT_PREFIX + cue.name)
+                } else {
+                    putString(PREF_AUDIO_CUE_TTS_TEXT_PREFIX + cue.name, customTtsText)
                 }
             }
             .putInt(PREF_AUDIO_CUE_PCM_FREQUENCY_PREFIX + cue.name, settings.pcmSettings.frequencyHz)
