@@ -53,7 +53,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
@@ -68,6 +67,9 @@ import androidx.compose.ui.zIndex
 import androidx.annotation.StringRes
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.incident201.poseguard.audio.AudioCuePlaybackSettings
 import com.incident201.poseguard.audio.AudioCuePlayer
 import com.incident201.poseguard.tracker.Point3D
@@ -1579,6 +1581,26 @@ private fun AudioCueAnnouncer(viewModel: GameViewModel, settings: GameSettings) 
     LaunchedEffect(player, settings.language, settings.ttsVoiceMode) {
         val locale = if (settings.language == AppLanguage.Russian) Locale("ru", "RU") else Locale.US
         player.setTtsConfig(locale, settings.ttsVoiceMode)
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, player, settings.language, settings.ttsVoiceMode) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val locale = if (settings.language == AppLanguage.Russian) {
+                    Locale("ru", "RU")
+                } else {
+                    Locale.US
+                }
+                player.setTtsConfig(locale, settings.ttsVoiceMode)
+                player.refreshTtsEngineIfSystemDefaultChanged()
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     LaunchedEffect(viewModel, player) {
