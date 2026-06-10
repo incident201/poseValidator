@@ -1593,6 +1593,7 @@ private fun AudioCueAnnouncer(viewModel: GameViewModel, settings: GameSettings) 
                     Locale.US
                 }
                 player.setTtsConfig(locale, settings.ttsVoiceMode)
+                player.refreshTtsEngineIfSystemDefaultChanged()
             }
         }
 

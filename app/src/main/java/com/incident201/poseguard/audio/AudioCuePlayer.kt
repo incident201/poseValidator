@@ -5,10 +5,12 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 class AudioCuePlayer(
@@ -25,22 +27,11 @@ class AudioCuePlayer(
     private val ttsRef = AtomicReference<TextToSpeech?>(null)
     private val desiredLocale = AtomicReference(Locale.US)
     private val desiredVoiceMode = AtomicReference(TtsVoiceMode.DefaultVoice)
+    private val currentSystemTtsEngine = AtomicReference<String?>(null)
+    private val ttsGeneration = AtomicLong(0)
 
     init {
-        val engine = TextToSpeech(appContext) { status ->
-            val initializedEngine = ttsRef.get() ?: return@TextToSpeech
-            ttsInitialized.set(true)
-            if (status == TextToSpeech.SUCCESS) {
-                val ready = applyTtsConfiguration(
-                    initializedEngine,
-                    desiredLocale.get(),
-                    desiredVoiceMode.get()
-                )
-                ttsReady.set(ready)
-                if (ready) flushPendingTts(initializedEngine)
-            }
-        }
-        ttsRef.set(engine)
+        createTtsEngine()
     }
 
     fun setTtsConfig(locale: Locale, voiceMode: TtsVoiceMode) {
@@ -49,6 +40,29 @@ class AudioCuePlayer(
         if (!ttsInitialized.get()) return
         val engine = ttsRef.get() ?: return
         val ready = applyTtsConfiguration(engine, locale, voiceMode)
+        ttsReady.set(ready)
+        if (ready) flushPendingTts(engine)
+    }
+
+    fun refreshTtsEngineIfSystemDefaultChanged() {
+        if (closed) return
+
+        val latestSystemEngine = readSystemTtsEngine()
+        val knownSystemEngine = currentSystemTtsEngine.get()
+
+        if (latestSystemEngine != knownSystemEngine) {
+            recreateTtsEngine()
+            return
+        }
+
+        val engine = ttsRef.get() ?: return
+        if (!ttsInitialized.get()) return
+
+        val ready = applyTtsConfiguration(
+            engine,
+            desiredLocale.get(),
+            desiredVoiceMode.get()
+        )
         ttsReady.set(ready)
         if (ready) flushPendingTts(engine)
     }
@@ -136,6 +150,54 @@ class AudioCuePlayer(
         }
     }
 
+    private fun readSystemTtsEngine(): String? =
+        runCatching {
+            Settings.Secure.getString(
+                appContext.contentResolver,
+                Settings.Secure.TTS_DEFAULT_SYNTH
+            )
+        }.getOrNull()
+
+    private fun createTtsEngine() {
+        val generation = ttsGeneration.incrementAndGet()
+        currentSystemTtsEngine.set(readSystemTtsEngine())
+
+        val engine = TextToSpeech(appContext) { status ->
+            if (generation != ttsGeneration.get()) return@TextToSpeech
+
+            val initializedEngine = ttsRef.get() ?: return@TextToSpeech
+            ttsInitialized.set(true)
+
+            if (status == TextToSpeech.SUCCESS) {
+                val ready = applyTtsConfiguration(
+                    initializedEngine,
+                    desiredLocale.get(),
+                    desiredVoiceMode.get()
+                )
+                ttsReady.set(ready)
+                if (ready) flushPendingTts(initializedEngine)
+            } else {
+                ttsReady.set(false)
+            }
+        }
+
+        ttsRef.set(engine)
+    }
+
+    private fun recreateTtsEngine() {
+        val oldEngine = ttsRef.getAndSet(null)
+
+        ttsReady.set(false)
+        ttsInitialized.set(false)
+
+        oldEngine?.let { engine ->
+            runCatching { engine.stop() }
+            runCatching { engine.shutdown() }
+        }
+
+        createTtsEngine()
+    }
+
     private fun applyTtsConfiguration(
         engine: TextToSpeech,
         locale: Locale,
@@ -171,6 +233,7 @@ class AudioCuePlayer(
 
     override fun close() {
         closed = true
+        ttsGeneration.incrementAndGet()
         releaseMediaPlayer()
         pcmSignalPlayer.close()
         ttsRef.getAndSet(null)?.run {
