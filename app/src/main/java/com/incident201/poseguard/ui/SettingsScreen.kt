@@ -502,6 +502,13 @@ private fun localizedIntifaceMessage(
         R.string.intiface_test_vibration_failed_detail,
         message.args.firstOrNull().orEmpty()
     )
+    IntifaceMessage.ScanRejected -> localizedString(language, R.string.intiface_scan_rejected)
+    IntifaceMessage.CommandRejected -> localizedString(language, R.string.intiface_command_rejected)
+    IntifaceMessage.CommandRejectedDetail -> localizedFormatString(
+        language,
+        R.string.intiface_command_rejected_detail,
+        message.args.firstOrNull().orEmpty()
+    )
 }
 
 @Composable

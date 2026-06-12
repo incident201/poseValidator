@@ -3,6 +3,9 @@ package com.incident201.poseguard.intiface
 import io.github.blackspherefollower.buttplug4j.client.ButtplugClientDevice
 import io.github.blackspherefollower.buttplug4j.client.IDeviceEvent
 import io.github.blackspherefollower.buttplug4j.connectors.jetty.websocket.client.ButtplugClientWSClient
+import io.github.blackspherefollower.buttplug4j.protocol.ButtplugMessage
+import io.github.blackspherefollower.buttplug4j.protocol.messages.Error
+import io.github.blackspherefollower.buttplug4j.protocol.messages.Ok
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -60,7 +63,17 @@ internal class OnlineIntifaceController : IntifaceController {
                 statusMessage = IntifaceUiMessage(IntifaceMessage.Scanning),
                 errorMessage = null
             )
-            newClient.startScanning()
+            val scanStarted = newClient.startScanning()
+            if (!scanStarted) {
+                if (isCurrent(newClient, generation)) {
+                    mutableState.value = mutableState.value.copy(
+                        isScanning = false,
+                        statusMessage = null,
+                        errorMessage = IntifaceUiMessage(IntifaceMessage.ScanRejected)
+                    )
+                }
+                return@withContext
+            }
             delay(SCAN_DURATION_MS)
             if (!isCurrent(newClient, generation)) return@withContext
 
@@ -162,9 +175,9 @@ internal class OnlineIntifaceController : IntifaceController {
                 errorMessage = null
             )
             repeat(TEST_PULSE_COUNT) { pulseIndex ->
-                device.sendScalarVibrateCmd(TEST_VIBRATION_STRENGTH).get()
+                requireOk(device.sendScalarVibrateCmd(TEST_VIBRATION_STRENGTH).get())
                 delay(TEST_PULSE_DURATION_MS)
-                device.sendScalarVibrateCmd(0.0).get()
+                requireOk(device.sendScalarVibrateCmd(0.0).get())
                 if (pulseIndex < TEST_PULSE_COUNT - 1) {
                     delay(TEST_PULSE_PAUSE_MS)
                 }
@@ -181,8 +194,8 @@ internal class OnlineIntifaceController : IntifaceController {
             )
         } finally {
             deviceToStop?.let { selectedDevice ->
-                runCatching { selectedDevice.sendScalarVibrateCmd(0.0).get() }
-                runCatching { selectedDevice.sendStopDeviceCmd().get() }
+                runCatching { requireOk(selectedDevice.sendScalarVibrateCmd(0.0).get()) }
+                runCatching { requireOk(selectedDevice.sendStopDeviceCmd().get()) }
             }
             mutableState.value = mutableState.value.copy(isTestingVibration = false)
         }
@@ -316,9 +329,29 @@ internal class OnlineIntifaceController : IntifaceController {
         }
     }
 
+    private fun requireOk(response: ButtplugMessage) {
+        when (response) {
+            is Ok -> Unit
+            is Error -> throw ButtplugCommandRejectedException(
+                response.getErrorMessage()?.takeIf { it.isNotBlank() }
+                    ?: COMMAND_REJECTED_FALLBACK
+            )
+            else -> throw ButtplugCommandRejectedException(
+                "$UNEXPECTED_RESPONSE_PREFIX${response.javaClass.simpleName}"
+            )
+        }
+    }
+
     private fun Throwable.toVibrationErrorMessage(): IntifaceUiMessage {
         val detail = message?.takeIf { it.isNotBlank() }
             ?: cause?.message?.takeIf { it.isNotBlank() }
+        if (this is ButtplugCommandRejectedException) {
+            return if (detail == null) {
+                IntifaceUiMessage(IntifaceMessage.CommandRejected)
+            } else {
+                IntifaceUiMessage(IntifaceMessage.CommandRejectedDetail, listOf(detail))
+            }
+        }
         return if (detail == null) {
             IntifaceUiMessage(IntifaceMessage.TestVibrationFailed)
         } else {
@@ -332,5 +365,9 @@ internal class OnlineIntifaceController : IntifaceController {
         const val TEST_VIBRATION_STRENGTH = 0.6
         const val TEST_PULSE_DURATION_MS = 180L
         const val TEST_PULSE_PAUSE_MS = 180L
+        const val COMMAND_REJECTED_FALLBACK = "Command rejected"
+        const val UNEXPECTED_RESPONSE_PREFIX = "Unexpected response: "
     }
 }
+
+private class ButtplugCommandRejectedException(message: String) : RuntimeException(message)

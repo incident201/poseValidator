@@ -219,4 +219,7 @@
     <string name="intiface_no_vibrate_capability">Selected device does not support vibration</string>
     <string name="intiface_test_vibration_failed">Failed to test vibration</string>
     <string name="intiface_test_vibration_failed_detail">Failed to test vibration: %1$s</string>
+    <string name="intiface_scan_rejected">Intiface Central rejected the scan request</string>
+    <string name="intiface_command_rejected">Intiface Central rejected the vibration command</string>
+    <string name="intiface_command_rejected_detail">Intiface Central rejected the vibration command: %1$s</string>
 </resources>

@@ -219,4 +219,7 @@
     <string name="intiface_no_vibrate_capability">Выбранное устройство не поддерживает вибрацию</string>
     <string name="intiface_test_vibration_failed">Не удалось проверить вибрацию</string>
     <string name="intiface_test_vibration_failed_detail">Не удалось проверить вибрацию: %1$s</string>
+    <string name="intiface_scan_rejected">Intiface Central отклонил запрос поиска устройств</string>
+    <string name="intiface_command_rejected">Intiface Central отклонил команду вибрации</string>
+    <string name="intiface_command_rejected_detail">Intiface Central отклонил команду вибрации: %1$s</string>
 </resources>

@@ -28,7 +28,10 @@ enum class IntifaceMessage {
     SelectedDeviceMissing,
     NoVibrateCapability,
     TestVibrationFailed,
-    TestVibrationFailedDetail
+    TestVibrationFailedDetail,
+    ScanRejected,
+    CommandRejected,
+    CommandRejectedDetail
 }
 
 data class IntifaceUiMessage(
