@@ -39,6 +39,8 @@ import com.incident201.poseguard.audio.PcmSignalPlayer
 import com.incident201.poseguard.audio.PcmSignalSettings
 import com.incident201.poseguard.audio.TtsPhraseTemplate
 import com.incident201.poseguard.audio.TtsVoiceMode
+import com.incident201.poseguard.intiface.IntifaceDeviceInfo
+import com.incident201.poseguard.intiface.IntifaceUiState
 import com.incident201.poseguard.viewmodel.AppLanguage
 import com.incident201.poseguard.viewmodel.FaceCheckMode
 import com.incident201.poseguard.viewmodel.GameSettings
@@ -75,6 +77,11 @@ internal fun SettingsScreen(
     onTtsVoiceModeChanged: (TtsVoiceMode) -> Unit,
     onTtsPhraseTemplateChanged: (TtsPhraseTemplate, String?) -> Unit,
     onAudioCueSettingsChanged: (AudioCue, AudioCueSettings) -> Unit,
+    intifaceState: IntifaceUiState,
+    onIntifaceWebSocketUrlChanged: (String) -> Unit,
+    onIntifaceSearchDevices: (String) -> Unit,
+    onIntifaceDeviceSelected: (IntifaceDeviceInfo) -> Unit,
+    onIntifaceDisconnect: () -> Unit,
     onShowInstructions: () -> Unit
  ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -225,6 +232,16 @@ internal fun SettingsScreen(
             settings = settings,
             onEnabledChanged = onCustomizeAudioEnabledChanged,
             onConfigureClick = { showAudioSettings = true },
+            colorScheme = colorScheme
+        )
+        Spacer(Modifier.height(12.dp))
+        IntifaceCentralCard(
+            settings = settings,
+            state = intifaceState,
+            onUrlChanged = onIntifaceWebSocketUrlChanged,
+            onSearchDevices = onIntifaceSearchDevices,
+            onDeviceSelected = onIntifaceDeviceSelected,
+            onDisconnect = onIntifaceDisconnect,
             colorScheme = colorScheme
         )
         Spacer(Modifier.height(12.dp))
@@ -438,6 +455,145 @@ private fun TtsVoiceModeCard(
                 }
             )
         }
+    }
+}
+
+@Composable
+private fun IntifaceCentralCard(
+    settings: GameSettings,
+    state: IntifaceUiState,
+    onUrlChanged: (String) -> Unit,
+    onSearchDevices: (String) -> Unit,
+    onDeviceSelected: (IntifaceDeviceInfo) -> Unit,
+    onDisconnect: () -> Unit,
+    colorScheme: ColorScheme
+) {
+    var showDeviceDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.devices) {
+        if (state.devices.isNotEmpty()) {
+            showDeviceDialog = true
+        }
+    }
+
+    Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Intiface Central",
+                color = colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = if (state.isSupported) {
+                    "Connect to Intiface Central over WebSocket and search for devices."
+                } else {
+                    "Available only in the online build."
+                },
+                color = colorScheme.onSurfaceVariant
+            )
+            OutlinedTextField(
+                value = settings.intifaceWebSocketUrl,
+                onValueChange = onUrlChanged,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = state.isSupported && !state.isScanning,
+                singleLine = true,
+                label = { Text("WebSocket URL") }
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = { onSearchDevices(settings.intifaceWebSocketUrl) },
+                    enabled = state.isSupported &&
+                        !state.isScanning &&
+                        settings.intifaceWebSocketUrl.isNotBlank()
+                ) {
+                    Text(if (state.isScanning) "Searching…" else "Search devices")
+                }
+                if (state.isConnected) {
+                    OutlinedButton(onClick = onDisconnect) {
+                        Text("Disconnect")
+                    }
+                }
+            }
+            state.statusText?.let { status ->
+                Text(text = status, color = colorScheme.onSurfaceVariant)
+            }
+            state.errorText?.let { error ->
+                Text(text = error, color = colorScheme.error)
+            }
+            state.selectedDevice?.let { device ->
+                Text(
+                    text = "Selected: ${device.displayName}",
+                    color = colorScheme.primary,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+    }
+
+    if (showDeviceDialog && state.devices.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { showDeviceDialog = false },
+            title = { Text("Select Intiface device") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    state.devices.forEach { device ->
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onDeviceSelected(device)
+                                    showDeviceDialog = false
+                                },
+                            shape = RoundedCornerShape(12.dp),
+                            color = colorScheme.surfaceVariant
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = device.displayName,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = "Vibrate motors: ${device.vibrateCount}",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                                TextButton(
+                                    onClick = {
+                                        onDeviceSelected(device)
+                                        showDeviceDialog = false
+                                    }
+                                ) {
+                                    Text("Select")
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDeviceDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 }
 

@@ -72,6 +72,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.incident201.poseguard.audio.AudioCuePlaybackSettings
 import com.incident201.poseguard.audio.AudioCuePlayer
+import com.incident201.poseguard.intiface.createIntifaceController
 import com.incident201.poseguard.tracker.Point3D
 import com.incident201.poseguard.tracker.PoseLandmarkerService
 import com.incident201.poseguard.viewmodel.AppLanguage
@@ -217,6 +218,14 @@ fun CameraScreen(
             modifier = modifier
         )
         return
+    }
+
+    val intifaceController = remember(context) {
+        createIntifaceController(context.applicationContext)
+    }
+    val intifaceState by intifaceController.state.collectAsState()
+    DisposableEffect(intifaceController) {
+        onDispose { intifaceController.disconnect() }
     }
 
     AudioCueAnnouncer(viewModel = viewModel, settings = gameSettings)
@@ -646,6 +655,13 @@ fun CameraScreen(
             onTtsVoiceModeChanged = viewModel::updateTtsVoiceMode,
             onTtsPhraseTemplateChanged = viewModel::updateTtsPhraseTemplate,
             onAudioCueSettingsChanged = viewModel::updateAudioCueSettings,
+            intifaceState = intifaceState,
+            onIntifaceWebSocketUrlChanged = viewModel::updateIntifaceWebSocketUrl,
+            onIntifaceSearchDevices = { url ->
+                coroutineScope.launch { intifaceController.searchDevices(url) }
+            },
+            onIntifaceDeviceSelected = intifaceController::selectDevice,
+            onIntifaceDisconnect = intifaceController::disconnect,
             onShowInstructions = {
                 showSettings = false
                 showOnboarding = true
