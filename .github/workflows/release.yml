@@ -47,11 +47,11 @@ jobs:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
 
       - name: Run Unit Tests
-        run: gradle testDebugUnitTest --no-daemon
+        run: gradle :app:testOfflineDebugUnitTest :app:testOnlineDebugUnitTest --no-daemon
 
-      - name: Build Release APK
+      - name: Build Release APKs
         run: |
-          gradle assembleRelease --no-daemon \
+          gradle :app:assembleOfflineRelease :app:assembleOnlineRelease --no-daemon \
             -PVERSION_NAME="${{ inputs.version_name }}" \
             -PVERSION_CODE="${{ inputs.version_code }}"
         env:
@@ -59,28 +59,39 @@ jobs:
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
-      - name: Rename APK
+      - name: Rename APKs
         run: |
           TAG="v${{ inputs.version_name }}"
-          ORIGINAL_PATH="app/build/outputs/apk/release/app-release.apk"
-          NEW_NAME="poseValidator_${TAG}_release.apk"
-          NEW_PATH="app/build/outputs/apk/release/${NEW_NAME}"
 
-          mv "$ORIGINAL_PATH" "$NEW_PATH"
+          OFFLINE_ORIGINAL_PATH="app/build/outputs/apk/offline/release/app-offline-release.apk"
+          ONLINE_ORIGINAL_PATH="app/build/outputs/apk/online/release/app-online-release.apk"
+
+          OFFLINE_APK_NAME="poseValidator_${TAG}_offline_release.apk"
+          ONLINE_APK_NAME="poseValidator_${TAG}_online_release.apk"
+
+          OFFLINE_APK_PATH="app/build/outputs/apk/offline/release/${OFFLINE_APK_NAME}"
+          ONLINE_APK_PATH="app/build/outputs/apk/online/release/${ONLINE_APK_NAME}"
+
+          mv "$OFFLINE_ORIGINAL_PATH" "$OFFLINE_APK_PATH"
+          mv "$ONLINE_ORIGINAL_PATH" "$ONLINE_APK_PATH"
 
           echo "TAG=${TAG}" >> $GITHUB_ENV
-          echo "APK_PATH=${NEW_PATH}" >> $GITHUB_ENV
-          echo "APK_NAME=${NEW_NAME}" >> $GITHUB_ENV
+          echo "OFFLINE_APK_PATH=${OFFLINE_APK_PATH}" >> $GITHUB_ENV
+          echo "ONLINE_APK_PATH=${ONLINE_APK_PATH}" >> $GITHUB_ENV
+          echo "OFFLINE_APK_NAME=${OFFLINE_APK_NAME}" >> $GITHUB_ENV
+          echo "ONLINE_APK_NAME=${ONLINE_APK_NAME}" >> $GITHUB_ENV
 
-      - name: Upload release APK artifact
+      - name: Upload release APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.APK_NAME }}
-          path: ${{ env.APK_PATH }}
+          name: poseValidator_${{ env.TAG }}_release_apks
+          path: |
+            ${{ env.OFFLINE_APK_PATH }}
+            ${{ env.ONLINE_APK_PATH }}
 
       - name: Create GitHub Release
         run: |
-          gh release create "${TAG}" "${APK_PATH}" \
+          gh release create "${TAG}" "${OFFLINE_APK_PATH}" "${ONLINE_APK_PATH}" \
             --title "${TAG}" \
             --notes "Stable manual release snapshot ${TAG}" \
             --target "${GITHUB_SHA}"
