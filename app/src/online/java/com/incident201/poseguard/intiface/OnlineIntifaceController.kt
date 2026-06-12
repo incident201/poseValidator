@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.net.URI
 import java.util.concurrent.atomic.AtomicLong
@@ -22,6 +23,7 @@ internal class OnlineIntifaceController : IntifaceController {
 
     private val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val clientLock = Any()
+    private val vibrationTestMutex = Mutex()
     private val operationGeneration = AtomicLong(0L)
     private var client: ButtplugClientWSClient? = null
 
@@ -105,14 +107,24 @@ internal class OnlineIntifaceController : IntifaceController {
     }
 
     override suspend fun testVibration() = withContext(Dispatchers.IO) {
-        if (mutableState.value.isTestingVibration) return@withContext
+        if (!vibrationTestMutex.tryLock()) return@withContext
+
+        try {
+            runVibrationTestLocked()
+        } finally {
+            vibrationTestMutex.unlock()
+        }
+    }
+
+    private suspend fun runVibrationTestLocked() {
+        if (mutableState.value.isTestingVibration) return
 
         val selected = mutableState.value.selectedDevice
         if (selected == null) {
             mutableState.value = mutableState.value.copy(
                 errorMessage = IntifaceUiMessage(IntifaceMessage.SelectDeviceFirst)
             )
-            return@withContext
+            return
         }
 
         val activeClient = synchronized(clientLock) { client }
@@ -121,7 +133,7 @@ internal class OnlineIntifaceController : IntifaceController {
                 isConnected = false,
                 errorMessage = IntifaceUiMessage(IntifaceMessage.UnableToConnect)
             )
-            return@withContext
+            return
         }
 
         var deviceToStop: ButtplugClientDevice? = null
@@ -134,14 +146,14 @@ internal class OnlineIntifaceController : IntifaceController {
                     statusMessage = null,
                     errorMessage = IntifaceUiMessage(IntifaceMessage.SelectedDeviceMissing)
                 )
-                return@withContext
+                return
             }
             deviceToStop = device
             if (device.getScalarVibrateCount() <= 0L) {
                 mutableState.value = mutableState.value.copy(
                     errorMessage = IntifaceUiMessage(IntifaceMessage.NoVibrateCapability)
                 )
-                return@withContext
+                return
             }
 
             mutableState.value = mutableState.value.copy(
