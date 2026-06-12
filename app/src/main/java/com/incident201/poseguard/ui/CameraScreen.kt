@@ -237,8 +237,20 @@ fun CameraScreen(
         createIntifaceController(context.applicationContext)
     }
     val intifaceState by intifaceController.state.collectAsState()
-    DisposableEffect(intifaceController) {
-        onDispose { intifaceController.disconnect() }
+    // Intiface is currently scoped to the foreground settings/test UI.
+    // Future session-scoped/background support should move this controller out of CameraScreen.
+    DisposableEffect(lifecycleOwner, intifaceController) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                intifaceController.disconnect()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            intifaceController.disconnect()
+        }
     }
 
     AudioCueAnnouncer(viewModel = viewModel, settings = gameSettings)
