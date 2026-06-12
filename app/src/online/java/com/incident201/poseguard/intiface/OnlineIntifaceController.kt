@@ -189,13 +189,22 @@ internal class OnlineIntifaceController : IntifaceController {
     }
 
     override fun disconnect() {
-        operationGeneration.incrementAndGet()
+        val generation = operationGeneration.incrementAndGet()
+        val clientToDisconnect = takeCurrentClient()
+        val disconnectedState = IntifaceUiState(
+            isSupported = true,
+            statusMessage = IntifaceUiMessage(IntifaceMessage.Disconnected)
+        )
+        mutableState.value = disconnectedState
+
         controllerScope.launch {
-            disconnectCurrentClient()
-            mutableState.value = IntifaceUiState(
-                isSupported = true,
-                statusMessage = IntifaceUiMessage(IntifaceMessage.Disconnected)
-            )
+            disconnectClient(clientToDisconnect)
+
+            val stillCurrent = operationGeneration.get() == generation &&
+                synchronized(clientLock) { client == null }
+            if (stillCurrent) {
+                mutableState.value = disconnectedState
+            }
         }
     }
 
@@ -253,12 +262,19 @@ internal class OnlineIntifaceController : IntifaceController {
         mutableState.value = mutableState.value.copy(devices = devices, selectedDevice = selected)
     }
 
-    private fun disconnectCurrentClient() {
-        val oldClient = synchronized(clientLock) {
+    private fun takeCurrentClient(): ButtplugClientWSClient? =
+        synchronized(clientLock) {
             client.also { client = null }
-        } ?: return
-        runCatching { oldClient.stopAllDevices() }
-        runCatching { oldClient.disconnect() }
+        }
+
+    private fun disconnectClient(targetClient: ButtplugClientWSClient?) {
+        if (targetClient == null) return
+        runCatching { targetClient.stopAllDevices() }
+        runCatching { targetClient.disconnect() }
+    }
+
+    private fun disconnectCurrentClient() {
+        disconnectClient(takeCurrentClient())
     }
 
     private fun isCurrent(candidate: ButtplugClientWSClient, generation: Long): Boolean =
