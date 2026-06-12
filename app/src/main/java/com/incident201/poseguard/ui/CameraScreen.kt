@@ -72,6 +72,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.incident201.poseguard.audio.AudioCuePlaybackSettings
 import com.incident201.poseguard.audio.AudioCuePlayer
+import com.incident201.poseguard.intiface.createIntifaceController
 import com.incident201.poseguard.tracker.Point3D
 import com.incident201.poseguard.tracker.PoseLandmarkerService
 import com.incident201.poseguard.viewmodel.AppLanguage
@@ -152,6 +153,19 @@ internal fun localizedString(language: AppLanguage, @StringRes id: Int): String 
     return context.createConfigurationContext(config).resources.getString(id)
 }
 
+@Composable
+internal fun localizedFormatString(
+    language: AppLanguage,
+    @StringRes id: Int,
+    vararg args: Any
+): String {
+    val context = LocalContext.current
+    val locale = if (language == AppLanguage.Russian) Locale("ru", "RU") else Locale.US
+    val config = android.content.res.Configuration(context.resources.configuration)
+    config.setLocale(locale)
+    return context.createConfigurationContext(config).resources.getString(id, *args)
+}
+
 private fun cameraSelectorFor(lensFacing: Int): CameraSelector {
     return when (lensFacing) {
         CameraSelector.LENS_FACING_FRONT -> CameraSelector.DEFAULT_FRONT_CAMERA
@@ -217,6 +231,26 @@ fun CameraScreen(
             modifier = modifier
         )
         return
+    }
+
+    val intifaceController = remember(context) {
+        createIntifaceController(context.applicationContext)
+    }
+    val intifaceState by intifaceController.state.collectAsState()
+    // Intiface is currently scoped to the foreground settings/test UI.
+    // Future session-scoped/background support should move this controller out of CameraScreen.
+    DisposableEffect(lifecycleOwner, intifaceController) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                intifaceController.disconnect()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            intifaceController.disconnect()
+        }
     }
 
     AudioCueAnnouncer(viewModel = viewModel, settings = gameSettings)
@@ -646,6 +680,16 @@ fun CameraScreen(
             onTtsVoiceModeChanged = viewModel::updateTtsVoiceMode,
             onTtsPhraseTemplateChanged = viewModel::updateTtsPhraseTemplate,
             onAudioCueSettingsChanged = viewModel::updateAudioCueSettings,
+            intifaceState = intifaceState,
+            onIntifaceWebSocketUrlChanged = viewModel::updateIntifaceWebSocketUrl,
+            onIntifaceSearchDevices = { url ->
+                coroutineScope.launch { intifaceController.searchDevices(url) }
+            },
+            onIntifaceDeviceSelected = intifaceController::selectDevice,
+            onIntifaceTestVibration = {
+                coroutineScope.launch { intifaceController.testVibration() }
+            },
+            onIntifaceDisconnect = intifaceController::disconnect,
             onShowInstructions = {
                 showSettings = false
                 showOnboarding = true

@@ -91,6 +91,8 @@ private const val PREF_AUDIO_CUE_PCM_PATTERN_PREFIX = "audio_cue_pcm_pattern_"
 private const val PREF_TIMER_MODE = "timer_mode"
 private const val PREF_RANDOM_MIN_DURATION_SECONDS = "random_min_duration_seconds"
 private const val PREF_RANDOM_MAX_DURATION_SECONDS = "random_max_duration_seconds"
+private const val PREF_INTIFACE_WEBSOCKET_URL = "intiface_websocket_url"
+private const val DEFAULT_INTIFACE_WEBSOCKET_URL = "ws://10.0.2.2:12345/buttplug"
 
 enum class GameState {
     Idle,
@@ -142,7 +144,8 @@ data class GameSettings(
     val ttsVoiceMode: TtsVoiceMode = TtsVoiceMode.DefaultVoice,
     val customTtsTemplates: Map<TtsPhraseTemplate, String> = emptyMap(),
     val audioCueSettings: Map<AudioCue, AudioCueSettings> =
-        AudioCue.entries.associateWith { AudioCueSettings() }
+        AudioCue.entries.associateWith { AudioCueSettings() },
+    val intifaceWebSocketUrl: String = DEFAULT_INTIFACE_WEBSOCKET_URL
 )
 
 private fun GameSettings.toPoseOcclusionGuardConfig(): PoseOcclusionGuardConfig {
@@ -415,7 +418,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             customizeAudioEnabled = prefs.getBoolean(PREF_CUSTOMIZE_AUDIO_ENABLED, false),
             ttsVoiceMode = ttsVoiceMode,
             customTtsTemplates = loadCustomTtsTemplates(),
-            audioCueSettings = loadAudioCueSettings()
+            audioCueSettings = loadAudioCueSettings(),
+            intifaceWebSocketUrl = prefs.getString(
+                PREF_INTIFACE_WEBSOCKET_URL,
+                DEFAULT_INTIFACE_WEBSOCKET_URL
+            )?.trim() ?: DEFAULT_INTIFACE_WEBSOCKET_URL
         )
     }
 
@@ -749,6 +756,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     fun updateCustomizeAudioEnabled(enabled: Boolean) {
         _gameSettings.value = _gameSettings.value.copy(customizeAudioEnabled = enabled)
         prefs.edit().putBoolean(PREF_CUSTOMIZE_AUDIO_ENABLED, enabled).apply()
+    }
+
+    fun updateIntifaceWebSocketUrl(value: String) {
+        val normalized = value.trim()
+        _gameSettings.value = _gameSettings.value.copy(intifaceWebSocketUrl = normalized)
+        prefs.edit().putString(PREF_INTIFACE_WEBSOCKET_URL, normalized).apply()
     }
 
     fun updateAudioCueSettings(cue: AudioCue, settings: AudioCueSettings) {
