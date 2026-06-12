@@ -26,11 +26,22 @@ internal class OnlineIntifaceController : IntifaceController {
 
     private val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val clientLock = Any()
+    private val searchDevicesMutex = Mutex()
     private val vibrationTestMutex = Mutex()
     private val operationGeneration = AtomicLong(0L)
     private var client: ButtplugClientWSClient? = null
 
     override suspend fun searchDevices(url: String) = withContext(Dispatchers.IO) {
+        if (!searchDevicesMutex.tryLock()) return@withContext
+
+        try {
+            runSearchDevicesLocked(url)
+        } finally {
+            searchDevicesMutex.unlock()
+        }
+    }
+
+    private suspend fun runSearchDevicesLocked(url: String) {
         val generation = operationGeneration.incrementAndGet()
         disconnectCurrentClient()
         val uri = parseWebSocketUri(url) ?: run {
@@ -38,7 +49,7 @@ internal class OnlineIntifaceController : IntifaceController {
                 isSupported = true,
                 errorMessage = IntifaceUiMessage(IntifaceMessage.InvalidUrl)
             )
-            return@withContext
+            return
         }
 
         mutableState.value = IntifaceUiState(
@@ -55,7 +66,7 @@ internal class OnlineIntifaceController : IntifaceController {
 
         try {
             newClient.connect(uri)
-            if (!isCurrent(newClient, generation)) return@withContext
+            if (!isCurrent(newClient, generation)) return
 
             mutableState.value = mutableState.value.copy(
                 isConnected = true,
@@ -72,10 +83,10 @@ internal class OnlineIntifaceController : IntifaceController {
                         errorMessage = IntifaceUiMessage(IntifaceMessage.ScanRejected)
                     )
                 }
-                return@withContext
+                return
             }
             delay(SCAN_DURATION_MS)
-            if (!isCurrent(newClient, generation)) return@withContext
+            if (!isCurrent(newClient, generation)) return
 
             runCatching { newClient.stopScanning() }
             newClient.requestDeviceList()
