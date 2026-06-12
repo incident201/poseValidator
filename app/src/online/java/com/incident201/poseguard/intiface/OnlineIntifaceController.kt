@@ -268,8 +268,17 @@ internal class OnlineIntifaceController : IntifaceController {
         }
         newClient.setErrorReceived {
             if (isCurrent(newClient, generation)) {
-                mutableState.value = mutableState.value.copy(
+                synchronized(clientLock) {
+                    if (client === newClient) client = null
+                }
+                mutableState.value = IntifaceUiState(
+                    isSupported = true,
+                    isConnected = false,
                     isScanning = false,
+                    isTestingVibration = false,
+                    devices = emptyList(),
+                    selectedDevice = null,
+                    statusMessage = null,
                     errorMessage = IntifaceUiMessage(IntifaceMessage.ServerError)
                 )
             }
