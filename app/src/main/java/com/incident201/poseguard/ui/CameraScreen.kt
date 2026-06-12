@@ -153,6 +153,19 @@ internal fun localizedString(language: AppLanguage, @StringRes id: Int): String 
     return context.createConfigurationContext(config).resources.getString(id)
 }
 
+@Composable
+internal fun localizedFormatString(
+    language: AppLanguage,
+    @StringRes id: Int,
+    vararg args: Any
+): String {
+    val context = LocalContext.current
+    val locale = if (language == AppLanguage.Russian) Locale("ru", "RU") else Locale.US
+    val config = android.content.res.Configuration(context.resources.configuration)
+    config.setLocale(locale)
+    return context.createConfigurationContext(config).resources.getString(id, *args)
+}
+
 private fun cameraSelectorFor(lensFacing: Int): CameraSelector {
     return when (lensFacing) {
         CameraSelector.LENS_FACING_FRONT -> CameraSelector.DEFAULT_FRONT_CAMERA
@@ -661,6 +674,9 @@ fun CameraScreen(
                 coroutineScope.launch { intifaceController.searchDevices(url) }
             },
             onIntifaceDeviceSelected = intifaceController::selectDevice,
+            onIntifaceTestVibration = {
+                coroutineScope.launch { intifaceController.testVibration() }
+            },
             onIntifaceDisconnect = intifaceController::disconnect,
             onShowInstructions = {
                 showSettings = false

@@ -31,7 +31,7 @@ internal class OnlineIntifaceController : IntifaceController {
         val uri = parseWebSocketUri(url) ?: run {
             mutableState.value = IntifaceUiState(
                 isSupported = true,
-                errorText = "Enter a valid ws:// or wss:// Intiface Central URL"
+                errorMessage = IntifaceUiMessage(IntifaceMessage.InvalidUrl)
             )
             return@withContext
         }
@@ -39,7 +39,7 @@ internal class OnlineIntifaceController : IntifaceController {
         mutableState.value = IntifaceUiState(
             isSupported = true,
             isScanning = true,
-            statusText = "Connecting to Intiface Central…"
+            statusMessage = IntifaceUiMessage(IntifaceMessage.Connecting)
         )
 
         val newClient = ButtplugClientWSClient("Pose Guard")
@@ -55,8 +55,8 @@ internal class OnlineIntifaceController : IntifaceController {
             mutableState.value = mutableState.value.copy(
                 isConnected = true,
                 isScanning = true,
-                statusText = "Searching for Intiface devices…",
-                errorText = null
+                statusMessage = IntifaceUiMessage(IntifaceMessage.Scanning),
+                errorMessage = null
             )
             newClient.startScanning()
             delay(SCAN_DURATION_MS)
@@ -75,10 +75,13 @@ internal class OnlineIntifaceController : IntifaceController {
                 devices = devices,
                 selectedDevice = mutableState.value.selectedDevice
                     ?.takeIf { selected -> devices.any { it.index == selected.index } },
-                statusText = if (devices.isEmpty()) {
-                    "No devices with vibration capability found"
+                statusMessage = if (devices.isEmpty()) {
+                    IntifaceUiMessage(IntifaceMessage.NoVibrateDevices)
                 } else {
-                    "Found ${devices.size} device(s)"
+                    IntifaceUiMessage(
+                        IntifaceMessage.FoundDevices,
+                        listOf(devices.size.toString())
+                    )
                 }
             )
         } catch (cancellation: CancellationException) {
@@ -94,10 +97,82 @@ internal class OnlineIntifaceController : IntifaceController {
                     isScanning = false,
                     devices = emptyList(),
                     selectedDevice = null,
-                    statusText = null,
-                    errorText = error.toUserMessage()
+                    statusMessage = null,
+                    errorMessage = error.toConnectionErrorMessage()
                 )
             }
+        }
+    }
+
+    override suspend fun testVibration() = withContext(Dispatchers.IO) {
+        if (mutableState.value.isTestingVibration) return@withContext
+
+        val selected = mutableState.value.selectedDevice
+        if (selected == null) {
+            mutableState.value = mutableState.value.copy(
+                errorMessage = IntifaceUiMessage(IntifaceMessage.SelectDeviceFirst)
+            )
+            return@withContext
+        }
+
+        val activeClient = synchronized(clientLock) { client }
+        if (activeClient == null || !activeClient.isConnected()) {
+            mutableState.value = mutableState.value.copy(
+                isConnected = false,
+                errorMessage = IntifaceUiMessage(IntifaceMessage.UnableToConnect)
+            )
+            return@withContext
+        }
+
+        var deviceToStop: ButtplugClientDevice? = null
+        try {
+            val device = activeClient.getDevices()
+                .firstOrNull { it.getDeviceIndex() == selected.index }
+            if (device == null) {
+                mutableState.value = mutableState.value.copy(
+                    selectedDevice = null,
+                    statusMessage = null,
+                    errorMessage = IntifaceUiMessage(IntifaceMessage.SelectedDeviceMissing)
+                )
+                return@withContext
+            }
+            deviceToStop = device
+            if (device.getScalarVibrateCount() <= 0L) {
+                mutableState.value = mutableState.value.copy(
+                    errorMessage = IntifaceUiMessage(IntifaceMessage.NoVibrateCapability)
+                )
+                return@withContext
+            }
+
+            mutableState.value = mutableState.value.copy(
+                isTestingVibration = true,
+                statusMessage = IntifaceUiMessage(IntifaceMessage.TestVibration),
+                errorMessage = null
+            )
+            repeat(TEST_PULSE_COUNT) { pulseIndex ->
+                device.sendScalarVibrateCmd(TEST_VIBRATION_STRENGTH).get()
+                delay(TEST_PULSE_DURATION_MS)
+                device.sendScalarVibrateCmd(0.0).get()
+                if (pulseIndex < TEST_PULSE_COUNT - 1) {
+                    delay(TEST_PULSE_PAUSE_MS)
+                }
+            }
+            mutableState.value = mutableState.value.copy(
+                statusMessage = IntifaceUiMessage(IntifaceMessage.TestVibrationDone)
+            )
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            mutableState.value = mutableState.value.copy(
+                statusMessage = null,
+                errorMessage = error.toVibrationErrorMessage()
+            )
+        } finally {
+            deviceToStop?.let { selectedDevice ->
+                runCatching { selectedDevice.sendScalarVibrateCmd(0.0).get() }
+                runCatching { selectedDevice.sendStopDeviceCmd().get() }
+            }
+            mutableState.value = mutableState.value.copy(isTestingVibration = false)
         }
     }
 
@@ -105,8 +180,11 @@ internal class OnlineIntifaceController : IntifaceController {
         val availableDevice = mutableState.value.devices.firstOrNull { it.index == device.index } ?: return
         mutableState.value = mutableState.value.copy(
             selectedDevice = availableDevice,
-            statusText = "Selected: ${availableDevice.displayName}",
-            errorText = null
+            statusMessage = IntifaceUiMessage(
+                IntifaceMessage.SelectedDevice,
+                listOf(availableDevice.displayName)
+            ),
+            errorMessage = null
         )
     }
 
@@ -116,7 +194,7 @@ internal class OnlineIntifaceController : IntifaceController {
             disconnectCurrentClient()
             mutableState.value = IntifaceUiState(
                 isSupported = true,
-                statusText = "Disconnected from Intiface Central"
+                statusMessage = IntifaceUiMessage(IntifaceMessage.Disconnected)
             )
         }
     }
@@ -146,12 +224,11 @@ internal class OnlineIntifaceController : IntifaceController {
                 mutableState.value = mutableState.value.copy(isScanning = false)
             }
         }
-        newClient.setErrorReceived { error ->
+        newClient.setErrorReceived {
             if (isCurrent(newClient, generation)) {
                 mutableState.value = mutableState.value.copy(
                     isScanning = false,
-                    errorText = error.getErrorMessage()?.takeIf { it.isNotBlank() }
-                        ?: "Intiface Central reported an error"
+                    errorMessage = IntifaceUiMessage(IntifaceMessage.ServerError)
                 )
             }
         }
@@ -159,8 +236,8 @@ internal class OnlineIntifaceController : IntifaceController {
             if (isCurrent(newClient, generation)) {
                 mutableState.value = mutableState.value.copy(
                     isConnected = true,
-                    statusText = "Connected to Intiface Central",
-                    errorText = null
+                    statusMessage = IntifaceUiMessage(IntifaceMessage.Connected),
+                    errorMessage = null
                 )
             }
         }
@@ -197,20 +274,35 @@ internal class OnlineIntifaceController : IntifaceController {
         index = getDeviceIndex(),
         name = getName().orEmpty(),
         displayName = getDisplayName()?.takeIf { it.isNotBlank() }
-            ?: getName().orEmpty().ifBlank { "Device ${getDeviceIndex()}" },
+            ?: getName().orEmpty().ifBlank { getDeviceIndex().toString() },
         vibrateCount = getScalarVibrateCount()
     )
 
-    private fun Throwable.toUserMessage(): String {
-        val detail = message?.takeIf { it.isNotBlank() } ?: cause?.message?.takeIf { it.isNotBlank() }
+    private fun Throwable.toConnectionErrorMessage(): IntifaceUiMessage {
+        val detail = message?.takeIf { it.isNotBlank() }
+            ?: cause?.message?.takeIf { it.isNotBlank() }
         return if (detail == null) {
-            "Unable to connect to Intiface Central"
+            IntifaceUiMessage(IntifaceMessage.UnableToConnect)
         } else {
-            "Unable to connect to Intiface Central: $detail"
+            IntifaceUiMessage(IntifaceMessage.UnableToConnectDetail, listOf(detail))
+        }
+    }
+
+    private fun Throwable.toVibrationErrorMessage(): IntifaceUiMessage {
+        val detail = message?.takeIf { it.isNotBlank() }
+            ?: cause?.message?.takeIf { it.isNotBlank() }
+        return if (detail == null) {
+            IntifaceUiMessage(IntifaceMessage.TestVibrationFailed)
+        } else {
+            IntifaceUiMessage(IntifaceMessage.TestVibrationFailedDetail, listOf(detail))
         }
     }
 
     private companion object {
         const val SCAN_DURATION_MS = 5_000L
+        const val TEST_PULSE_COUNT = 3
+        const val TEST_VIBRATION_STRENGTH = 0.6
+        const val TEST_PULSE_DURATION_MS = 180L
+        const val TEST_PULSE_PAUSE_MS = 180L
     }
 }

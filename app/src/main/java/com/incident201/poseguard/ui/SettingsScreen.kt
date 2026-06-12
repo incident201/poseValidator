@@ -40,6 +40,8 @@ import com.incident201.poseguard.audio.PcmSignalSettings
 import com.incident201.poseguard.audio.TtsPhraseTemplate
 import com.incident201.poseguard.audio.TtsVoiceMode
 import com.incident201.poseguard.intiface.IntifaceDeviceInfo
+import com.incident201.poseguard.intiface.IntifaceMessage
+import com.incident201.poseguard.intiface.IntifaceUiMessage
 import com.incident201.poseguard.intiface.IntifaceUiState
 import com.incident201.poseguard.viewmodel.AppLanguage
 import com.incident201.poseguard.viewmodel.FaceCheckMode
@@ -81,6 +83,7 @@ internal fun SettingsScreen(
     onIntifaceWebSocketUrlChanged: (String) -> Unit,
     onIntifaceSearchDevices: (String) -> Unit,
     onIntifaceDeviceSelected: (IntifaceDeviceInfo) -> Unit,
+    onIntifaceTestVibration: () -> Unit,
     onIntifaceDisconnect: () -> Unit,
     onShowInstructions: () -> Unit
  ) {
@@ -241,6 +244,7 @@ internal fun SettingsScreen(
             onUrlChanged = onIntifaceWebSocketUrlChanged,
             onSearchDevices = onIntifaceSearchDevices,
             onDeviceSelected = onIntifaceDeviceSelected,
+            onTestVibration = onIntifaceTestVibration,
             onDisconnect = onIntifaceDisconnect,
             colorScheme = colorScheme
         )
@@ -459,12 +463,55 @@ private fun TtsVoiceModeCard(
 }
 
 @Composable
+private fun localizedIntifaceMessage(
+    language: AppLanguage,
+    message: IntifaceUiMessage
+): String = when (message.message) {
+    IntifaceMessage.OnlineOnly -> localizedString(language, R.string.intiface_online_only)
+    IntifaceMessage.Connecting -> localizedString(language, R.string.intiface_connecting)
+    IntifaceMessage.Connected -> localizedString(language, R.string.intiface_connected)
+    IntifaceMessage.Scanning -> localizedString(language, R.string.intiface_scanning)
+    IntifaceMessage.NoVibrateDevices -> localizedString(language, R.string.intiface_no_vibrate_devices)
+    IntifaceMessage.FoundDevices -> localizedFormatString(
+        language,
+        R.string.intiface_found_devices,
+        message.args.firstOrNull()?.toIntOrNull() ?: 0
+    )
+    IntifaceMessage.SelectedDevice -> localizedFormatString(
+        language,
+        R.string.intiface_selected_device,
+        message.args.firstOrNull().orEmpty()
+    )
+    IntifaceMessage.Disconnected -> localizedString(language, R.string.intiface_disconnected)
+    IntifaceMessage.InvalidUrl -> localizedString(language, R.string.intiface_invalid_url)
+    IntifaceMessage.ServerError -> localizedString(language, R.string.intiface_server_error)
+    IntifaceMessage.UnableToConnect -> localizedString(language, R.string.intiface_unable_to_connect)
+    IntifaceMessage.UnableToConnectDetail -> localizedFormatString(
+        language,
+        R.string.intiface_unable_to_connect_detail,
+        message.args.firstOrNull().orEmpty()
+    )
+    IntifaceMessage.TestVibration -> localizedString(language, R.string.intiface_test_vibration_status)
+    IntifaceMessage.TestVibrationDone -> localizedString(language, R.string.intiface_test_vibration_done)
+    IntifaceMessage.SelectDeviceFirst -> localizedString(language, R.string.intiface_select_device_first)
+    IntifaceMessage.SelectedDeviceMissing -> localizedString(language, R.string.intiface_selected_device_missing)
+    IntifaceMessage.NoVibrateCapability -> localizedString(language, R.string.intiface_no_vibrate_capability)
+    IntifaceMessage.TestVibrationFailed -> localizedString(language, R.string.intiface_test_vibration_failed)
+    IntifaceMessage.TestVibrationFailedDetail -> localizedFormatString(
+        language,
+        R.string.intiface_test_vibration_failed_detail,
+        message.args.firstOrNull().orEmpty()
+    )
+}
+
+@Composable
 private fun IntifaceCentralCard(
     settings: GameSettings,
     state: IntifaceUiState,
     onUrlChanged: (String) -> Unit,
     onSearchDevices: (String) -> Unit,
     onDeviceSelected: (IntifaceDeviceInfo) -> Unit,
+    onTestVibration: () -> Unit,
     onDisconnect: () -> Unit,
     colorScheme: ColorScheme
 ) {
@@ -484,25 +531,30 @@ private fun IntifaceCentralCard(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text = "Intiface Central",
+                text = localizedString(settings.language, R.string.intiface_title),
                 color = colorScheme.onSurfaceVariant,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                text = if (state.isSupported) {
-                    "Connect to Intiface Central over WebSocket and search for devices."
-                } else {
-                    "Available only in the online build."
-                },
+                text = localizedString(
+                    settings.language,
+                    if (state.isSupported) {
+                        R.string.intiface_description_online
+                    } else {
+                        R.string.intiface_description_offline
+                    }
+                ),
                 color = colorScheme.onSurfaceVariant
             )
             OutlinedTextField(
                 value = settings.intifaceWebSocketUrl,
                 onValueChange = onUrlChanged,
                 modifier = Modifier.fillMaxWidth(),
-                enabled = state.isSupported && !state.isScanning,
+                enabled = state.isSupported && !state.isScanning && !state.isTestingVibration,
                 singleLine = true,
-                label = { Text("WebSocket URL") }
+                label = {
+                    Text(localizedString(settings.language, R.string.intiface_websocket_url))
+                }
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -512,25 +564,67 @@ private fun IntifaceCentralCard(
                     onClick = { onSearchDevices(settings.intifaceWebSocketUrl) },
                     enabled = state.isSupported &&
                         !state.isScanning &&
+                        !state.isTestingVibration &&
                         settings.intifaceWebSocketUrl.isNotBlank()
                 ) {
-                    Text(if (state.isScanning) "Searching…" else "Search devices")
+                    Text(
+                        localizedString(
+                            settings.language,
+                            if (state.isScanning) {
+                                R.string.intiface_searching
+                            } else {
+                                R.string.intiface_search_devices
+                            }
+                        )
+                    )
                 }
                 if (state.isConnected) {
-                    OutlinedButton(onClick = onDisconnect) {
-                        Text("Disconnect")
+                    OutlinedButton(
+                        onClick = onDisconnect,
+                        enabled = !state.isTestingVibration
+                    ) {
+                        Text(localizedString(settings.language, R.string.intiface_disconnect))
                     }
                 }
             }
-            state.statusText?.let { status ->
-                Text(text = status, color = colorScheme.onSurfaceVariant)
+            Button(
+                onClick = onTestVibration,
+                enabled = state.isSupported &&
+                    state.isConnected &&
+                    state.selectedDevice != null &&
+                    !state.isScanning &&
+                    !state.isTestingVibration
+            ) {
+                Text(
+                    localizedString(
+                        settings.language,
+                        if (state.isTestingVibration) {
+                            R.string.intiface_testing_vibration
+                        } else {
+                            R.string.intiface_test_vibration
+                        }
+                    )
+                )
             }
-            state.errorText?.let { error ->
-                Text(text = error, color = colorScheme.error)
+            state.statusMessage?.let { status ->
+                Text(
+                    text = localizedIntifaceMessage(settings.language, status),
+                    color = colorScheme.onSurfaceVariant
+                )
+            }
+            state.errorMessage?.let { error ->
+                Text(
+                    text = localizedIntifaceMessage(settings.language, error),
+                    color = colorScheme.error
+                )
             }
             state.selectedDevice?.let { device ->
                 Text(
-                    text = "Selected: ${device.displayName}",
+                    text = localizedFormatString(
+                        settings.language,
+                        R.string.intiface_selected_device,
+                        device.displayName
+                    ),
                     color = colorScheme.primary,
                     fontWeight = FontWeight.Medium
                 )
@@ -541,7 +635,9 @@ private fun IntifaceCentralCard(
     if (showDeviceDialog && state.devices.isNotEmpty()) {
         AlertDialog(
             onDismissRequest = { showDeviceDialog = false },
-            title = { Text("Select Intiface device") },
+            title = {
+                Text(localizedString(settings.language, R.string.intiface_select_device_title))
+            },
             text = {
                 Column(
                     modifier = Modifier
@@ -571,7 +667,11 @@ private fun IntifaceCentralCard(
                                         fontWeight = FontWeight.Medium
                                     )
                                     Text(
-                                        text = "Vibrate motors: ${device.vibrateCount}",
+                                        text = localizedFormatString(
+                                            settings.language,
+                                            R.string.intiface_vibrate_motors,
+                                            device.vibrateCount
+                                        ),
                                         style = MaterialTheme.typography.bodySmall
                                     )
                                 }
@@ -581,7 +681,7 @@ private fun IntifaceCentralCard(
                                         showDeviceDialog = false
                                     }
                                 ) {
-                                    Text("Select")
+                                    Text(localizedString(settings.language, R.string.intiface_select))
                                 }
                             }
                         }
@@ -590,7 +690,7 @@ private fun IntifaceCentralCard(
             },
             confirmButton = {
                 TextButton(onClick = { showDeviceDialog = false }) {
-                    Text("Close")
+                    Text(localizedString(settings.language, R.string.intiface_close))
                 }
             }
         )

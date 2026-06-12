@@ -186,4 +186,37 @@
     <string name="audio_cue_tts_template_minutes_hint">Use {minutes} where the number of minutes should appear.</string>
     <string name="audio_cue_tts_template_minutes_error">Keep {minutes} in this template.</string>
     <string name="audio_cue_penalty_added_to_timer">Penalty added to timer</string>
+
+    <string name="intiface_title">Intiface Central</string>
+    <string name="intiface_description_online">Connect to Intiface Central over WebSocket and search for devices.</string>
+    <string name="intiface_description_offline">Available only in the online build.</string>
+    <string name="intiface_websocket_url">WebSocket URL</string>
+    <string name="intiface_search_devices">Search devices</string>
+    <string name="intiface_searching">Searching…</string>
+    <string name="intiface_disconnect">Disconnect</string>
+    <string name="intiface_select_device_title">Select Intiface device</string>
+    <string name="intiface_select">Select</string>
+    <string name="intiface_close">Close</string>
+    <string name="intiface_vibrate_motors">Vibrate motors: %1$d</string>
+    <string name="intiface_selected_device">Selected: %1$s</string>
+    <string name="intiface_online_only">Intiface Central is available only in the online build</string>
+    <string name="intiface_connecting">Connecting to Intiface Central…</string>
+    <string name="intiface_connected">Connected to Intiface Central</string>
+    <string name="intiface_scanning">Searching for Intiface devices…</string>
+    <string name="intiface_no_vibrate_devices">No devices with vibration capability found</string>
+    <string name="intiface_found_devices">Found %1$d device(s)</string>
+    <string name="intiface_disconnected">Disconnected from Intiface Central</string>
+    <string name="intiface_invalid_url">Enter a valid ws:// or wss:// Intiface Central URL</string>
+    <string name="intiface_server_error">Intiface Central reported an error</string>
+    <string name="intiface_unable_to_connect">Unable to connect to Intiface Central</string>
+    <string name="intiface_unable_to_connect_detail">Unable to connect to Intiface Central: %1$s</string>
+    <string name="intiface_test_vibration">Test vibration</string>
+    <string name="intiface_testing_vibration">Testing…</string>
+    <string name="intiface_test_vibration_status">Testing vibration…</string>
+    <string name="intiface_test_vibration_done">Test vibration completed</string>
+    <string name="intiface_select_device_first">Select a device first</string>
+    <string name="intiface_selected_device_missing">Selected device is no longer connected</string>
+    <string name="intiface_no_vibrate_capability">Selected device does not support vibration</string>
+    <string name="intiface_test_vibration_failed">Failed to test vibration</string>
+    <string name="intiface_test_vibration_failed_detail">Failed to test vibration: %1$s</string>
 </resources>
