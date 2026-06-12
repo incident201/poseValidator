@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.net.URI
 import java.util.concurrent.atomic.AtomicLong
@@ -32,12 +33,8 @@ internal class OnlineIntifaceController : IntifaceController {
     private var client: ButtplugClientWSClient? = null
 
     override suspend fun searchDevices(url: String) = withContext(Dispatchers.IO) {
-        if (!searchDevicesMutex.tryLock()) return@withContext
-
-        try {
+        searchDevicesMutex.withLock {
             runSearchDevicesLocked(url)
-        } finally {
-            searchDevicesMutex.unlock()
         }
     }
 
