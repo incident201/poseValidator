@@ -192,6 +192,7 @@
     <string name="intiface_description_offline">Available only in the online build.</string>
     <string name="intiface_websocket_url">WebSocket URL</string>
     <string name="intiface_search_devices">Search devices</string>
+    <string name="intiface_change_device">Change device</string>
     <string name="intiface_searching">Searching…</string>
     <string name="intiface_disconnect">Disconnect</string>
     <string name="intiface_select_device_title">Select Intiface device</string>
@@ -238,7 +239,19 @@
     <string name="intiface_pattern_pulse">Pulse</string>
     <string name="intiface_pulse_length_seconds">Pulse length, seconds</string>
     <string name="intiface_pulse_pause_seconds">Pause, seconds</string>
-    <string name="intiface_pause_duration_seconds">Pause duration, seconds</string>
+    <string name="intiface_pause_duration_seconds">Pause duration (seconds)</string>
+
+    <string name="intiface_overlay_online_required">Intiface: online build required</string>
+    <string name="intiface_overlay_disabled">Intiface: disabled</string>
+    <string name="intiface_overlay_connecting">Intiface: connecting…</string>
+    <string name="intiface_overlay_connected">Intiface: connected — %1$s</string>
+    <string name="intiface_overlay_device_not_selected">Intiface: device not selected</string>
+    <string name="intiface_overlay_reconnecting">Intiface: reconnecting — %1$s</string>
+    <string name="intiface_status_connected">Connected</string>
+    <string name="intiface_status_connecting">Connecting…</string>
+    <string name="intiface_status_disconnected">Disconnected</string>
+    <string name="intiface_status_saved_device_not_found">Saved device not found</string>
+    <string name="intiface_saved_device_not_found">Saved device not found</string>
     <string name="intiface_connection_disabled_hint">Enable Intiface Central Connection to connect a device.</string>
     <string name="intiface_rules_disabled_until_enabled">Connection and session rules are disabled until Intiface Central Connection is enabled.</string>
 </resources>

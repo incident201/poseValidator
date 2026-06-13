@@ -105,6 +105,9 @@ private const val PREF_RANDOM_MIN_DURATION_SECONDS = "random_min_duration_second
 private const val PREF_RANDOM_MAX_DURATION_SECONDS = "random_max_duration_seconds"
 private const val PREF_INTIFACE_WEBSOCKET_URL = "intiface_websocket_url"
 private const val PREF_INTIFACE_CONNECTION_ENABLED = "intiface_connection_enabled"
+private const val PREF_INTIFACE_SELECTED_DEVICE_NAME = "intiface_selected_device_name"
+private const val PREF_INTIFACE_SELECTED_DEVICE_DISPLAY_NAME = "intiface_selected_device_display_name"
+private const val PREF_INTIFACE_SELECTED_DEVICE_INDEX = "intiface_selected_device_index"
 private const val PREF_INTIFACE_BACKGROUND_MODE = "intiface_background_mode"
 private const val PREF_INTIFACE_BACKGROUND_STRENGTH = "intiface_background_strength"
 private const val PREF_INTIFACE_BACKGROUND_PATTERN = "intiface_background_pattern"
@@ -172,6 +175,9 @@ data class GameSettings(
         AudioCue.entries.associateWith { AudioCueSettings() },
     val intifaceWebSocketUrl: String = DEFAULT_INTIFACE_WEBSOCKET_URL,
     val intifaceConnectionEnabled: Boolean = false,
+    val intifaceSelectedDeviceName: String = "",
+    val intifaceSelectedDeviceDisplayName: String = "",
+    val intifaceSelectedDeviceIndex: Long? = null,
     val intifaceBackgroundMode: IntifaceBackgroundMode = IntifaceBackgroundMode.Off,
     val intifaceBackgroundVibration: IntifaceVibrationSettings = IntifaceVibrationSettings(
         strength = 0.2, pulseLengthSeconds = 0.5, pulsePauseSeconds = 0.5
@@ -386,6 +392,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     init {
         applySettingsToEngines(_gameSettings.value)
+        autoConnectIntifaceIfRemembered()
         _statusMessage.value = tr(R.string.status_initial)
     }
 
@@ -847,7 +854,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         val effective = enabled && intifaceController.state.value.isSupported
         _gameSettings.value = _gameSettings.value.copy(intifaceConnectionEnabled = effective)
         prefs.edit().putBoolean(PREF_INTIFACE_CONNECTION_ENABLED, effective).apply()
-        if (!effective) disconnectIntiface()
+        if (effective) {
+            autoConnectIntifaceIfRemembered()
+        } else {
+            disconnectIntiface()
+        }
     }
 
     fun updateIntifaceBackgroundMode(mode: IntifaceBackgroundMode) {
@@ -892,7 +903,34 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         viewModelScope.launch { intifaceController.searchDevices(url) }
     }
 
-    fun selectIntifaceDevice(device: IntifaceDeviceInfo) = intifaceController.selectDevice(device)
+    fun selectIntifaceDevice(device: IntifaceDeviceInfo) {
+        prefs.edit()
+            .putString(PREF_INTIFACE_SELECTED_DEVICE_NAME, device.name)
+            .putString(PREF_INTIFACE_SELECTED_DEVICE_DISPLAY_NAME, device.displayName)
+            .putLong(PREF_INTIFACE_SELECTED_DEVICE_INDEX, device.index)
+            .apply()
+        _gameSettings.value = _gameSettings.value.copy(
+            intifaceSelectedDeviceName = device.name,
+            intifaceSelectedDeviceDisplayName = device.displayName,
+            intifaceSelectedDeviceIndex = device.index
+        )
+        intifaceController.selectDevice(device)
+    }
+
+    private fun autoConnectIntifaceIfRemembered() {
+        val settings = _gameSettings.value
+        if (!settings.intifaceConnectionEnabled) return
+        if (settings.intifaceSelectedDeviceName.isBlank() && settings.intifaceSelectedDeviceDisplayName.isBlank()) return
+
+        val rememberedDevice = com.incident201.poseguard.intiface.IntifaceRememberedDevice(
+            name = settings.intifaceSelectedDeviceName,
+            displayName = settings.intifaceSelectedDeviceDisplayName,
+            index = settings.intifaceSelectedDeviceIndex
+        )
+        viewModelScope.launch {
+            intifaceController.connectToRememberedDevice(settings.intifaceWebSocketUrl, rememberedDevice)
+        }
+    }
 
     fun testIntifaceVibration() {
         if (!_gameSettings.value.intifaceConnectionEnabled) return
@@ -901,6 +939,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     fun disconnectIntiface() {
         stopIntifaceSessionSignals(disconnect = true)
+    }
+
+    fun pauseIntifaceSessionSignals() {
+        stopIntifaceSessionSignals(disconnect = false)
     }
 
     private fun IntifaceVibrationSettings.normalized() = copy(

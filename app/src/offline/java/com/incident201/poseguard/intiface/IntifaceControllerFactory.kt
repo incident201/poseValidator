@@ -23,6 +23,10 @@ private class OfflineIntifaceController : IntifaceController {
         mutableState.value = mutableState.value.copy(errorMessage = onlineOnlyMessage)
     }
 
+    override suspend fun connectToRememberedDevice(url: String, rememberedDevice: IntifaceRememberedDevice) {
+        mutableState.value = mutableState.value.copy(errorMessage = onlineOnlyMessage)
+    }
+
     override suspend fun testVibration() {
         mutableState.value = mutableState.value.copy(errorMessage = onlineOnlyMessage)
     }

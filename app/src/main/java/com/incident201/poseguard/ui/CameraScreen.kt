@@ -236,14 +236,14 @@ fun CameraScreen(
     DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
-                viewModel.disconnectIntiface()
+                viewModel.pauseIntifaceSessionSignals()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
 
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            viewModel.disconnectIntiface()
+            viewModel.pauseIntifaceSessionSignals()
         }
     }
 
@@ -867,6 +867,18 @@ fun CameraScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 12.dp)
                         .zIndex(3f)
+                )
+            }
+
+            if (!showFinalScreen) {
+                IntifacePreviewStatusOverlay(
+                    state = intifaceState,
+                    language = gameSettings.language,
+                    enabled = gameSettings.intifaceConnectionEnabled,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 12.dp)
+                        .zIndex(4f)
                 )
             }
         }

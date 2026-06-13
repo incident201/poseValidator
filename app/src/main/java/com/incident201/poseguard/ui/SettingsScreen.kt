@@ -540,6 +540,7 @@ private fun localizedIntifaceMessage(
         R.string.intiface_command_rejected_detail,
         message.args.firstOrNull().orEmpty()
     )
+    IntifaceMessage.SavedDeviceNotFound -> localizedString(language, R.string.intiface_saved_device_not_found)
 }
 
 @Composable
@@ -577,6 +578,20 @@ private fun CompactIntifaceCard(
                 ),
                 color = colorScheme.onSurfaceVariant
             )
+            if (supported && settings.intifaceConnectionEnabled) {
+                val statusRes = when {
+                    state.errorMessage != null && state.errorMessage.message == IntifaceMessage.SavedDeviceNotFound -> R.string.intiface_status_saved_device_not_found
+                    state.isScanning -> R.string.intiface_status_connecting
+                    state.isConnected && state.selectedDevice != null -> R.string.intiface_status_connected
+                    else -> R.string.intiface_status_disconnected
+                }
+                
+                Text(
+                    text = localizedString(settings.language, statusRes) + (state.selectedDevice?.let { " — ${it.displayName}" } ?: ""),
+                    color = if (state.isConnected && state.selectedDevice != null) colorScheme.primary else colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium
+                )
+            }
             OutlinedButton(onClick = onConfigureClick, enabled = supported) {
                 Text(localizedString(settings.language, R.string.intiface_configure))
             }
@@ -736,10 +751,12 @@ private fun IntifaceConnectionCard(
     colorScheme: ColorScheme
 ) {
     var showDeviceDialog by remember { mutableStateOf(false) }
+    var openDialogAfterManualSearch by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.devices) {
-        if (state.devices.isNotEmpty()) {
+        if (state.devices.isNotEmpty() && openDialogAfterManualSearch) {
             showDeviceDialog = true
+            openDialogAfterManualSearch = false
         }
     }
 
@@ -780,8 +797,12 @@ private fun IntifaceConnectionCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                val hasRememberedDevice = settings.intifaceSelectedDeviceName.isNotBlank() || settings.intifaceSelectedDeviceDisplayName.isNotBlank()
                 Button(
-                    onClick = { onSearchDevices(settings.intifaceWebSocketUrl) },
+                    onClick = { 
+                        openDialogAfterManualSearch = true
+                        onSearchDevices(settings.intifaceWebSocketUrl) 
+                    },
                     enabled = enabled &&
                         !state.isScanning &&
                         !state.isTestingVibration &&
@@ -792,6 +813,8 @@ private fun IntifaceConnectionCard(
                             settings.language,
                             if (state.isScanning) {
                                 R.string.intiface_searching
+                            } else if (hasRememberedDevice) {
+                                R.string.intiface_change_device
                             } else {
                                 R.string.intiface_search_devices
                             }
@@ -807,6 +830,45 @@ private fun IntifaceConnectionCard(
                     }
                 }
             }
+            
+            val statusRes = when {
+                state.errorMessage != null && state.errorMessage.message == IntifaceMessage.SavedDeviceNotFound -> R.string.intiface_status_saved_device_not_found
+                state.isScanning -> R.string.intiface_status_connecting
+                state.isConnected && state.selectedDevice != null -> R.string.intiface_status_connected
+                else -> R.string.intiface_status_disconnected
+            }
+            
+            Text(
+                text = localizedString(settings.language, statusRes),
+                color = if (state.isConnected && state.selectedDevice != null) colorScheme.primary else colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.Medium
+            )
+
+            state.statusMessage?.let { status ->
+                Text(
+                    text = localizedIntifaceMessage(settings.language, status),
+                    color = colorScheme.onSurfaceVariant
+                )
+            }
+            state.errorMessage?.let { error ->
+                Text(
+                    text = localizedIntifaceMessage(settings.language, error),
+                    color = colorScheme.error
+                )
+            }
+            val displayedDeviceName = state.selectedDevice?.displayName ?: settings.intifaceSelectedDeviceDisplayName.takeIf { it.isNotBlank() } ?: settings.intifaceSelectedDeviceName
+            if (displayedDeviceName.isNotBlank()) {
+                Text(
+                    text = localizedFormatString(
+                        settings.language,
+                        R.string.intiface_selected_device,
+                        displayedDeviceName
+                    ),
+                    color = colorScheme.primary,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            
             Button(
                 onClick = onTestVibration,
                 enabled = enabled &&
@@ -824,29 +886,6 @@ private fun IntifaceConnectionCard(
                             R.string.intiface_test_vibration
                         }
                     )
-                )
-            }
-            state.statusMessage?.let { status ->
-                Text(
-                    text = localizedIntifaceMessage(settings.language, status),
-                    color = colorScheme.onSurfaceVariant
-                )
-            }
-            state.errorMessage?.let { error ->
-                Text(
-                    text = localizedIntifaceMessage(settings.language, error),
-                    color = colorScheme.error
-                )
-            }
-            state.selectedDevice?.let { device ->
-                Text(
-                    text = localizedFormatString(
-                        settings.language,
-                        R.string.intiface_selected_device,
-                        device.displayName
-                    ),
-                    color = colorScheme.primary,
-                    fontWeight = FontWeight.Medium
                 )
             }
         }

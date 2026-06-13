@@ -22,6 +22,12 @@ data class IntifaceDeviceInfo(
     val vibrateCount: Long
 )
 
+data class IntifaceRememberedDevice(
+    val name: String,
+    val displayName: String,
+    val index: Long?
+)
+
 enum class IntifaceMessage {
     OnlineOnly,
     Connecting,
@@ -40,11 +46,11 @@ enum class IntifaceMessage {
     SelectDeviceFirst,
     SelectedDeviceMissing,
     NoVibrateCapability,
-    TestVibrationFailed,
     TestVibrationFailedDetail,
     ScanRejected,
     CommandRejected,
-    CommandRejectedDetail
+    CommandRejectedDetail,
+    SavedDeviceNotFound
 }
 
 data class IntifaceUiMessage(
@@ -67,6 +73,7 @@ interface IntifaceController {
     val state: StateFlow<IntifaceUiState>
 
     suspend fun searchDevices(url: String)
+    suspend fun connectToRememberedDevice(url: String, rememberedDevice: IntifaceRememberedDevice)
     suspend fun testVibration()
     suspend fun setVibrationStrength(strength: Double)
     suspend fun stopVibration()

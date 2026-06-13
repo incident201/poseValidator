@@ -192,6 +192,7 @@
     <string name="intiface_description_offline">Доступно только в online-сборке.</string>
     <string name="intiface_websocket_url">WebSocket URL</string>
     <string name="intiface_search_devices">Найти устройства</string>
+    <string name="intiface_change_device">Сменить устройство</string>
     <string name="intiface_searching">Поиск…</string>
     <string name="intiface_disconnect">Отключиться</string>
     <string name="intiface_select_device_title">Выберите устройство Intiface</string>
@@ -239,6 +240,18 @@
     <string name="intiface_pulse_length_seconds">Длина импульса, секунд</string>
     <string name="intiface_pulse_pause_seconds">Пауза, секунд</string>
     <string name="intiface_pause_duration_seconds">Длительность паузы, секунд</string>
+
+    <string name="intiface_overlay_online_required">Intiface: нужна online-сборка</string>
+    <string name="intiface_overlay_disabled">Intiface: выключен</string>
+    <string name="intiface_overlay_connecting">Intiface: подключение…</string>
+    <string name="intiface_overlay_connected">Intiface: подключено — %1$s</string>
+    <string name="intiface_overlay_device_not_selected">Intiface: устройство не выбрано</string>
+    <string name="intiface_overlay_reconnecting">Intiface: переподключение — %1$s</string>
+    <string name="intiface_status_connected">Подключено</string>
+    <string name="intiface_status_connecting">Подключение…</string>
+    <string name="intiface_status_disconnected">Отключено</string>
+    <string name="intiface_status_saved_device_not_found">Сохранённое устройство не найдено</string>
+    <string name="intiface_saved_device_not_found">Сохранённое устройство не найдено</string>
     <string name="intiface_connection_disabled_hint">Включите подключение Intiface Central для соединения с устройством.</string>
     <string name="intiface_rules_disabled_until_enabled">Подключение и правила сессии недоступны, пока Intiface Central выключен.</string>
 </resources>

@@ -39,6 +39,7 @@ internal class OnlineIntifaceController : IntifaceController {
     private val vibrationCommandMutex = Mutex()
     private val operationGeneration = AtomicLong(0L)
     private var client: ButtplugClientWSClient? = null
+    private var connectedUri: URI? = null
 
     override suspend fun searchDevices(url: String) = withContext(Dispatchers.IO) {
         searchDevicesMutex.withLock {
@@ -46,16 +47,28 @@ internal class OnlineIntifaceController : IntifaceController {
         }
     }
 
-    private suspend fun runSearchDevicesLocked(url: String) {
-        val generation = operationGeneration.incrementAndGet()
-        disconnectCurrentClient()
+    override suspend fun connectToRememberedDevice(url: String, rememberedDevice: IntifaceRememberedDevice) = withContext(Dispatchers.IO) {
+        searchDevicesMutex.withLock {
+            runConnectToRememberedLocked(url, rememberedDevice)
+        }
+    }
+
+    private suspend fun ensureClientConnected(url: String): Pair<ButtplugClientWSClient, Long>? {
         val uri = parseWebSocketUri(url) ?: run {
             mutableState.value = IntifaceUiState(
                 isSupported = true,
                 errorMessage = IntifaceUiMessage(IntifaceMessage.InvalidUrl)
             )
-            return
+            return null
         }
+
+        val currentClient = synchronized(clientLock) { client }
+        if (currentClient != null && currentClient.isConnected() && connectedUri == uri) {
+            return Pair(currentClient, operationGeneration.get())
+        }
+
+        val generation = operationGeneration.incrementAndGet()
+        disconnectCurrentClient()
 
         mutableState.value = IntifaceUiState(
             isSupported = true,
@@ -66,13 +79,44 @@ internal class OnlineIntifaceController : IntifaceController {
         val newClient = ButtplugClientWSClient("Pose Guard")
         synchronized(clientLock) {
             client = newClient
+            connectedUri = uri
         }
         registerCallbacks(newClient, generation)
 
         try {
             newClient.connect(uri)
-            if (!isCurrent(newClient, generation)) return
+            if (!isCurrent(newClient, generation)) return null
+            return Pair(newClient, generation)
+        } catch (error: Throwable) {
+            val clientToDisconnect = synchronized(clientLock) {
+                if (operationGeneration.get() == generation && client === newClient) {
+                    connectedUri = null
+                    client.also { client = null }
+                } else {
+                    null
+                }
+            }
+            if (clientToDisconnect != null) {
+                disconnectClient(clientToDisconnect)
+                mutableState.value = mutableState.value.copy(
+                    isConnected = false,
+                    isScanning = false,
+                    devices = emptyList(),
+                    selectedDevice = null,
+                    statusMessage = null,
+                    errorMessage = error.toConnectionErrorMessage()
+                )
+            }
+            return null
+        }
+    }
 
+    private suspend fun runSearchDevicesLocked(url: String) {
+        val pair = ensureClientConnected(url) ?: return
+        val newClient = pair.first
+        val generation = pair.second
+
+        try {
             mutableState.value = mutableState.value.copy(
                 isConnected = true,
                 isScanning = true,
@@ -121,6 +165,91 @@ internal class OnlineIntifaceController : IntifaceController {
         } catch (error: Throwable) {
             val clientToDisconnect = synchronized(clientLock) {
                 if (operationGeneration.get() == generation && client === newClient) {
+                    connectedUri = null
+                    client.also { client = null }
+                } else {
+                    null
+                }
+            }
+            if (clientToDisconnect != null) {
+                disconnectClient(clientToDisconnect)
+                mutableState.value = mutableState.value.copy(
+                    isConnected = false,
+                    isScanning = false,
+                    devices = emptyList(),
+                    selectedDevice = null,
+                    statusMessage = null,
+                    errorMessage = error.toConnectionErrorMessage()
+                )
+            }
+        }
+    }
+
+    private suspend fun runConnectToRememberedLocked(url: String, rememberedDevice: IntifaceRememberedDevice) {
+        val pair = ensureClientConnected(url) ?: return
+        val newClient = pair.first
+        val generation = pair.second
+
+        try {
+            mutableState.value = mutableState.value.copy(
+                isConnected = true,
+                isScanning = true,
+                statusMessage = IntifaceUiMessage(IntifaceMessage.Connecting),
+                errorMessage = null
+            )
+            val scanStarted = newClient.startScanning()
+            if (!scanStarted) {
+                if (isCurrent(newClient, generation)) {
+                    mutableState.value = mutableState.value.copy(
+                        isScanning = false,
+                        statusMessage = null,
+                        errorMessage = IntifaceUiMessage(IntifaceMessage.ScanRejected)
+                    )
+                }
+                return
+            }
+            delay(SCAN_DURATION_MS)
+            if (!isCurrent(newClient, generation)) return
+
+            runCatching { newClient.stopScanning() }
+            newClient.requestDeviceList()
+            val devices = newClient.getDevices()
+                .filter { it.getScalarVibrateCount() > 0L }
+                .map { it.toDeviceInfo() }
+                .sortedBy { it.displayName.lowercase() }
+            if (!isCurrent(newClient, generation)) return
+
+            val matchedDevice = devices.firstOrNull { it.name == rememberedDevice.name }
+                ?: devices.firstOrNull { it.displayName == rememberedDevice.displayName }
+                ?: devices.firstOrNull { it.index == rememberedDevice.index }
+
+            if (matchedDevice != null) {
+                mutableState.value = mutableState.value.copy(
+                    isConnected = newClient.isConnected(),
+                    isScanning = false,
+                    devices = devices,
+                    selectedDevice = matchedDevice,
+                    statusMessage = IntifaceUiMessage(
+                        IntifaceMessage.SelectedDevice,
+                        listOf(matchedDevice.displayName)
+                    )
+                )
+            } else {
+                mutableState.value = mutableState.value.copy(
+                    isConnected = newClient.isConnected(),
+                    isScanning = false,
+                    devices = devices,
+                    selectedDevice = null,
+                    statusMessage = null,
+                    errorMessage = IntifaceUiMessage(IntifaceMessage.SavedDeviceNotFound)
+                )
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            val clientToDisconnect = synchronized(clientLock) {
+                if (operationGeneration.get() == generation && client === newClient) {
+                    connectedUri = null
                     client.also { client = null }
                 } else {
                     null
@@ -387,6 +516,7 @@ internal class OnlineIntifaceController : IntifaceController {
         newClient.setErrorReceived {
             val clientToDisconnect = synchronized(clientLock) {
                 if (operationGeneration.get() == generation && client === newClient) {
+                    connectedUri = null
                     client.also { client = null }
                 } else {
                     null
@@ -433,6 +563,7 @@ internal class OnlineIntifaceController : IntifaceController {
 
     private fun takeCurrentClient(): ButtplugClientWSClient? =
         synchronized(clientLock) {
+            connectedUri = null
             client.also { client = null }
         }
 
