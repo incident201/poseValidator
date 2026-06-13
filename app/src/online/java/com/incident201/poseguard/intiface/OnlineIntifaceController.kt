@@ -19,12 +19,17 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.net.URI
-import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicLong
 
 internal class OnlineIntifaceController : IntifaceController {
+    private sealed class CommandAttempt {
+        object Skipped : CommandAttempt()
+        object Success : CommandAttempt()
+        data class Failure(val error: Throwable) : CommandAttempt()
+    }
+
     private val mutableState = MutableStateFlow(IntifaceUiState(isSupported = true))
     override val state: StateFlow<IntifaceUiState> = mutableState.asStateFlow()
 
@@ -192,13 +197,18 @@ internal class OnlineIntifaceController : IntifaceController {
             return
         }
         if (stopDevice) {
-            val zeroError = runCurrentCommand(activeClient, generation) {
-                device.sendScalarVibrateCmd(0.0)
+            val zeroResult = runScalarVibrateIfCurrent(activeClient, generation, device, 0.0)
+            val stopResult = runStopDeviceIfCurrent(activeClient, generation, device)
+
+            val error = listOf(zeroResult, stopResult)
+                .filterIsInstance<CommandAttempt.Failure>()
+                .firstOrNull()
+                ?.error
+
+            if (zeroResult is CommandAttempt.Skipped && stopResult is CommandAttempt.Skipped) {
+                return
             }
-            val stopError = runCurrentCommand(activeClient, generation) {
-                device.sendStopDeviceCmd()
-            }
-            val error = zeroError ?: stopError
+
             updateIfCurrent {
                 if (error != null) {
                     it.copy(errorMessage = error.toSessionVibrationErrorMessage())
@@ -209,17 +219,11 @@ internal class OnlineIntifaceController : IntifaceController {
             return
         }
 
-        val future = currentCommandFutureOrNull(activeClient, generation) {
-            device.sendScalarVibrateCmd(strength)
-        } ?: return
-
-        runCatching {
-            requireOk(awaitResponse(future))
-        }.onSuccess {
-            updateIfCurrent { it.copy(errorMessage = null) }
-        }.onFailure { error ->
-            updateIfCurrent {
-                it.copy(errorMessage = error.toSessionVibrationErrorMessage())
+        when (val result = runScalarVibrateIfCurrent(activeClient, generation, device, strength)) {
+            CommandAttempt.Skipped -> return
+            CommandAttempt.Success -> updateIfCurrent { it.copy(errorMessage = null) }
+            is CommandAttempt.Failure -> updateIfCurrent {
+                it.copy(errorMessage = result.error.toSessionVibrationErrorMessage())
             }
         }
     }
@@ -272,16 +276,23 @@ internal class OnlineIntifaceController : IntifaceController {
                 errorMessage = null
             )
             repeat(TEST_PULSE_COUNT) { pulseIndex ->
-                val pulseFuture = currentCommandFutureOrNull(activeClient, generation) {
-                    device.sendScalarVibrateCmd(TEST_VIBRATION_STRENGTH)
-                } ?: return
-                requireOk(awaitResponse(pulseFuture))
+                when (val result = runScalarVibrateIfCurrent(
+                    activeClient,
+                    generation,
+                    device,
+                    TEST_VIBRATION_STRENGTH
+                )) {
+                    CommandAttempt.Skipped -> return
+                    CommandAttempt.Success -> Unit
+                    is CommandAttempt.Failure -> throw result.error
+                }
                 delay(TEST_PULSE_DURATION_MS)
                 
-                val zeroFuture = currentCommandFutureOrNull(activeClient, generation) {
-                    device.sendScalarVibrateCmd(0.0)
-                } ?: return
-                requireOk(awaitResponse(zeroFuture))
+                when (val result = runScalarVibrateIfCurrent(activeClient, generation, device, 0.0)) {
+                    CommandAttempt.Skipped -> return
+                    CommandAttempt.Success -> Unit
+                    is CommandAttempt.Failure -> throw result.error
+                }
                 
                 if (pulseIndex < TEST_PULSE_COUNT - 1) {
                     delay(TEST_PULSE_PAUSE_MS)
@@ -303,16 +314,8 @@ internal class OnlineIntifaceController : IntifaceController {
             }
         } finally {
             deviceToStop?.let { selectedDevice ->
-                currentCommandFutureOrNull(activeClient, generation) {
-                    selectedDevice.sendScalarVibrateCmd(0.0)
-                }?.let { future ->
-                    runCatching { requireOk(awaitResponse(future)) }
-                }
-                currentCommandFutureOrNull(activeClient, generation) {
-                    selectedDevice.sendStopDeviceCmd()
-                }?.let { future ->
-                    runCatching { requireOk(awaitResponse(future)) }
-                }
+                runScalarVibrateIfCurrent(activeClient, generation, selectedDevice, 0.0)
+                runStopDeviceIfCurrent(activeClient, generation, selectedDevice)
             }
             if (isCurrent(activeClient, generation)) {
                 mutableState.value = mutableState.value.copy(isTestingVibration = false)
@@ -435,25 +438,47 @@ internal class OnlineIntifaceController : IntifaceController {
     private fun isCurrent(candidate: ButtplugClientWSClient, generation: Long): Boolean =
         operationGeneration.get() == generation && synchronized(clientLock) { client === candidate }
 
-    private fun currentCommandFutureOrNull(
+    private fun runScalarVibrateIfCurrent(
         sourceClient: ButtplugClientWSClient,
         generation: Long,
-        create: () -> Future<out ButtplugMessage>
-    ): Future<out ButtplugMessage>? = synchronized(clientLock) {
-        if (operationGeneration.get() == generation && client === sourceClient) {
-            create()
-        } else {
-            null
-        }
+        device: ButtplugClientDevice,
+        strength: Double
+    ): CommandAttempt {
+        val future = synchronized(clientLock) {
+            if (operationGeneration.get() == generation && client === sourceClient) {
+                device.sendScalarVibrateCmd(strength)
+            } else {
+                null
+            }
+        } ?: return CommandAttempt.Skipped
+
+        return runCatching {
+            requireOk(awaitResponse(future))
+        }.fold(
+            onSuccess = { CommandAttempt.Success },
+            onFailure = { CommandAttempt.Failure(it) }
+        )
     }
 
-    private fun runCurrentCommand(
+    private fun runStopDeviceIfCurrent(
         sourceClient: ButtplugClientWSClient,
         generation: Long,
-        create: () -> Future<out ButtplugMessage>
-    ): Throwable? {
-        val future = currentCommandFutureOrNull(sourceClient, generation, create) ?: return null
-        return runCatching { requireOk(awaitResponse(future)) }.exceptionOrNull()
+        device: ButtplugClientDevice
+    ): CommandAttempt {
+        val future = synchronized(clientLock) {
+            if (operationGeneration.get() == generation && client === sourceClient) {
+                device.sendStopDeviceCmd()
+            } else {
+                null
+            }
+        } ?: return CommandAttempt.Skipped
+
+        return runCatching {
+            requireOk(awaitResponse(future))
+        }.fold(
+            onSuccess = { CommandAttempt.Success },
+            onFailure = { CommandAttempt.Failure(it) }
+        )
     }
 
     private fun parseWebSocketUri(value: String): URI? = runCatching {
@@ -493,7 +518,7 @@ internal class OnlineIntifaceController : IntifaceController {
         }
     }
 
-    private fun awaitResponse(future: Future<out ButtplugMessage>): ButtplugMessage {
+    private fun awaitResponse(future: java.util.concurrent.Future<out ButtplugMessage>): ButtplugMessage {
         return try {
             future.get(COMMAND_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         } catch (timeout: TimeoutException) {
