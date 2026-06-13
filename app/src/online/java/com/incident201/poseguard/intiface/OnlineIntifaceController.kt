@@ -190,16 +190,20 @@ internal class OnlineIntifaceController : IntifaceController {
                 requireOk(awaitResponse(device.sendStopDeviceCmd()))
             }.exceptionOrNull()
             val error = zeroError ?: stopError
-            if (error != null) {
-                mutableState.value = mutableState.value.copy(
+            mutableState.value = if (error != null) {
+                mutableState.value.copy(
                     errorMessage = error.toSessionVibrationErrorMessage()
                 )
+            } else {
+                mutableState.value.copy(errorMessage = null)
             }
             return
         }
 
         runCatching {
             requireOk(awaitResponse(device.sendScalarVibrateCmd(strength)))
+        }.onSuccess {
+            mutableState.value = mutableState.value.copy(errorMessage = null)
         }.onFailure { error ->
             mutableState.value = mutableState.value.copy(
                 errorMessage = error.toSessionVibrationErrorMessage()
