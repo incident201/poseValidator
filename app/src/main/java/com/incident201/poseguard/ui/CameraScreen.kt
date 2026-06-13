@@ -870,7 +870,10 @@ fun CameraScreen(
                 )
             }
 
-            if (!showFinalScreen && intifaceState.isSupported) {
+            val showIntifaceOverlay = !showFinalScreen && intifaceState.isSupported &&
+                (gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success)
+
+            if (showIntifaceOverlay) {
                 IntifacePreviewStatusOverlay(
                     state = intifaceState,
                     language = gameSettings.language,

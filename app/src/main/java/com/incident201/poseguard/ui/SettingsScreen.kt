@@ -712,9 +712,11 @@ private fun IntifaceConnectionCard(
     var openDialogAfterManualSearch by remember { mutableStateOf(false) }
 
     LaunchedEffect(openDialogAfterManualSearch, state.isScanning, state.devices) {
-        if (openDialogAfterManualSearch && !state.isScanning && state.devices.isNotEmpty()) {
-            showDeviceDialog = true
+        if (openDialogAfterManualSearch && !state.isScanning) {
             openDialogAfterManualSearch = false
+            if (state.devices.isNotEmpty()) {
+                showDeviceDialog = true
+            }
         }
     }
 

@@ -47,14 +47,14 @@ jobs:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
 
       - name: Run Offline Unit Tests
-        run: gradle :app:testOfflineDebugUnitTest --no-daemon --stacktrace --info
+        run: gradle :app:testOfflineDebugUnitTest --no-daemon --stacktrace
 
       - name: Run Online Unit Tests
-        run: gradle :app:testOnlineDebugUnitTest --no-daemon --stacktrace --info
+        run: gradle :app:testOnlineDebugUnitTest --no-daemon --stacktrace
 
       - name: Build Offline Release APK
         run: |
-          gradle :app:assembleOfflineRelease --no-daemon --stacktrace --info \
+          gradle :app:assembleOfflineRelease --no-daemon --stacktrace \
             -PVERSION_NAME="${{ inputs.version_name }}" \
             -PVERSION_CODE="${{ inputs.version_code }}"
         env:
@@ -64,7 +64,7 @@ jobs:
 
       - name: Build Online Release APK
         run: |
-          gradle :app:assembleOnlineRelease --no-daemon --stacktrace --info \
+          gradle :app:assembleOnlineRelease --no-daemon --stacktrace \
             -PVERSION_NAME="${{ inputs.version_name }}" \
             -PVERSION_CODE="${{ inputs.version_code }}"
         env:

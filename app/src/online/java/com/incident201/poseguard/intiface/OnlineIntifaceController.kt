@@ -62,9 +62,16 @@ internal class OnlineIntifaceController : IntifaceController {
             return null
         }
 
-        val currentClient = synchronized(clientLock) { client }
-        if (currentClient != null && currentClient.isConnected() && connectedUri == uri) {
-            return Pair(currentClient, operationGeneration.get())
+        val existingSession = synchronized(clientLock) {
+            val c = client
+            if (c != null && c.isConnected() && connectedUri == uri) {
+                Pair(c, operationGeneration.get())
+            } else {
+                null
+            }
+        }
+        if (existingSession != null) {
+            return existingSession
         }
 
         val generation = operationGeneration.incrementAndGet()

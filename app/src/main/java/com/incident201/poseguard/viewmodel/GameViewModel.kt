@@ -918,6 +918,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             intifaceSelectedDeviceIndex = device.index
         )
         intifaceController.selectDevice(device)
+        restartIntifaceBackgroundIfNeeded()
     }
 
     private fun autoConnectIntifaceIfRemembered() {
@@ -932,6 +933,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         )
         viewModelScope.launch {
             intifaceController.connectToRememberedDevice(settings.intifaceWebSocketUrl, rememberedDevice)
+            restartIntifaceBackgroundIfNeeded()
         }
     }
 
