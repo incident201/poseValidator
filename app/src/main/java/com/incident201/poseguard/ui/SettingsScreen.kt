@@ -732,7 +732,7 @@ private fun IntifaceConnectionCard(
             ManualIntifaceSearchDialogState.WaitingForScanFinish -> {
                 if (!state.isScanning) {
                     manualSearchDialogState = ManualIntifaceSearchDialogState.Idle
-                    if (state.devices.isNotEmpty()) {
+                    if (state.errorMessage == null && state.devices.isNotEmpty()) {
                         showDeviceDialog = true
                     }
                 }
