@@ -72,7 +72,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.incident201.poseguard.audio.AudioCuePlaybackSettings
 import com.incident201.poseguard.audio.AudioCuePlayer
-import com.incident201.poseguard.intiface.createIntifaceController
 import com.incident201.poseguard.tracker.Point3D
 import com.incident201.poseguard.tracker.PoseLandmarkerService
 import com.incident201.poseguard.viewmodel.AppLanguage
@@ -233,23 +232,18 @@ fun CameraScreen(
         return
     }
 
-    val intifaceController = remember(context) {
-        createIntifaceController(context.applicationContext)
-    }
-    val intifaceState by intifaceController.state.collectAsState()
-    // Intiface is currently scoped to the foreground settings/test UI.
-    // Future session-scoped/background support should move this controller out of CameraScreen.
-    DisposableEffect(lifecycleOwner, intifaceController) {
+    val intifaceState by viewModel.intifaceState.collectAsState()
+    DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
-                intifaceController.disconnect()
+                viewModel.disconnectIntiface()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
 
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            intifaceController.disconnect()
+            viewModel.disconnectIntiface()
         }
     }
 
@@ -681,15 +675,17 @@ fun CameraScreen(
             onTtsPhraseTemplateChanged = viewModel::updateTtsPhraseTemplate,
             onAudioCueSettingsChanged = viewModel::updateAudioCueSettings,
             intifaceState = intifaceState,
+            onIntifaceConnectionEnabledChanged = viewModel::updateIntifaceConnectionEnabled,
+            onIntifaceBackgroundModeChanged = viewModel::updateIntifaceBackgroundMode,
+            onIntifaceBackgroundVibrationChanged = viewModel::updateIntifaceBackgroundVibration,
+            onIntifaceViolationModeChanged = viewModel::updateIntifaceViolationMode,
+            onIntifaceViolationVibrationChanged = viewModel::updateIntifaceViolationVibration,
+            onIntifaceViolationPauseSecondsChanged = viewModel::updateIntifaceViolationPauseSeconds,
             onIntifaceWebSocketUrlChanged = viewModel::updateIntifaceWebSocketUrl,
-            onIntifaceSearchDevices = { url ->
-                coroutineScope.launch { intifaceController.searchDevices(url) }
-            },
-            onIntifaceDeviceSelected = intifaceController::selectDevice,
-            onIntifaceTestVibration = {
-                coroutineScope.launch { intifaceController.testVibration() }
-            },
-            onIntifaceDisconnect = intifaceController::disconnect,
+            onIntifaceSearchDevices = viewModel::searchIntifaceDevices,
+            onIntifaceDeviceSelected = viewModel::selectIntifaceDevice,
+            onIntifaceTestVibration = viewModel::testIntifaceVibration,
+            onIntifaceDisconnect = viewModel::disconnectIntiface,
             onShowInstructions = {
                 showSettings = false
                 showOnboarding = true

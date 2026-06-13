@@ -19,6 +19,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.net.URI
+import java.util.concurrent.Future
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicLong
 
 internal class OnlineIntifaceController : IntifaceController {
@@ -28,7 +31,7 @@ internal class OnlineIntifaceController : IntifaceController {
     private val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val clientLock = Any()
     private val searchDevicesMutex = Mutex()
-    private val vibrationTestMutex = Mutex()
+    private val vibrationCommandMutex = Mutex()
     private val operationGeneration = AtomicLong(0L)
     private var client: ButtplugClientWSClient? = null
 
@@ -91,6 +94,7 @@ internal class OnlineIntifaceController : IntifaceController {
                 .filter { it.getScalarVibrateCount() > 0L }
                 .map { it.toDeviceInfo() }
                 .sortedBy { it.displayName.lowercase() }
+            if (!isCurrent(newClient, generation)) return
 
             mutableState.value = mutableState.value.copy(
                 isConnected = newClient.isConnected(),
@@ -128,12 +132,95 @@ internal class OnlineIntifaceController : IntifaceController {
     }
 
     override suspend fun testVibration() = withContext(Dispatchers.IO) {
-        if (!vibrationTestMutex.tryLock()) return@withContext
+        if (!vibrationCommandMutex.tryLock()) return@withContext
 
         try {
             runVibrationTestLocked()
         } finally {
-            vibrationTestMutex.unlock()
+            vibrationCommandMutex.unlock()
+        }
+    }
+
+    override suspend fun setVibrationStrength(strength: Double) = withContext(Dispatchers.IO) {
+        vibrationCommandMutex.withLock {
+            runSessionVibrationCommand(strength.coerceIn(0.0, 1.0), stopDevice = false)
+        }
+    }
+
+    override suspend fun stopVibration() = withContext(Dispatchers.IO) {
+        vibrationCommandMutex.withLock {
+            runSessionVibrationCommand(0.0, stopDevice = true)
+        }
+    }
+
+    private fun runSessionVibrationCommand(strength: Double, stopDevice: Boolean) {
+        val activeClient = synchronized(clientLock) { client }
+        if (activeClient == null || !activeClient.isConnected()) {
+            return
+        }
+        val generation = operationGeneration.get()
+        fun updateIfCurrent(update: (IntifaceUiState) -> IntifaceUiState) {
+            if (isCurrent(activeClient, generation)) {
+                mutableState.value = update(mutableState.value)
+            }
+        }
+        if (!isCurrent(activeClient, generation)) return
+
+        val selected = mutableState.value.selectedDevice
+        if (selected == null) {
+            updateIfCurrent {
+                it.copy(
+                    errorMessage = IntifaceUiMessage(IntifaceMessage.SelectedDeviceMissing)
+                )
+            }
+            return
+        }
+        val device = activeClient.getDevices().firstOrNull { it.getDeviceIndex() == selected.index }
+        if (device == null) {
+            updateIfCurrent {
+                it.copy(
+                    selectedDevice = null,
+                    errorMessage = IntifaceUiMessage(IntifaceMessage.SelectedDeviceMissing)
+                )
+            }
+            return
+        }
+        if (device.getScalarVibrateCount() <= 0L) {
+            updateIfCurrent {
+                it.copy(errorMessage = IntifaceUiMessage(IntifaceMessage.NoVibrateCapability))
+            }
+            return
+        }
+        if (stopDevice) {
+            val zeroError = runCurrentCommand(activeClient, generation) {
+                device.sendScalarVibrateCmd(0.0)
+            }
+            val stopError = runCurrentCommand(activeClient, generation) {
+                device.sendStopDeviceCmd()
+            }
+            val error = zeroError ?: stopError
+            updateIfCurrent {
+                if (error != null) {
+                    it.copy(errorMessage = error.toSessionVibrationErrorMessage())
+                } else {
+                    it.copy(errorMessage = null)
+                }
+            }
+            return
+        }
+
+        val future = currentCommandFutureOrNull(activeClient, generation) {
+            device.sendScalarVibrateCmd(strength)
+        } ?: return
+
+        runCatching {
+            requireOk(awaitResponse(future))
+        }.onSuccess {
+            updateIfCurrent { it.copy(errorMessage = null) }
+        }.onFailure { error ->
+            updateIfCurrent {
+                it.copy(errorMessage = error.toSessionVibrationErrorMessage())
+            }
         }
     }
 
@@ -156,9 +243,11 @@ internal class OnlineIntifaceController : IntifaceController {
             )
             return
         }
+        val generation = operationGeneration.get()
 
         var deviceToStop: ButtplugClientDevice? = null
         try {
+            if (!isCurrent(activeClient, generation)) return
             val device = activeClient.getDevices()
                 .firstOrNull { it.getDeviceIndex() == selected.index }
             if (device == null) {
@@ -183,29 +272,51 @@ internal class OnlineIntifaceController : IntifaceController {
                 errorMessage = null
             )
             repeat(TEST_PULSE_COUNT) { pulseIndex ->
-                requireOk(device.sendScalarVibrateCmd(TEST_VIBRATION_STRENGTH).get())
+                val pulseFuture = currentCommandFutureOrNull(activeClient, generation) {
+                    device.sendScalarVibrateCmd(TEST_VIBRATION_STRENGTH)
+                } ?: return
+                requireOk(awaitResponse(pulseFuture))
                 delay(TEST_PULSE_DURATION_MS)
-                requireOk(device.sendScalarVibrateCmd(0.0).get())
+                
+                val zeroFuture = currentCommandFutureOrNull(activeClient, generation) {
+                    device.sendScalarVibrateCmd(0.0)
+                } ?: return
+                requireOk(awaitResponse(zeroFuture))
+                
                 if (pulseIndex < TEST_PULSE_COUNT - 1) {
                     delay(TEST_PULSE_PAUSE_MS)
                 }
             }
-            mutableState.value = mutableState.value.copy(
-                statusMessage = IntifaceUiMessage(IntifaceMessage.TestVibrationDone)
-            )
+            if (isCurrent(activeClient, generation)) {
+                mutableState.value = mutableState.value.copy(
+                    statusMessage = IntifaceUiMessage(IntifaceMessage.TestVibrationDone)
+                )
+            }
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (error: Throwable) {
-            mutableState.value = mutableState.value.copy(
-                statusMessage = null,
-                errorMessage = error.toVibrationErrorMessage()
-            )
+            if (isCurrent(activeClient, generation)) {
+                mutableState.value = mutableState.value.copy(
+                    statusMessage = null,
+                    errorMessage = error.toVibrationErrorMessage()
+                )
+            }
         } finally {
             deviceToStop?.let { selectedDevice ->
-                runCatching { requireOk(selectedDevice.sendScalarVibrateCmd(0.0).get()) }
-                runCatching { requireOk(selectedDevice.sendStopDeviceCmd().get()) }
+                currentCommandFutureOrNull(activeClient, generation) {
+                    selectedDevice.sendScalarVibrateCmd(0.0)
+                }?.let { future ->
+                    runCatching { requireOk(awaitResponse(future)) }
+                }
+                currentCommandFutureOrNull(activeClient, generation) {
+                    selectedDevice.sendStopDeviceCmd()
+                }?.let { future ->
+                    runCatching { requireOk(awaitResponse(future)) }
+                }
             }
-            mutableState.value = mutableState.value.copy(isTestingVibration = false)
+            if (isCurrent(activeClient, generation)) {
+                mutableState.value = mutableState.value.copy(isTestingVibration = false)
+            }
         }
     }
 
@@ -245,12 +356,12 @@ internal class OnlineIntifaceController : IntifaceController {
         newClient.setDeviceAdded(object : IDeviceEvent {
             override fun deviceAdded(device: ButtplugClientDevice) {
                 if (!isCurrent(newClient, generation) || mutableState.value.isScanning) return
-                runCatching { refreshDevices(newClient) }
+                runCatching { refreshDevices(newClient, generation) }
             }
 
             override fun deviceRemoved(deviceIndex: Long) {
                 if (!isCurrent(newClient, generation) || mutableState.value.isScanning) return
-                runCatching { refreshDevices(newClient) }
+                runCatching { refreshDevices(newClient, generation) }
             }
         })
         newClient.setDeviceRemoved(object : IDeviceEvent {
@@ -258,7 +369,7 @@ internal class OnlineIntifaceController : IntifaceController {
 
             override fun deviceRemoved(deviceIndex: Long) {
                 if (!isCurrent(newClient, generation) || mutableState.value.isScanning) return
-                runCatching { refreshDevices(newClient) }
+                runCatching { refreshDevices(newClient, generation) }
             }
         })
         newClient.setScanningFinished {
@@ -294,13 +405,15 @@ internal class OnlineIntifaceController : IntifaceController {
         }
     }
 
-    private fun refreshDevices(sourceClient: ButtplugClientWSClient) {
+    private fun refreshDevices(sourceClient: ButtplugClientWSClient, generation: Long) {
         val devices = sourceClient.getDevices()
             .filter { it.getScalarVibrateCount() > 0L }
             .map { it.toDeviceInfo() }
             .sortedBy { it.displayName.lowercase() }
+        if (!isCurrent(sourceClient, generation)) return
         val selected = mutableState.value.selectedDevice
             ?.takeIf { selectedDevice -> devices.any { it.index == selectedDevice.index } }
+        if (!isCurrent(sourceClient, generation)) return
         mutableState.value = mutableState.value.copy(devices = devices, selectedDevice = selected)
     }
 
@@ -321,6 +434,27 @@ internal class OnlineIntifaceController : IntifaceController {
 
     private fun isCurrent(candidate: ButtplugClientWSClient, generation: Long): Boolean =
         operationGeneration.get() == generation && synchronized(clientLock) { client === candidate }
+
+    private fun currentCommandFutureOrNull(
+        sourceClient: ButtplugClientWSClient,
+        generation: Long,
+        create: () -> Future<out ButtplugMessage>
+    ): Future<out ButtplugMessage>? = synchronized(clientLock) {
+        if (operationGeneration.get() == generation && client === sourceClient) {
+            create()
+        } else {
+            null
+        }
+    }
+
+    private fun runCurrentCommand(
+        sourceClient: ButtplugClientWSClient,
+        generation: Long,
+        create: () -> Future<out ButtplugMessage>
+    ): Throwable? {
+        val future = currentCommandFutureOrNull(sourceClient, generation, create) ?: return null
+        return runCatching { requireOk(awaitResponse(future)) }.exceptionOrNull()
+    }
 
     private fun parseWebSocketUri(value: String): URI? = runCatching {
         URI(value.trim()).takeIf { uri ->
@@ -359,6 +493,15 @@ internal class OnlineIntifaceController : IntifaceController {
         }
     }
 
+    private fun awaitResponse(future: Future<out ButtplugMessage>): ButtplugMessage {
+        return try {
+            future.get(COMMAND_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        } catch (timeout: TimeoutException) {
+            future.cancel(true)
+            throw timeout
+        }
+    }
+
     private fun Throwable.toVibrationErrorMessage(): IntifaceUiMessage {
         val detail = message?.takeIf { it.isNotBlank() }
             ?: cause?.message?.takeIf { it.isNotBlank() }
@@ -376,12 +519,25 @@ internal class OnlineIntifaceController : IntifaceController {
         }
     }
 
+    private fun Throwable.toSessionVibrationErrorMessage(): IntifaceUiMessage {
+        val detail = message?.takeIf { it.isNotBlank() }
+            ?: cause?.message?.takeIf { it.isNotBlank() }
+        return if (this is ButtplugCommandRejectedException) {
+            if (detail == null) IntifaceUiMessage(IntifaceMessage.CommandRejected)
+            else IntifaceUiMessage(IntifaceMessage.CommandRejectedDetail, listOf(detail))
+        } else {
+            if (detail == null) IntifaceUiMessage(IntifaceMessage.UnableToConnect)
+            else IntifaceUiMessage(IntifaceMessage.UnableToConnectDetail, listOf(detail))
+        }
+    }
+
     private companion object {
         const val SCAN_DURATION_MS = 5_000L
         const val TEST_PULSE_COUNT = 3
         const val TEST_VIBRATION_STRENGTH = 0.6
         const val TEST_PULSE_DURATION_MS = 180L
         const val TEST_PULSE_PAUSE_MS = 180L
+        const val COMMAND_TIMEOUT_MS = 750L
         const val COMMAND_REJECTED_FALLBACK = "Command rejected"
         const val UNEXPECTED_RESPONSE_PREFIX = "Unexpected response: "
     }
