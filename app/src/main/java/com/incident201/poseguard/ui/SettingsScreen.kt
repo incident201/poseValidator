@@ -696,6 +696,12 @@ private fun <T> IntifaceModeCard(
     }
 }
 
+private enum class ManualIntifaceSearchDialogState {
+    Idle,
+    WaitingForScanStart,
+    WaitingForScanFinish
+}
+
 @Composable
 private fun IntifaceConnectionCard(
     settings: GameSettings,
@@ -709,13 +715,27 @@ private fun IntifaceConnectionCard(
     colorScheme: ColorScheme
 ) {
     var showDeviceDialog by remember { mutableStateOf(false) }
-    var openDialogAfterManualSearch by remember { mutableStateOf(false) }
+    var manualSearchDialogState by remember { mutableStateOf(ManualIntifaceSearchDialogState.Idle) }
 
-    LaunchedEffect(openDialogAfterManualSearch, state.isScanning, state.devices) {
-        if (openDialogAfterManualSearch && !state.isScanning) {
-            openDialogAfterManualSearch = false
-            if (state.devices.isNotEmpty()) {
-                showDeviceDialog = true
+    LaunchedEffect(manualSearchDialogState, state.isScanning, state.devices, state.errorMessage) {
+        when (manualSearchDialogState) {
+            ManualIntifaceSearchDialogState.Idle -> Unit
+        
+            ManualIntifaceSearchDialogState.WaitingForScanStart -> {
+                if (state.isScanning) {
+                    manualSearchDialogState = ManualIntifaceSearchDialogState.WaitingForScanFinish
+                } else if (state.errorMessage != null) {
+                    manualSearchDialogState = ManualIntifaceSearchDialogState.Idle
+                }
+            }
+        
+            ManualIntifaceSearchDialogState.WaitingForScanFinish -> {
+                if (!state.isScanning) {
+                    manualSearchDialogState = ManualIntifaceSearchDialogState.Idle
+                    if (state.devices.isNotEmpty()) {
+                        showDeviceDialog = true
+                    }
+                }
             }
         }
     }
@@ -760,7 +780,7 @@ private fun IntifaceConnectionCard(
                 val hasRememberedDevice = settings.intifaceSelectedDeviceName.isNotBlank() || settings.intifaceSelectedDeviceDisplayName.isNotBlank()
                 Button(
                     onClick = { 
-                        openDialogAfterManualSearch = true
+                        manualSearchDialogState = ManualIntifaceSearchDialogState.WaitingForScanStart
                         onSearchDevices(settings.intifaceWebSocketUrl) 
                     },
                     enabled = enabled &&

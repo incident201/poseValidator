@@ -299,11 +299,17 @@ internal class OnlineIntifaceController : IntifaceController {
     }
 
     private fun runSessionVibrationCommand(strength: Double, stopDevice: Boolean) {
-        val activeClient = synchronized(clientLock) { client }
-        if (activeClient == null || !activeClient.isConnected()) {
-            return
-        }
-        val generation = operationGeneration.get()
+        val session = synchronized(clientLock) {
+            val c = client
+            if (c != null && c.isConnected()) {
+                c to operationGeneration.get()
+            } else {
+                null
+            }
+        } ?: return
+
+        val activeClient = session.first
+        val generation = session.second
         fun updateIfCurrent(update: (IntifaceUiState) -> IntifaceUiState) {
             if (isCurrent(activeClient, generation)) {
                 mutableState.value = update(mutableState.value)
