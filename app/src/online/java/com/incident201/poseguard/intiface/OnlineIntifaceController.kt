@@ -119,16 +119,25 @@ internal class OnlineIntifaceController : IntifaceController {
     }
 
     private suspend fun runSearchDevicesLocked(url: String) {
-        val pair = ensureClientConnected(url) ?: return
+        mutableState.value = mutableState.value.copy(
+            isScanning = true,
+            statusMessage = IntifaceUiMessage(IntifaceMessage.Scanning),
+            errorMessage = null
+        )
+        val pair = ensureClientConnected(url)
+        if (pair == null) {
+            mutableState.value = mutableState.value.copy(
+                isScanning = false,
+                statusMessage = null
+            )
+            return
+        }
         val newClient = pair.first
         val generation = pair.second
 
         try {
             mutableState.value = mutableState.value.copy(
-                isConnected = true,
-                isScanning = true,
-                statusMessage = IntifaceUiMessage(IntifaceMessage.Scanning),
-                errorMessage = null
+                isConnected = true
             )
             val scanStarted = newClient.startScanning()
             if (!scanStarted) {

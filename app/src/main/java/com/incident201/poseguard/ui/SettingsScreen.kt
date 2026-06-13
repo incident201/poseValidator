@@ -724,8 +724,6 @@ private fun IntifaceConnectionCard(
             ManualIntifaceSearchDialogState.WaitingForScanStart -> {
                 if (state.isScanning) {
                     manualSearchDialogState = ManualIntifaceSearchDialogState.WaitingForScanFinish
-                } else if (state.errorMessage != null) {
-                    manualSearchDialogState = ManualIntifaceSearchDialogState.Idle
                 }
             }
         
