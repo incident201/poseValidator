@@ -499,7 +499,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         runCatching { enumValueOf<T>(prefs.getString(key, default.name) ?: default.name) }.getOrDefault(default)
 
     private fun getDoublePref(key: String, defaultValue: Double): Double =
-        if (prefs.contains(key)) Double.longBitsToDouble(prefs.getLong(key, 0L)) else defaultValue
+        if (prefs.contains(key)) java.lang.Double.longBitsToDouble(prefs.getLong(key, 0L)) else defaultValue
 
     private fun putDoublePref(key: String, value: Double) {
         prefs.edit().putLong(key, java.lang.Double.doubleToRawLongBits(value)).apply()
