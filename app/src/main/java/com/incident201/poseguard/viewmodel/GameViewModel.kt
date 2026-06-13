@@ -930,9 +930,21 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             intifaceController.disconnect()
             return
         }
+        if (!shouldRunIntifaceBestEffortStop()) {
+            return
+        }
         viewModelScope.launch {
             runCatching { intifaceController.stopVibration() }
         }
+    }
+
+    private fun shouldRunIntifaceBestEffortStop(): Boolean {
+        val state = intifaceController.state.value
+        val settings = _gameSettings.value
+        return state.isSupported &&
+            settings.intifaceConnectionEnabled &&
+            state.isConnected &&
+            state.selectedDevice != null
     }
 
     private fun nextIntifaceSignalGeneration(): Long =
@@ -948,9 +960,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             settings.intifaceBackgroundMode != IntifaceBackgroundMode.Vibration ||
             !isIntifaceRuntimeReady(settings)
         ) {
-            viewModelScope.launch {
-                if (intifaceSignalGeneration.get() == generation) {
-                    runCatching { intifaceController.stopVibration() }
+            if (shouldRunIntifaceBestEffortStop()) {
+                viewModelScope.launch {
+                    if (intifaceSignalGeneration.get() == generation) {
+                        runCatching { intifaceController.stopVibration() }
+                    }
                 }
             }
             return
@@ -972,9 +986,19 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     ) {
         val settings = _gameSettings.value
         if (settings.intifaceViolationMode == IntifaceViolationMode.Off ||
-            !isIntifaceRuntimeReady(settings) ||
-            (requireHoldingPose && _gameState.value != GameState.HoldingPose)
+            !isIntifaceRuntimeReady(settings)
         ) {
+            return
+        }
+        if (requireHoldingPose) {
+            synchronized(sessionTargetLock) {
+                if (_gameState.value != GameState.HoldingPose ||
+                    pendingTerminalResult != null
+                ) {
+                    return
+                }
+                startIntifaceOverrideJob(settings, resumeBackgroundAfter)
+            }
             return
         }
         startIntifaceOverrideJob(settings, resumeBackgroundAfter)
