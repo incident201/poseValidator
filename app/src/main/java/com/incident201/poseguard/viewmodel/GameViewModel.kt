@@ -926,9 +926,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         intifaceBackgroundJob = null
         intifaceOverrideJob?.cancel()
         intifaceOverrideJob = null
+        if (disconnect) {
+            intifaceController.disconnect()
+            return
+        }
         viewModelScope.launch {
             runCatching { intifaceController.stopVibration() }
-            if (disconnect) intifaceController.disconnect()
         }
     }
 
@@ -1414,11 +1417,17 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                     tr(R.string.defeat_face_not_to_camera)
                 else tr(R.string.defeat_face_to_camera)
             }
+            if (!tryReserveSessionDefeat()) {
+                return true
+            }
             triggerIntifaceViolationEffect(
                 resumeBackgroundAfter = false,
                 requireHoldingPose = false
             )
-            triggerDefeat(defeatReason, preserveIntifaceOverride = true)
+            completeDefeatAfterReservation(
+                defeatReason,
+                preserveIntifaceOverride = true
+            )
             return true
         }
 
@@ -1892,6 +1901,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         if (!tryReserveSessionDefeat()) {
             return
         }
+        completeDefeatAfterReservation(reason, preserveIntifaceOverride)
+    }
+
+    private fun completeDefeatAfterReservation(
+        reason: String,
+        preserveIntifaceOverride: Boolean = false
+    ) {
         if (preserveIntifaceOverride) {
             intifaceBackgroundJob?.cancel()
             intifaceBackgroundJob = null
@@ -1958,7 +1974,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     fun dismissFinalScreen() {
         if (_gameState.value != GameState.Success && _gameState.value != GameState.Failed) return
-        stopIntifaceSessionSignals()
         startDelayJob?.cancel()
         timerJob?.cancel()
         stabilizationFallbackJob?.cancel()
@@ -1990,10 +2005,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _statusMessage.value = tr(R.string.status_initial)
         _defeatReason.value = ""
         _timerSeconds.value = if (_timerMode.value == TimerMode.Exact) _selectedDurationSeconds.value else 0
+        stopIntifaceSessionSignals()
     }
 
     fun stopSession() {
-        stopIntifaceSessionSignals()
         startDelayJob?.cancel()
         timerJob?.cancel()
         stabilizationFallbackJob?.cancel()
@@ -2025,6 +2040,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _statusMessage.value = tr(R.string.status_initial)
         _defeatReason.value = ""
         _timerSeconds.value = if (_timerMode.value == TimerMode.Exact) _selectedDurationSeconds.value else 0
+        stopIntifaceSessionSignals()
     }
     override fun onCleared() {
         isCleared = true

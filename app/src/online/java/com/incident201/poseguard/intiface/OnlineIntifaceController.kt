@@ -226,9 +226,11 @@ internal class OnlineIntifaceController : IntifaceController {
             )
             return
         }
+        val generation = operationGeneration.get()
 
         var deviceToStop: ButtplugClientDevice? = null
         try {
+            if (!isCurrent(activeClient, generation)) return
             val device = activeClient.getDevices()
                 .firstOrNull { it.getDeviceIndex() == selected.index }
             if (device == null) {
@@ -253,29 +255,38 @@ internal class OnlineIntifaceController : IntifaceController {
                 errorMessage = null
             )
             repeat(TEST_PULSE_COUNT) { pulseIndex ->
+                if (!isCurrent(activeClient, generation)) return
                 requireOk(awaitResponse(device.sendScalarVibrateCmd(TEST_VIBRATION_STRENGTH)))
                 delay(TEST_PULSE_DURATION_MS)
+                if (!isCurrent(activeClient, generation)) return
                 requireOk(awaitResponse(device.sendScalarVibrateCmd(0.0)))
                 if (pulseIndex < TEST_PULSE_COUNT - 1) {
                     delay(TEST_PULSE_PAUSE_MS)
+                    if (!isCurrent(activeClient, generation)) return
                 }
             }
-            mutableState.value = mutableState.value.copy(
-                statusMessage = IntifaceUiMessage(IntifaceMessage.TestVibrationDone)
-            )
+            if (isCurrent(activeClient, generation)) {
+                mutableState.value = mutableState.value.copy(
+                    statusMessage = IntifaceUiMessage(IntifaceMessage.TestVibrationDone)
+                )
+            }
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (error: Throwable) {
-            mutableState.value = mutableState.value.copy(
-                statusMessage = null,
-                errorMessage = error.toVibrationErrorMessage()
-            )
+            if (isCurrent(activeClient, generation)) {
+                mutableState.value = mutableState.value.copy(
+                    statusMessage = null,
+                    errorMessage = error.toVibrationErrorMessage()
+                )
+            }
         } finally {
             deviceToStop?.let { selectedDevice ->
                 runCatching { requireOk(awaitResponse(selectedDevice.sendScalarVibrateCmd(0.0))) }
                 runCatching { requireOk(awaitResponse(selectedDevice.sendStopDeviceCmd())) }
             }
-            mutableState.value = mutableState.value.copy(isTestingVibration = false)
+            if (isCurrent(activeClient, generation)) {
+                mutableState.value = mutableState.value.copy(isTestingVibration = false)
+            }
         }
     }
 
