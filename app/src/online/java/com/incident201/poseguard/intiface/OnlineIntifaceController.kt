@@ -119,11 +119,15 @@ internal class OnlineIntifaceController : IntifaceController {
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (error: Throwable) {
-            if (isCurrent(newClient, generation)) {
-                runCatching { newClient.disconnect() }
-                synchronized(clientLock) {
-                    if (client === newClient) client = null
+            val clientToDisconnect = synchronized(clientLock) {
+                if (operationGeneration.get() == generation && client === newClient) {
+                    client.also { client = null }
+                } else {
+                    null
                 }
+            }
+            if (clientToDisconnect != null) {
+                disconnectClient(clientToDisconnect)
                 mutableState.value = mutableState.value.copy(
                     isConnected = false,
                     isScanning = false,
@@ -381,10 +385,14 @@ internal class OnlineIntifaceController : IntifaceController {
             }
         }
         newClient.setErrorReceived {
-            if (isCurrent(newClient, generation)) {
-                synchronized(clientLock) {
-                    if (client === newClient) client = null
+            val clientToDisconnect = synchronized(clientLock) {
+                if (operationGeneration.get() == generation && client === newClient) {
+                    client.also { client = null }
+                } else {
+                    null
                 }
+            }
+            if (clientToDisconnect != null) {
                 mutableState.value = IntifaceUiState(
                     isSupported = true,
                     isConnected = false,
@@ -395,6 +403,9 @@ internal class OnlineIntifaceController : IntifaceController {
                     statusMessage = null,
                     errorMessage = IntifaceUiMessage(IntifaceMessage.ServerError)
                 )
+                controllerScope.launch {
+                    disconnectClient(clientToDisconnect)
+                }
             }
         }
         newClient.setOnConnected {
