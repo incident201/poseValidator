@@ -52,6 +52,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
@@ -345,6 +347,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private val frameLock = Any()
     private val processingLock = Any()
+    // When both locks are needed, always acquire processingLock before sessionTargetLock.
     private val sessionTargetLock = Any()
     private var processingGeneration = 0L
     private val mediaPipeResultExecutor = Executors.newSingleThreadExecutor()
@@ -361,6 +364,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private var intifaceBackgroundJob: Job? = null
     private var intifaceOverrideJob: Job? = null
     private val intifaceSignalGeneration = AtomicLong(0L)
+    private val intifaceSignalCommandMutex = Mutex()
 
     private enum class RunMode { Background, Violation }
 
@@ -921,7 +925,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     private fun stopIntifaceSessionSignals(disconnect: Boolean = false) {
-        nextIntifaceSignalGeneration()
+        val generation = nextIntifaceSignalGeneration()
         intifaceBackgroundJob?.cancel()
         intifaceBackgroundJob = null
         intifaceOverrideJob?.cancel()
@@ -934,7 +938,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             return
         }
         viewModelScope.launch {
-            runCatching { intifaceController.stopVibration() }
+            stopIntifaceIfSignalCurrent(generation)
         }
     }
 
@@ -950,6 +954,27 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private fun nextIntifaceSignalGeneration(): Long =
         intifaceSignalGeneration.incrementAndGet()
 
+    private suspend fun stopIntifaceIfSignalCurrent(generation: Long) {
+        intifaceSignalCommandMutex.withLock {
+            if (intifaceSignalGeneration.get() == generation &&
+                shouldRunIntifaceBestEffortStop()
+            ) {
+                runCatching { intifaceController.stopVibration() }
+            }
+        }
+    }
+
+    private suspend fun setIntifaceStrengthIfSignalCurrent(
+        generation: Long,
+        strength: Double
+    ): Boolean = intifaceSignalCommandMutex.withLock {
+        if (intifaceSignalGeneration.get() != generation || !isIntifaceRuntimeReady()) {
+            return@withLock false
+        }
+        intifaceController.setVibrationStrength(strength)
+        true
+    }
+
     private fun restartIntifaceBackgroundIfNeeded() {
         intifaceBackgroundJob?.cancel()
         intifaceBackgroundJob = null
@@ -962,20 +987,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         ) {
             if (shouldRunIntifaceBestEffortStop()) {
                 viewModelScope.launch {
-                    if (intifaceSignalGeneration.get() == generation) {
-                        runCatching { intifaceController.stopVibration() }
-                    }
+                    stopIntifaceIfSignalCurrent(generation)
                 }
             }
             return
         }
         intifaceBackgroundJob = viewModelScope.launch {
             try {
-                runIntifaceVibrationPattern(settings.intifaceBackgroundVibration, RunMode.Background)
+                runIntifaceVibrationPattern(
+                    settings.intifaceBackgroundVibration,
+                    RunMode.Background,
+                    generation
+                )
             } finally {
-                if (intifaceSignalGeneration.get() == generation) {
-                    runCatching { intifaceController.stopVibration() }
-                }
+                runCatching { stopIntifaceIfSignalCurrent(generation) }
             }
         }
     }
@@ -1017,18 +1042,22 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 when (settings.intifaceViolationMode) {
                     IntifaceViolationMode.Off -> Unit
                     IntifaceViolationMode.Pause -> {
-                        intifaceController.stopVibration()
+                        stopIntifaceIfSignalCurrent(generation)
                         delay((settings.intifaceViolationPauseSeconds * 1000).toLong())
                     }
                     IntifaceViolationMode.Vibration ->
-                        runIntifaceVibrationPattern(settings.intifaceViolationVibration, RunMode.Violation)
+                        runIntifaceVibrationPattern(
+                            settings.intifaceViolationVibration,
+                            RunMode.Violation,
+                            generation
+                        )
                 }
             } finally {
                 val currentJob = coroutineContext[Job]
                 if (intifaceOverrideJob === currentJob &&
                     intifaceSignalGeneration.get() == generation
                 ) {
-                    runCatching { intifaceController.stopVibration() }
+                    runCatching { stopIntifaceIfSignalCurrent(generation) }
                     if (intifaceOverrideJob === currentJob &&
                         intifaceSignalGeneration.get() == generation
                     ) {
@@ -1047,19 +1076,20 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private suspend fun runIntifaceVibrationPattern(
         settings: IntifaceVibrationSettings,
-        mode: RunMode
+        mode: RunMode,
+        generation: Long
     ) {
         val normalized = settings.normalized()
         if (normalized.pattern == IntifaceVibrationPattern.Constant) {
             if (mode == RunMode.Background) {
                 while (_gameState.value == GameState.HoldingPose && isIntifaceRuntimeReady()) {
-                    intifaceController.setVibrationStrength(normalized.strength)
+                    if (!setIntifaceStrengthIfSignalCurrent(generation, normalized.strength)) return
                     delay(500)
                 }
             } else {
-                intifaceController.setVibrationStrength(normalized.strength)
+                if (!setIntifaceStrengthIfSignalCurrent(generation, normalized.strength)) return
                 delay((INTIFACE_VIOLATION_EFFECT_SECONDS * 1000).toLong())
-                intifaceController.setVibrationStrength(0.0)
+                setIntifaceStrengthIfSignalCurrent(generation, 0.0)
             }
             return
         }
@@ -1069,26 +1099,26 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             while (true) {
                 var remainingMs = deadlineMs - SystemClock.elapsedRealtime()
                 if (remainingMs <= 0L) break
-                intifaceController.setVibrationStrength(normalized.strength)
+                if (!setIntifaceStrengthIfSignalCurrent(generation, normalized.strength)) return
                 delay(
                     (normalized.pulseLengthSeconds * 1000).toLong()
                         .coerceAtMost(remainingMs)
                 )
                 remainingMs = deadlineMs - SystemClock.elapsedRealtime()
-                intifaceController.setVibrationStrength(0.0)
+                if (!setIntifaceStrengthIfSignalCurrent(generation, 0.0)) return
                 if (remainingMs <= 0L) break
                 delay(
                     (normalized.pulsePauseSeconds * 1000).toLong()
                         .coerceAtMost(remainingMs)
                 )
             }
-            runCatching { intifaceController.setVibrationStrength(0.0) }
+            runCatching { setIntifaceStrengthIfSignalCurrent(generation, 0.0) }
             return
         }
         do {
-            intifaceController.setVibrationStrength(normalized.strength)
+            if (!setIntifaceStrengthIfSignalCurrent(generation, normalized.strength)) return
             delay((normalized.pulseLengthSeconds * 1000).toLong())
-            intifaceController.setVibrationStrength(0.0)
+            if (!setIntifaceStrengthIfSignalCurrent(generation, 0.0)) return
             delay((normalized.pulsePauseSeconds * 1000).toLong())
         } while (_gameState.value == GameState.HoldingPose && isIntifaceRuntimeReady())
     }
@@ -1432,38 +1462,49 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             return false
         }
 
-        currentViolationCount += 1
-        _violationCount.value = currentViolationCount
-        updateRuleViolationCounts(type)
-        val isTerminalViolation = currentViolationCount >= _gameSettings.value.maxViolations
-        if (isTerminalViolation) {
-            val defeatReason = when (type) {
-                RuleViolationType.Drift -> tr(R.string.defeat_drift)
-                RuleViolationType.Motion -> tr(R.string.defeat_motion)
-                RuleViolationType.PersonDisappeared -> tr(R.string.defeat_disappeared)
-                RuleViolationType.FaceNotMatchingMode -> if (_gameSettings.value.faceCheckMode == FaceCheckMode.FaceToCamera)
-                    tr(R.string.defeat_face_not_to_camera)
-                else tr(R.string.defeat_face_to_camera)
+        var terminalDefeatReason: String? = null
+        synchronized(sessionTargetLock) {
+            if (!canAcceptRuleViolationLocked()) {
+                return false
             }
-            if (!tryReserveSessionDefeat()) {
-                return true
+
+            currentViolationCount += 1
+            _violationCount.value = currentViolationCount
+            updateRuleViolationCounts(type)
+            if (currentViolationCount >= _gameSettings.value.maxViolations) {
+                pendingTerminalResult = PendingTerminalResult.Defeat
+                terminalDefeatReason = when (type) {
+                    RuleViolationType.Drift -> tr(R.string.defeat_drift)
+                    RuleViolationType.Motion -> tr(R.string.defeat_motion)
+                    RuleViolationType.PersonDisappeared -> tr(R.string.defeat_disappeared)
+                    RuleViolationType.FaceNotMatchingMode ->
+                        if (_gameSettings.value.faceCheckMode == FaceCheckMode.FaceToCamera) {
+                            tr(R.string.defeat_face_not_to_camera)
+                        } else {
+                            tr(R.string.defeat_face_to_camera)
+                        }
+                }
+            } else {
+                triggerIntifaceViolationEffect()
+                applyPenalty(type, penaltyMinutesForViolation(currentViolationCount))
+                lastPenaltyAtMs = now
+                return false
             }
-            triggerIntifaceViolationEffect(
-                resumeBackgroundAfter = false,
-                requireHoldingPose = false
-            )
-            completeDefeatAfterReservation(
-                defeatReason,
-                preserveIntifaceOverride = true
-            )
-            return true
         }
 
-        triggerIntifaceViolationEffect()
-        applyPenalty(type, penaltyMinutesForViolation(currentViolationCount))
-        lastPenaltyAtMs = now
-        return false
+        triggerIntifaceViolationEffect(
+            resumeBackgroundAfter = false,
+            requireHoldingPose = false
+        )
+        completeDefeatAfterReservation(
+            terminalDefeatReason ?: return true,
+            preserveIntifaceOverride = true
+        )
+        return true
     }
+
+    private fun canAcceptRuleViolationLocked(): Boolean =
+        _gameState.value == GameState.HoldingPose && pendingTerminalResult == null
 
     private fun updateRuleViolationCounts(type: RuleViolationType) {
         _ruleViolationCounts.value = when (type) {
@@ -1491,17 +1532,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private fun applyPenalty(type: RuleViolationType, minutes: Int) {
         val sec = minutes * 60
         if (_gameSettings.value.penaltiesEnabled && sec > 0) {
-            if (sessionTimerMode == TimerMode.Random) {
-                synchronized(sessionTargetLock) {
-                    if (sessionTimerMode == TimerMode.Random &&
-                        _gameState.value == GameState.HoldingPose &&
-                        pendingTerminalResult == null
-                    ) {
+            synchronized(sessionTargetLock) {
+                if (_gameState.value == GameState.HoldingPose &&
+                    pendingTerminalResult == null
+                ) {
+                    if (sessionTimerMode == TimerMode.Random) {
                         sessionTargetSeconds += sec
+                    } else {
+                        _timerSeconds.value += sec
                     }
                 }
-            } else {
-                _timerSeconds.value += sec
             }
         }
 
@@ -1793,10 +1833,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         } else {
             _selectedDurationSeconds.value
         }
-        synchronized(sessionTargetLock) {
-            sessionTargetSeconds = sessionInitialTimerSeconds
-            pendingTerminalResult = null
-        }
         sessionHoldingStartedAtElapsedMs = null
         sessionSettingsSnapshot = _gameSettings.value
         _timerSeconds.value = if (sessionTimerMode == TimerMode.Exact) sessionInitialTimerSeconds else 0
@@ -1815,6 +1851,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             resetRuleViolationCounts()
             lastPenaltyAtMs = 0L
             consecutiveFaceFailFrames = 0
+            synchronized(sessionTargetLock) {
+                sessionTargetSeconds = sessionInitialTimerSeconds
+                pendingTerminalResult = null
+            }
         }
         startDelayJob?.cancel()
         timerJob?.cancel()
@@ -1926,10 +1966,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private fun resetMovementGaugeState() { _movementGaugeState.value = MovementGaugeState() }
 
     fun triggerDefeat(reason: String, preserveIntifaceOverride: Boolean = false) {
-        if (!tryReserveSessionDefeat()) {
-            return
+        synchronized(processingLock) {
+            if (!tryReserveSessionDefeat()) {
+                return
+            }
+            completeDefeatAfterReservation(reason, preserveIntifaceOverride)
         }
-        completeDefeatAfterReservation(reason, preserveIntifaceOverride)
     }
 
     private fun completeDefeatAfterReservation(
@@ -2010,9 +2052,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
         _startDelayRemainingSeconds.value = 0
-        synchronized(sessionTargetLock) {
-            pendingTerminalResult = null
-        }
         synchronized(processingLock) {
             processingGeneration += 1
             poseIdentityStabilizer.reset()
@@ -2025,6 +2064,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             resetRuleViolationCounts()
             lastPenaltyAtMs = 0L
             consecutiveFaceFailFrames = 0
+        }
+        synchronized(sessionTargetLock) {
+            pendingTerminalResult = null
         }
         _sessionSummary.value = null
         resetMovementGaugeState()
@@ -2045,9 +2087,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
         _startDelayRemainingSeconds.value = 0
-        synchronized(sessionTargetLock) {
-            pendingTerminalResult = null
-        }
         synchronized(processingLock) {
             processingGeneration += 1
             poseIdentityStabilizer.reset()
@@ -2060,6 +2099,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             resetRuleViolationCounts()
             lastPenaltyAtMs = 0L
             consecutiveFaceFailFrames = 0
+        }
+        synchronized(sessionTargetLock) {
+            pendingTerminalResult = null
         }
         _sessionSummary.value = null
         resetMovementGaugeState()
@@ -2081,9 +2123,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         sensorManager.unregisterListener(this)
         stabilizationStableSinceMs = null
         stabilizationCompleted = false
-        synchronized(sessionTargetLock) {
-            pendingTerminalResult = null
-        }
         synchronized(processingLock) {
             processingGeneration += 1
             poseIdentityStabilizer.reset()
@@ -2091,6 +2130,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             movementTracker.reset()
             poseOcclusionGuard.reset()
             resetPoseDropoutHoldState()
+        }
+        synchronized(sessionTargetLock) {
+            pendingTerminalResult = null
         }
         clearCameraFrameCache(recycle = true)
         mediaPipeResultExecutor.shutdownNow()

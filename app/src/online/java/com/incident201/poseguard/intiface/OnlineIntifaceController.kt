@@ -94,6 +94,7 @@ internal class OnlineIntifaceController : IntifaceController {
                 .filter { it.getScalarVibrateCount() > 0L }
                 .map { it.toDeviceInfo() }
                 .sortedBy { it.displayName.lowercase() }
+            if (!isCurrent(newClient, generation)) return
 
             mutableState.value = mutableState.value.copy(
                 isConnected = newClient.isConnected(),
@@ -155,10 +156,6 @@ internal class OnlineIntifaceController : IntifaceController {
     private fun runSessionVibrationCommand(strength: Double, stopDevice: Boolean) {
         val activeClient = synchronized(clientLock) { client }
         if (activeClient == null || !activeClient.isConnected()) {
-            mutableState.value = mutableState.value.copy(
-                isConnected = false,
-                errorMessage = IntifaceUiMessage(IntifaceMessage.UnableToConnect)
-            )
             return
         }
         val generation = operationGeneration.get()
@@ -342,12 +339,12 @@ internal class OnlineIntifaceController : IntifaceController {
         newClient.setDeviceAdded(object : IDeviceEvent {
             override fun deviceAdded(device: ButtplugClientDevice) {
                 if (!isCurrent(newClient, generation) || mutableState.value.isScanning) return
-                runCatching { refreshDevices(newClient) }
+                runCatching { refreshDevices(newClient, generation) }
             }
 
             override fun deviceRemoved(deviceIndex: Long) {
                 if (!isCurrent(newClient, generation) || mutableState.value.isScanning) return
-                runCatching { refreshDevices(newClient) }
+                runCatching { refreshDevices(newClient, generation) }
             }
         })
         newClient.setDeviceRemoved(object : IDeviceEvent {
@@ -355,7 +352,7 @@ internal class OnlineIntifaceController : IntifaceController {
 
             override fun deviceRemoved(deviceIndex: Long) {
                 if (!isCurrent(newClient, generation) || mutableState.value.isScanning) return
-                runCatching { refreshDevices(newClient) }
+                runCatching { refreshDevices(newClient, generation) }
             }
         })
         newClient.setScanningFinished {
@@ -391,13 +388,15 @@ internal class OnlineIntifaceController : IntifaceController {
         }
     }
 
-    private fun refreshDevices(sourceClient: ButtplugClientWSClient) {
+    private fun refreshDevices(sourceClient: ButtplugClientWSClient, generation: Long) {
         val devices = sourceClient.getDevices()
             .filter { it.getScalarVibrateCount() > 0L }
             .map { it.toDeviceInfo() }
             .sortedBy { it.displayName.lowercase() }
+        if (!isCurrent(sourceClient, generation)) return
         val selected = mutableState.value.selectedDevice
             ?.takeIf { selectedDevice -> devices.any { it.index == selectedDevice.index } }
+        if (!isCurrent(sourceClient, generation)) return
         mutableState.value = mutableState.value.copy(devices = devices, selectedDevice = selected)
     }
 
