@@ -161,25 +161,37 @@ internal class OnlineIntifaceController : IntifaceController {
             )
             return
         }
+        val generation = operationGeneration.get()
+        fun updateIfCurrent(update: (IntifaceUiState) -> IntifaceUiState) {
+            if (isCurrent(activeClient, generation)) {
+                mutableState.value = update(mutableState.value)
+            }
+        }
+        if (!isCurrent(activeClient, generation)) return
+
         val selected = mutableState.value.selectedDevice
         if (selected == null) {
-            mutableState.value = mutableState.value.copy(
-                errorMessage = IntifaceUiMessage(IntifaceMessage.SelectedDeviceMissing)
-            )
+            updateIfCurrent {
+                it.copy(
+                    errorMessage = IntifaceUiMessage(IntifaceMessage.SelectedDeviceMissing)
+                )
+            }
             return
         }
         val device = activeClient.getDevices().firstOrNull { it.getDeviceIndex() == selected.index }
         if (device == null) {
-            mutableState.value = mutableState.value.copy(
-                selectedDevice = null,
-                errorMessage = IntifaceUiMessage(IntifaceMessage.SelectedDeviceMissing)
-            )
+            updateIfCurrent {
+                it.copy(
+                    selectedDevice = null,
+                    errorMessage = IntifaceUiMessage(IntifaceMessage.SelectedDeviceMissing)
+                )
+            }
             return
         }
         if (device.getScalarVibrateCount() <= 0L) {
-            mutableState.value = mutableState.value.copy(
-                errorMessage = IntifaceUiMessage(IntifaceMessage.NoVibrateCapability)
-            )
+            updateIfCurrent {
+                it.copy(errorMessage = IntifaceUiMessage(IntifaceMessage.NoVibrateCapability))
+            }
             return
         }
         if (stopDevice) {
@@ -190,12 +202,12 @@ internal class OnlineIntifaceController : IntifaceController {
                 requireOk(awaitResponse(device.sendStopDeviceCmd()))
             }.exceptionOrNull()
             val error = zeroError ?: stopError
-            mutableState.value = if (error != null) {
-                mutableState.value.copy(
-                    errorMessage = error.toSessionVibrationErrorMessage()
-                )
-            } else {
-                mutableState.value.copy(errorMessage = null)
+            updateIfCurrent {
+                if (error != null) {
+                    it.copy(errorMessage = error.toSessionVibrationErrorMessage())
+                } else {
+                    it.copy(errorMessage = null)
+                }
             }
             return
         }
@@ -203,11 +215,11 @@ internal class OnlineIntifaceController : IntifaceController {
         runCatching {
             requireOk(awaitResponse(device.sendScalarVibrateCmd(strength)))
         }.onSuccess {
-            mutableState.value = mutableState.value.copy(errorMessage = null)
+            updateIfCurrent { it.copy(errorMessage = null) }
         }.onFailure { error ->
-            mutableState.value = mutableState.value.copy(
-                errorMessage = error.toSessionVibrationErrorMessage()
-            )
+            updateIfCurrent {
+                it.copy(errorMessage = error.toSessionVibrationErrorMessage())
+            }
         }
     }
 

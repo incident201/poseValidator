@@ -1029,9 +1029,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                     intifaceSignalGeneration.get() == generation
                 ) {
                     runCatching { intifaceController.stopVibration() }
-                    intifaceOverrideJob = null
-                    if (resumeBackgroundAfter) {
-                        restartIntifaceBackgroundIfNeeded()
+                    if (intifaceOverrideJob === currentJob &&
+                        intifaceSignalGeneration.get() == generation
+                    ) {
+                        intifaceOverrideJob = null
+                        if (resumeBackgroundAfter) {
+                            restartIntifaceBackgroundIfNeeded()
+                        }
                     }
                 }
             }
