@@ -483,6 +483,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             )?.trim() ?: DEFAULT_INTIFACE_WEBSOCKET_URL,
             intifaceConnectionEnabled = intifaceController.state.value.isSupported &&
                 prefs.getBoolean(PREF_INTIFACE_CONNECTION_ENABLED, false),
+            intifaceSelectedDeviceName = prefs.getString(PREF_INTIFACE_SELECTED_DEVICE_NAME, "")?.trim().orEmpty(),
+            intifaceSelectedDeviceDisplayName = prefs.getString(PREF_INTIFACE_SELECTED_DEVICE_DISPLAY_NAME, "")?.trim().orEmpty(),
+            intifaceSelectedDeviceIndex = if (prefs.contains(PREF_INTIFACE_SELECTED_DEVICE_INDEX)) prefs.getLong(PREF_INTIFACE_SELECTED_DEVICE_INDEX, -1L).takeIf { it >= 0L } else null,
             intifaceBackgroundMode = backgroundMode,
             intifaceBackgroundVibration = IntifaceVibrationSettings(
                 strength = getDoublePref(PREF_INTIFACE_BACKGROUND_STRENGTH, 0.2).coerceIn(0.0, 1.0),

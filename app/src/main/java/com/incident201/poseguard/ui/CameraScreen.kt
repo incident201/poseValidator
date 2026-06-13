@@ -870,7 +870,7 @@ fun CameraScreen(
                 )
             }
 
-            if (!showFinalScreen) {
+            if (!showFinalScreen && intifaceState.isSupported) {
                 IntifacePreviewStatusOverlay(
                     state = intifaceState,
                     language = gameSettings.language,
@@ -2405,5 +2405,37 @@ private fun normalizeSoftwareArgb8888(bitmap: Bitmap): Bitmap {
         normalized
     } else {
         bitmap
+    }
+}
+
+@Composable
+private fun IntifacePreviewStatusOverlay(
+    state: com.incident201.poseguard.intiface.IntifaceUiState,
+    language: AppLanguage,
+    enabled: Boolean,
+    modifier: Modifier = Modifier
+) {
+    if (!state.isSupported) return
+    if (!enabled) return
+
+    val statusText = when {
+        state.errorMessage != null -> localizedIntifaceMessage(language, state.errorMessage)
+        state.isScanning -> localizedString(language, R.string.intiface_overlay_connecting)
+        state.isConnected && state.selectedDevice != null -> localizedFormatString(language, R.string.intiface_overlay_connected, state.selectedDevice.displayName)
+        state.isConnected && state.selectedDevice == null -> localizedString(language, R.string.intiface_overlay_device_not_selected)
+        else -> null
+    }
+
+    if (statusText != null) {
+        Text(
+            text = statusText,
+            modifier = modifier
+                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }

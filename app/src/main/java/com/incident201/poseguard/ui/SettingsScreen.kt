@@ -109,7 +109,13 @@ internal fun SettingsScreen(
         if (showIntifaceSettings) showIntifaceSettings = false else showAudioSettings = false
     }
 
-    if (showIntifaceSettings) {
+    LaunchedEffect(showIntifaceSettings, intifaceState.isSupported) {
+        if (showIntifaceSettings && !intifaceState.isSupported) {
+            showIntifaceSettings = false
+        }
+    }
+
+    if (showIntifaceSettings && intifaceState.isSupported) {
         IntifaceCentralSettingsScreen(
             settings = settings,
             state = intifaceState,
@@ -271,14 +277,16 @@ internal fun SettingsScreen(
             onConfigureClick = { showAudioSettings = true },
             colorScheme = colorScheme
         )
-        Spacer(Modifier.height(12.dp))
-        CompactIntifaceCard(
-            settings = settings,
-            state = intifaceState,
-            onEnabledChanged = onIntifaceConnectionEnabledChanged,
-            onConfigureClick = { showIntifaceSettings = true },
-            colorScheme = colorScheme
-        )
+        if (intifaceState.isSupported) {
+            Spacer(Modifier.height(12.dp))
+            CompactIntifaceCard(
+                settings = settings,
+                state = intifaceState,
+                onEnabledChanged = onIntifaceConnectionEnabledChanged,
+                onConfigureClick = { showIntifaceSettings = true },
+                colorScheme = colorScheme
+            )
+        }
         Spacer(Modifier.height(12.dp))
         Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
             Column(Modifier.padding(16.dp)) {
@@ -753,8 +761,8 @@ private fun IntifaceConnectionCard(
     var showDeviceDialog by remember { mutableStateOf(false) }
     var openDialogAfterManualSearch by remember { mutableStateOf(false) }
 
-    LaunchedEffect(state.devices) {
-        if (state.devices.isNotEmpty() && openDialogAfterManualSearch) {
+    LaunchedEffect(openDialogAfterManualSearch, state.isScanning, state.devices) {
+        if (openDialogAfterManualSearch && !state.isScanning && state.devices.isNotEmpty()) {
             showDeviceDialog = true
             openDialogAfterManualSearch = false
         }

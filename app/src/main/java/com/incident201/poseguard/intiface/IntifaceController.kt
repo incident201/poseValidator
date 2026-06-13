@@ -46,6 +46,7 @@ enum class IntifaceMessage {
     SelectDeviceFirst,
     SelectedDeviceMissing,
     NoVibrateCapability,
+    TestVibrationFailed,
     TestVibrationFailedDetail,
     ScanRejected,
     CommandRejected,
