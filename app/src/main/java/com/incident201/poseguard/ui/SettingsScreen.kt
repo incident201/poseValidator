@@ -20,8 +20,10 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -1778,14 +1780,61 @@ private fun DoubleSettingField(
     decimals: Int,
     enabled: Boolean = true
 ) {
-    var text by remember(value) { mutableStateOf(String.format(Locale.US, "%.${decimals}f", value)) }
+    fun format(number: Double): String =
+        String.format(Locale.US, "%.${decimals}f", number)
+
+    fun sanitize(input: String): String {
+        val dottedInput = input.replace(',', '.')
+        var dotSeen = false
+        return buildString {
+            dottedInput.forEach { char ->
+                when {
+                    char.isDigit() -> append(char)
+                    char == '.' && !dotSeen -> {
+                        append(char)
+                        dotSeen = true
+                    }
+                }
+            }
+        }
+    }
+
+    var text by rememberSaveable { mutableStateOf(format(value)) }
+    var isEditing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(value, enabled) {
+        if (!isEditing || !enabled) {
+            text = format(value)
+        }
+    }
+
     OutlinedTextField(
         value = text,
         onValueChange = { input ->
-            text = input
-            input.replace(',', '.').toDoubleOrNull()?.let { onValueChanged(it.coerceIn(min, max)) }
+            val normalized = sanitize(input)
+            text = normalized
+            val parsed = normalized.toDoubleOrNull()
+            if (enabled && parsed != null) {
+                onValueChanged(parsed.coerceIn(min, max))
+            }
         },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .onFocusChanged { focusState ->
+                if (focusState.isFocused) {
+                    isEditing = true
+                } else if (isEditing) {
+                    isEditing = false
+                    val parsed = text.toDoubleOrNull()
+                    if (enabled && parsed != null) {
+                        val clamped = parsed.coerceIn(min, max)
+                        onValueChanged(clamped)
+                        text = format(clamped)
+                    } else {
+                        text = format(value)
+                    }
+                }
+            },
         enabled = enabled,
         singleLine = true,
         label = { Text(label) },
