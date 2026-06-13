@@ -28,7 +28,7 @@ internal class OnlineIntifaceController : IntifaceController {
     private val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val clientLock = Any()
     private val searchDevicesMutex = Mutex()
-    private val vibrationTestMutex = Mutex()
+    private val vibrationCommandMutex = Mutex()
     private val operationGeneration = AtomicLong(0L)
     private var client: ButtplugClientWSClient? = null
 
@@ -128,12 +128,64 @@ internal class OnlineIntifaceController : IntifaceController {
     }
 
     override suspend fun testVibration() = withContext(Dispatchers.IO) {
-        if (!vibrationTestMutex.tryLock()) return@withContext
+        if (!vibrationCommandMutex.tryLock()) return@withContext
 
         try {
             runVibrationTestLocked()
         } finally {
-            vibrationTestMutex.unlock()
+            vibrationCommandMutex.unlock()
+        }
+    }
+
+    override suspend fun setVibrationStrength(strength: Double) = withContext(Dispatchers.IO) {
+        vibrationCommandMutex.withLock {
+            runSessionVibrationCommand(strength.coerceIn(0.0, 1.0), stopDevice = false)
+        }
+    }
+
+    override suspend fun stopVibration() = withContext(Dispatchers.IO) {
+        vibrationCommandMutex.withLock {
+            runSessionVibrationCommand(0.0, stopDevice = true)
+        }
+    }
+
+    private fun runSessionVibrationCommand(strength: Double, stopDevice: Boolean) {
+        val activeClient = synchronized(clientLock) { client }
+        if (activeClient == null || !activeClient.isConnected()) {
+            mutableState.value = mutableState.value.copy(
+                isConnected = false,
+                errorMessage = IntifaceUiMessage(IntifaceMessage.UnableToConnect)
+            )
+            return
+        }
+        val selected = mutableState.value.selectedDevice
+        if (selected == null) {
+            mutableState.value = mutableState.value.copy(
+                errorMessage = IntifaceUiMessage(IntifaceMessage.SelectedDeviceMissing)
+            )
+            return
+        }
+        val device = activeClient.getDevices().firstOrNull { it.getDeviceIndex() == selected.index }
+        if (device == null) {
+            mutableState.value = mutableState.value.copy(
+                selectedDevice = null,
+                errorMessage = IntifaceUiMessage(IntifaceMessage.SelectedDeviceMissing)
+            )
+            return
+        }
+        if (device.getScalarVibrateCount() <= 0L) {
+            mutableState.value = mutableState.value.copy(
+                errorMessage = IntifaceUiMessage(IntifaceMessage.NoVibrateCapability)
+            )
+            return
+        }
+        try {
+            requireOk(device.sendScalarVibrateCmd(strength).get())
+            if (stopDevice) requireOk(device.sendStopDeviceCmd().get())
+        } catch (error: Throwable) {
+            mutableState.value = mutableState.value.copy(
+                errorMessage = error.toSessionVibrationErrorMessage()
+            )
         }
     }
 
@@ -373,6 +425,18 @@ internal class OnlineIntifaceController : IntifaceController {
             IntifaceUiMessage(IntifaceMessage.TestVibrationFailed)
         } else {
             IntifaceUiMessage(IntifaceMessage.TestVibrationFailedDetail, listOf(detail))
+        }
+    }
+
+    private fun Throwable.toSessionVibrationErrorMessage(): IntifaceUiMessage {
+        val detail = message?.takeIf { it.isNotBlank() }
+            ?: cause?.message?.takeIf { it.isNotBlank() }
+        return if (this is ButtplugCommandRejectedException) {
+            if (detail == null) IntifaceUiMessage(IntifaceMessage.CommandRejected)
+            else IntifaceUiMessage(IntifaceMessage.CommandRejectedDetail, listOf(detail))
+        } else {
+            if (detail == null) IntifaceUiMessage(IntifaceMessage.UnableToConnect)
+            else IntifaceUiMessage(IntifaceMessage.UnableToConnectDetail, listOf(detail))
         }
     }
 

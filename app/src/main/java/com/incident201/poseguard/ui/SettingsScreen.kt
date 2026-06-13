@@ -40,9 +40,13 @@ import com.incident201.poseguard.audio.PcmSignalSettings
 import com.incident201.poseguard.audio.TtsPhraseTemplate
 import com.incident201.poseguard.audio.TtsVoiceMode
 import com.incident201.poseguard.intiface.IntifaceDeviceInfo
+import com.incident201.poseguard.intiface.IntifaceBackgroundMode
 import com.incident201.poseguard.intiface.IntifaceMessage
 import com.incident201.poseguard.intiface.IntifaceUiMessage
 import com.incident201.poseguard.intiface.IntifaceUiState
+import com.incident201.poseguard.intiface.IntifaceVibrationPattern
+import com.incident201.poseguard.intiface.IntifaceVibrationSettings
+import com.incident201.poseguard.intiface.IntifaceViolationMode
 import com.incident201.poseguard.viewmodel.AppLanguage
 import com.incident201.poseguard.viewmodel.FaceCheckMode
 import com.incident201.poseguard.viewmodel.GameSettings
@@ -80,6 +84,12 @@ internal fun SettingsScreen(
     onTtsPhraseTemplateChanged: (TtsPhraseTemplate, String?) -> Unit,
     onAudioCueSettingsChanged: (AudioCue, AudioCueSettings) -> Unit,
     intifaceState: IntifaceUiState,
+    onIntifaceConnectionEnabledChanged: (Boolean) -> Unit,
+    onIntifaceBackgroundModeChanged: (IntifaceBackgroundMode) -> Unit,
+    onIntifaceBackgroundVibrationChanged: (IntifaceVibrationSettings) -> Unit,
+    onIntifaceViolationModeChanged: (IntifaceViolationMode) -> Unit,
+    onIntifaceViolationVibrationChanged: (IntifaceVibrationSettings) -> Unit,
+    onIntifaceViolationPauseSecondsChanged: (Double) -> Unit,
     onIntifaceWebSocketUrlChanged: (String) -> Unit,
     onIntifaceSearchDevices: (String) -> Unit,
     onIntifaceDeviceSelected: (IntifaceDeviceInfo) -> Unit,
@@ -91,9 +101,31 @@ internal fun SettingsScreen(
     val selectedDriftTolerance = driftTolerancePresetFor(settings.driftThresholdFactor)
     val selectedMotionSensitivity = motionSensitivityPresetFor(settings.motionThresholdFactor)
     var showAudioSettings by remember { mutableStateOf(false) }
+    var showIntifaceSettings by remember { mutableStateOf(false) }
 
-    BackHandler(enabled = showAudioSettings) {
-        showAudioSettings = false
+    BackHandler(enabled = showAudioSettings || showIntifaceSettings) {
+        if (showIntifaceSettings) showIntifaceSettings = false else showAudioSettings = false
+    }
+
+    if (showIntifaceSettings) {
+        IntifaceCentralSettingsScreen(
+            settings = settings,
+            state = intifaceState,
+            onBack = { showIntifaceSettings = false },
+            onConnectionEnabledChanged = onIntifaceConnectionEnabledChanged,
+            onBackgroundModeChanged = onIntifaceBackgroundModeChanged,
+            onBackgroundVibrationChanged = onIntifaceBackgroundVibrationChanged,
+            onViolationModeChanged = onIntifaceViolationModeChanged,
+            onViolationVibrationChanged = onIntifaceViolationVibrationChanged,
+            onViolationPauseSecondsChanged = onIntifaceViolationPauseSecondsChanged,
+            onUrlChanged = onIntifaceWebSocketUrlChanged,
+            onSearchDevices = onIntifaceSearchDevices,
+            onDeviceSelected = onIntifaceDeviceSelected,
+            onTestVibration = onIntifaceTestVibration,
+            onDisconnect = onIntifaceDisconnect,
+            colorScheme = colorScheme
+        )
+        return
     }
 
     if (showAudioSettings) {
@@ -238,14 +270,11 @@ internal fun SettingsScreen(
             colorScheme = colorScheme
         )
         Spacer(Modifier.height(12.dp))
-        IntifaceCentralCard(
+        CompactIntifaceCard(
             settings = settings,
             state = intifaceState,
-            onUrlChanged = onIntifaceWebSocketUrlChanged,
-            onSearchDevices = onIntifaceSearchDevices,
-            onDeviceSelected = onIntifaceDeviceSelected,
-            onTestVibration = onIntifaceTestVibration,
-            onDisconnect = onIntifaceDisconnect,
+            onEnabledChanged = onIntifaceConnectionEnabledChanged,
+            onConfigureClick = { showIntifaceSettings = true },
             colorScheme = colorScheme
         )
         Spacer(Modifier.height(12.dp))
@@ -512,9 +541,191 @@ private fun localizedIntifaceMessage(
 }
 
 @Composable
-private fun IntifaceCentralCard(
+private fun CompactIntifaceCard(
     settings: GameSettings,
     state: IntifaceUiState,
+    onEnabledChanged: (Boolean) -> Unit,
+    onConfigureClick: () -> Unit,
+    colorScheme: ColorScheme
+) {
+    val supported = state.isSupported
+    Card(
+        modifier = Modifier.alpha(if (supported) 1f else 0.5f),
+        colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    localizedString(settings.language, R.string.intiface_connection_title),
+                    modifier = Modifier.weight(1f),
+                    color = colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Switch(
+                    checked = supported && settings.intifaceConnectionEnabled,
+                    onCheckedChange = onEnabledChanged,
+                    enabled = supported
+                )
+            }
+            Text(
+                localizedString(
+                    settings.language,
+                    if (supported) R.string.intiface_connection_description_online
+                    else R.string.intiface_connection_description_offline
+                ),
+                color = colorScheme.onSurfaceVariant
+            )
+            OutlinedButton(onClick = onConfigureClick, enabled = supported) {
+                Text(localizedString(settings.language, R.string.intiface_configure))
+            }
+        }
+    }
+}
+
+@Composable
+private fun IntifaceCentralSettingsScreen(
+    settings: GameSettings,
+    state: IntifaceUiState,
+    onBack: () -> Unit,
+    onConnectionEnabledChanged: (Boolean) -> Unit,
+    onBackgroundModeChanged: (IntifaceBackgroundMode) -> Unit,
+    onBackgroundVibrationChanged: (IntifaceVibrationSettings) -> Unit,
+    onViolationModeChanged: (IntifaceViolationMode) -> Unit,
+    onViolationVibrationChanged: (IntifaceVibrationSettings) -> Unit,
+    onViolationPauseSecondsChanged: (Double) -> Unit,
+    onUrlChanged: (String) -> Unit,
+    onSearchDevices: (String) -> Unit,
+    onDeviceSelected: (IntifaceDeviceInfo) -> Unit,
+    onTestVibration: () -> Unit,
+    onDisconnect: () -> Unit,
+    colorScheme: ColorScheme
+) {
+    val enabled = state.isSupported && settings.intifaceConnectionEnabled
+    Column(
+        Modifier.fillMaxSize().background(colorScheme.background)
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, localizedString(settings.language, R.string.back))
+            }
+            Text(
+                localizedString(settings.language, R.string.intiface_connection_title),
+                fontSize = 24.sp, fontWeight = FontWeight.Bold
+            )
+        }
+        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
+            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(localizedString(settings.language, R.string.intiface_connection_title), fontWeight = FontWeight.SemiBold)
+                    Text(
+                        localizedString(
+                            settings.language,
+                            if (state.isSupported) R.string.intiface_connection_description_online
+                            else R.string.intiface_connection_description_offline
+                        )
+                    )
+                }
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onConnectionEnabledChanged,
+                    enabled = state.isSupported
+                )
+            }
+        }
+        if (!enabled) {
+            Text(
+                localizedString(settings.language, R.string.intiface_rules_disabled_until_enabled),
+                color = colorScheme.onBackground
+            )
+        }
+        IntifaceConnectionCard(
+            settings, state, enabled, onUrlChanged, onSearchDevices, onDeviceSelected,
+            onTestVibration, onDisconnect, colorScheme
+        )
+        IntifaceModeCard(
+            title = localizedString(settings.language, R.string.intiface_background_title),
+            enabled = enabled,
+            options = IntifaceBackgroundMode.entries,
+            selected = settings.intifaceBackgroundMode,
+            label = { if (it == IntifaceBackgroundMode.Off) R.string.intiface_mode_off else R.string.intiface_mode_vibration },
+            onSelected = onBackgroundModeChanged,
+            language = settings.language,
+            colorScheme = colorScheme
+        ) {
+            if (settings.intifaceBackgroundMode == IntifaceBackgroundMode.Vibration) {
+                IntifaceVibrationSettingsEditor(
+                    settings.language, settings.intifaceBackgroundVibration,
+                    onBackgroundVibrationChanged, enabled
+                )
+            }
+        }
+        IntifaceModeCard(
+            title = localizedString(settings.language, R.string.intiface_violations_title),
+            enabled = enabled,
+            options = IntifaceViolationMode.entries,
+            selected = settings.intifaceViolationMode,
+            label = {
+                when (it) {
+                    IntifaceViolationMode.Off -> R.string.intiface_mode_off
+                    IntifaceViolationMode.Vibration -> R.string.intiface_mode_vibration
+                    IntifaceViolationMode.Pause -> R.string.intiface_mode_pause
+                }
+            },
+            onSelected = onViolationModeChanged,
+            language = settings.language,
+            colorScheme = colorScheme
+        ) {
+            when (settings.intifaceViolationMode) {
+                IntifaceViolationMode.Off -> Unit
+                IntifaceViolationMode.Vibration -> IntifaceVibrationSettingsEditor(
+                    settings.language, settings.intifaceViolationVibration,
+                    onViolationVibrationChanged, enabled
+                )
+                IntifaceViolationMode.Pause -> DoubleSettingField(
+                    localizedString(settings.language, R.string.intiface_pause_duration_seconds),
+                    settings.intifaceViolationPauseSeconds, onViolationPauseSecondsChanged,
+                    0.05, 60.0, 2, enabled
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun <T> IntifaceModeCard(
+    title: String,
+    enabled: Boolean,
+    options: List<T>,
+    selected: T,
+    label: (T) -> Int,
+    onSelected: (T) -> Unit,
+    language: AppLanguage,
+    colorScheme: ColorScheme,
+    content: @Composable () -> Unit
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp).alpha(if (enabled) 1f else 0.5f)) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            options.forEach { option ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected == option, { onSelected(option) }, enabled = enabled)
+                    Text(localizedString(language, label(option)))
+                }
+            }
+            content()
+        }
+    }
+}
+
+@Composable
+private fun IntifaceConnectionCard(
+    settings: GameSettings,
+    state: IntifaceUiState,
+    enabled: Boolean,
     onUrlChanged: (String) -> Unit,
     onSearchDevices: (String) -> Unit,
     onDeviceSelected: (IntifaceDeviceInfo) -> Unit,
@@ -557,7 +768,7 @@ private fun IntifaceCentralCard(
                 value = settings.intifaceWebSocketUrl,
                 onValueChange = onUrlChanged,
                 modifier = Modifier.fillMaxWidth(),
-                enabled = state.isSupported && !state.isScanning && !state.isTestingVibration,
+                enabled = enabled && !state.isScanning && !state.isTestingVibration,
                 singleLine = true,
                 label = {
                     Text(localizedString(settings.language, R.string.intiface_websocket_url))
@@ -569,7 +780,7 @@ private fun IntifaceCentralCard(
             ) {
                 Button(
                     onClick = { onSearchDevices(settings.intifaceWebSocketUrl) },
-                    enabled = state.isSupported &&
+                    enabled = enabled &&
                         !state.isScanning &&
                         !state.isTestingVibration &&
                         settings.intifaceWebSocketUrl.isNotBlank()
@@ -588,7 +799,7 @@ private fun IntifaceCentralCard(
                 if (state.isConnected) {
                     OutlinedButton(
                         onClick = onDisconnect,
-                        enabled = !state.isTestingVibration
+                        enabled = enabled && !state.isTestingVibration
                     ) {
                         Text(localizedString(settings.language, R.string.intiface_disconnect))
                     }
@@ -596,7 +807,7 @@ private fun IntifaceCentralCard(
             }
             Button(
                 onClick = onTestVibration,
-                enabled = state.isSupported &&
+                enabled = enabled &&
                     state.isConnected &&
                     state.selectedDevice != null &&
                     !state.isScanning &&
@@ -1555,6 +1766,81 @@ private fun FloatSettingField(
         modifier = Modifier.fillMaxWidth()
     )
     Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun DoubleSettingField(
+    label: String,
+    value: Double,
+    onValueChanged: (Double) -> Unit,
+    min: Double,
+    max: Double,
+    decimals: Int,
+    enabled: Boolean = true
+) {
+    var text by remember(value) { mutableStateOf(String.format(Locale.US, "%.${decimals}f", value)) }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { input ->
+            text = input
+            input.replace(',', '.').toDoubleOrNull()?.let { onValueChanged(it.coerceIn(min, max)) }
+        },
+        modifier = Modifier.fillMaxWidth(),
+        enabled = enabled,
+        singleLine = true,
+        label = { Text(label) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+    )
+}
+
+@Composable
+private fun IntifaceVibrationSettingsEditor(
+    language: AppLanguage,
+    settings: IntifaceVibrationSettings,
+    onChanged: (IntifaceVibrationSettings) -> Unit,
+    enabled: Boolean
+) {
+    DoubleSettingField(
+        localizedString(language, R.string.intiface_strength),
+        settings.strength,
+        { onChanged(settings.copy(strength = it)) },
+        0.0, 1.0, 2, enabled
+    )
+    Text(localizedString(language, R.string.intiface_strength_range))
+    Text(localizedString(language, R.string.intiface_pattern), fontWeight = FontWeight.Medium)
+    IntifaceVibrationPattern.entries.forEach { pattern ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(
+                selected = settings.pattern == pattern,
+                onClick = { onChanged(settings.copy(pattern = pattern)) },
+                enabled = enabled
+            )
+            Text(
+                localizedString(
+                    language,
+                    if (pattern == IntifaceVibrationPattern.Constant) {
+                        R.string.intiface_pattern_constant
+                    } else {
+                        R.string.intiface_pattern_pulse
+                    }
+                )
+            )
+        }
+    }
+    if (settings.pattern == IntifaceVibrationPattern.Pulse) {
+        DoubleSettingField(
+            localizedString(language, R.string.intiface_pulse_length_seconds),
+            settings.pulseLengthSeconds,
+            { onChanged(settings.copy(pulseLengthSeconds = it)) },
+            0.05, 10.0, 2, enabled
+        )
+        DoubleSettingField(
+            localizedString(language, R.string.intiface_pulse_pause_seconds),
+            settings.pulsePauseSeconds,
+            { onChanged(settings.copy(pulsePauseSeconds = it)) },
+            0.05, 10.0, 2, enabled
+        )
+    }
 }
 
 

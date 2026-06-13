@@ -222,4 +222,23 @@
     <string name="intiface_scan_rejected">Intiface Central rejected the scan request</string>
     <string name="intiface_command_rejected">Intiface Central rejected the vibration command</string>
     <string name="intiface_command_rejected_detail">Intiface Central rejected the vibration command: %1$s</string>
+    <string name="intiface_connection_title">Intiface Central Connection</string>
+    <string name="intiface_connection_description_online">Connect to Intiface Central and configure vibration rules for sessions.</string>
+    <string name="intiface_connection_description_offline">Available only in the online build.</string>
+    <string name="intiface_configure">Configure</string>
+    <string name="intiface_background_title">Background</string>
+    <string name="intiface_violations_title">Violations</string>
+    <string name="intiface_mode_off">Off</string>
+    <string name="intiface_mode_vibration">Vibration</string>
+    <string name="intiface_mode_pause">Pause</string>
+    <string name="intiface_strength">Strength / intensity</string>
+    <string name="intiface_strength_range">Range: 0.0–1.0</string>
+    <string name="intiface_pattern">Pattern</string>
+    <string name="intiface_pattern_constant">Constant</string>
+    <string name="intiface_pattern_pulse">Pulse</string>
+    <string name="intiface_pulse_length_seconds">Pulse length, seconds</string>
+    <string name="intiface_pulse_pause_seconds">Pause, seconds</string>
+    <string name="intiface_pause_duration_seconds">Pause duration, seconds</string>
+    <string name="intiface_connection_disabled_hint">Enable Intiface Central Connection to connect a device.</string>
+    <string name="intiface_rules_disabled_until_enabled">Connection and session rules are disabled until Intiface Central Connection is enabled.</string>
 </resources>

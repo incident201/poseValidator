@@ -222,4 +222,23 @@
     <string name="intiface_scan_rejected">Intiface Central отклонил запрос поиска устройств</string>
     <string name="intiface_command_rejected">Intiface Central отклонил команду вибрации</string>
     <string name="intiface_command_rejected_detail">Intiface Central отклонил команду вибрации: %1$s</string>
+    <string name="intiface_connection_title">Подключение Intiface Central</string>
+    <string name="intiface_connection_description_online">Подключение к Intiface Central и правила вибрации во время сессии.</string>
+    <string name="intiface_connection_description_offline">Доступно только в online-сборке.</string>
+    <string name="intiface_configure">Настроить</string>
+    <string name="intiface_background_title">Фон</string>
+    <string name="intiface_violations_title">Нарушения</string>
+    <string name="intiface_mode_off">Выкл.</string>
+    <string name="intiface_mode_vibration">Вибрация</string>
+    <string name="intiface_mode_pause">Пауза</string>
+    <string name="intiface_strength">Сила / интенсивность</string>
+    <string name="intiface_strength_range">Диапазон: 0,0–1,0</string>
+    <string name="intiface_pattern">Режим</string>
+    <string name="intiface_pattern_constant">Постоянная</string>
+    <string name="intiface_pattern_pulse">Импульсы</string>
+    <string name="intiface_pulse_length_seconds">Длина импульса, секунд</string>
+    <string name="intiface_pulse_pause_seconds">Пауза, секунд</string>
+    <string name="intiface_pause_duration_seconds">Длительность паузы, секунд</string>
+    <string name="intiface_connection_disabled_hint">Включите подключение Intiface Central для соединения с устройством.</string>
+    <string name="intiface_rules_disabled_until_enabled">Подключение и правила сессии недоступны, пока Intiface Central выключен.</string>
 </resources>

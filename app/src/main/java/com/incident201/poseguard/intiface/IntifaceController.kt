@@ -2,6 +2,19 @@ package com.incident201.poseguard.intiface
 
 import kotlinx.coroutines.flow.StateFlow
 
+enum class IntifaceBackgroundMode { Off, Vibration }
+
+enum class IntifaceViolationMode { Off, Vibration, Pause }
+
+enum class IntifaceVibrationPattern { Constant, Pulse }
+
+data class IntifaceVibrationSettings(
+    val strength: Double = 0.5,
+    val pattern: IntifaceVibrationPattern = IntifaceVibrationPattern.Constant,
+    val pulseLengthSeconds: Double = 0.25,
+    val pulsePauseSeconds: Double = 0.25
+)
+
 data class IntifaceDeviceInfo(
     val index: Long,
     val name: String,
@@ -55,6 +68,8 @@ interface IntifaceController {
 
     suspend fun searchDevices(url: String)
     suspend fun testVibration()
+    suspend fun setVibrationStrength(strength: Double)
+    suspend fun stopVibration()
     fun selectDevice(device: IntifaceDeviceInfo)
     fun disconnect()
 }

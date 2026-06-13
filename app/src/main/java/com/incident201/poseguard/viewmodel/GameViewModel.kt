@@ -22,6 +22,13 @@ import com.incident201.poseguard.audio.PcmPattern
 import com.incident201.poseguard.audio.PcmSignalSettings
 import com.incident201.poseguard.audio.TtsPhraseTemplate
 import com.incident201.poseguard.audio.TtsVoiceMode
+import com.incident201.poseguard.intiface.IntifaceBackgroundMode
+import com.incident201.poseguard.intiface.IntifaceDeviceInfo
+import com.incident201.poseguard.intiface.IntifaceUiState
+import com.incident201.poseguard.intiface.IntifaceVibrationPattern
+import com.incident201.poseguard.intiface.IntifaceVibrationSettings
+import com.incident201.poseguard.intiface.IntifaceViolationMode
+import com.incident201.poseguard.intiface.createIntifaceController
 import com.incident201.poseguard.tracker.FaceDetectionStatus
 import com.incident201.poseguard.tracker.FaceCandidateCropper
 import com.incident201.poseguard.tracker.FaceDetectorService
@@ -92,7 +99,20 @@ private const val PREF_TIMER_MODE = "timer_mode"
 private const val PREF_RANDOM_MIN_DURATION_SECONDS = "random_min_duration_seconds"
 private const val PREF_RANDOM_MAX_DURATION_SECONDS = "random_max_duration_seconds"
 private const val PREF_INTIFACE_WEBSOCKET_URL = "intiface_websocket_url"
+private const val PREF_INTIFACE_CONNECTION_ENABLED = "intiface_connection_enabled"
+private const val PREF_INTIFACE_BACKGROUND_MODE = "intiface_background_mode"
+private const val PREF_INTIFACE_BACKGROUND_STRENGTH = "intiface_background_strength"
+private const val PREF_INTIFACE_BACKGROUND_PATTERN = "intiface_background_pattern"
+private const val PREF_INTIFACE_BACKGROUND_PULSE_LENGTH = "intiface_background_pulse_length"
+private const val PREF_INTIFACE_BACKGROUND_PULSE_PAUSE = "intiface_background_pulse_pause"
+private const val PREF_INTIFACE_VIOLATION_MODE = "intiface_violation_mode"
+private const val PREF_INTIFACE_VIOLATION_STRENGTH = "intiface_violation_strength"
+private const val PREF_INTIFACE_VIOLATION_PATTERN = "intiface_violation_pattern"
+private const val PREF_INTIFACE_VIOLATION_PULSE_LENGTH = "intiface_violation_pulse_length"
+private const val PREF_INTIFACE_VIOLATION_PULSE_PAUSE = "intiface_violation_pulse_pause"
+private const val PREF_INTIFACE_VIOLATION_PAUSE_SECONDS = "intiface_violation_pause_seconds"
 private const val DEFAULT_INTIFACE_WEBSOCKET_URL = "ws://10.0.2.2:12345/buttplug"
+private const val INTIFACE_VIOLATION_EFFECT_SECONDS = 1.0
 
 enum class GameState {
     Idle,
@@ -145,7 +165,20 @@ data class GameSettings(
     val customTtsTemplates: Map<TtsPhraseTemplate, String> = emptyMap(),
     val audioCueSettings: Map<AudioCue, AudioCueSettings> =
         AudioCue.entries.associateWith { AudioCueSettings() },
-    val intifaceWebSocketUrl: String = DEFAULT_INTIFACE_WEBSOCKET_URL
+    val intifaceWebSocketUrl: String = DEFAULT_INTIFACE_WEBSOCKET_URL,
+    val intifaceConnectionEnabled: Boolean = false,
+    val intifaceBackgroundMode: IntifaceBackgroundMode = IntifaceBackgroundMode.Off,
+    val intifaceBackgroundVibration: IntifaceVibrationSettings = IntifaceVibrationSettings(
+        strength = 0.2, pulseLengthSeconds = 0.5, pulsePauseSeconds = 0.5
+    ),
+    val intifaceViolationMode: IntifaceViolationMode = IntifaceViolationMode.Off,
+    val intifaceViolationVibration: IntifaceVibrationSettings = IntifaceVibrationSettings(
+        strength = 0.7,
+        pattern = IntifaceVibrationPattern.Pulse,
+        pulseLengthSeconds = 0.25,
+        pulsePauseSeconds = 0.25
+    ),
+    val intifaceViolationPauseSeconds: Double = 1.0
 )
 
 private fun GameSettings.toPoseOcclusionGuardConfig(): PoseOcclusionGuardConfig {
@@ -225,6 +258,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private var stabilizationFallbackJob: Job? = null
 
     private val prefs: SharedPreferences = application.getSharedPreferences("game_settings", Context.MODE_PRIVATE)
+    private val intifaceController = createIntifaceController(application.applicationContext)
+    val intifaceState: StateFlow<IntifaceUiState> = intifaceController.state
 
     private val _gameState = MutableStateFlow(GameState.Idle)
     val gameState: StateFlow<GameState> = _gameState.asStateFlow()
@@ -320,6 +355,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private var rawPoseMissingFrames = 0
     private var startDelayJob: Job? = null
     private var timerJob: Job? = null
+    private var intifaceBackgroundJob: Job? = null
+    private var intifaceOverrideJob: Job? = null
+
+    private enum class RunMode { Background, Violation }
 
     private var currentViolationCount = 0
     private var lastPenaltyAtMs = 0L
@@ -382,6 +421,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             PREF_WRIST_DRIFT_WEIGHT,
             DEFAULT_WRIST_DRIFT_WEIGHT
         ).coerceIn(0f, 1f)
+        val backgroundMode = enumPref(PREF_INTIFACE_BACKGROUND_MODE, IntifaceBackgroundMode.Off)
+        val violationMode = enumPref(PREF_INTIFACE_VIOLATION_MODE, IntifaceViolationMode.Off)
+        val backgroundPattern = enumPref(PREF_INTIFACE_BACKGROUND_PATTERN, IntifaceVibrationPattern.Constant)
+        val violationPattern = enumPref(PREF_INTIFACE_VIOLATION_PATTERN, IntifaceVibrationPattern.Pulse)
         return GameSettings(
             language = language,
             faceCheckMode = mode,
@@ -422,8 +465,36 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             intifaceWebSocketUrl = prefs.getString(
                 PREF_INTIFACE_WEBSOCKET_URL,
                 DEFAULT_INTIFACE_WEBSOCKET_URL
-            )?.trim() ?: DEFAULT_INTIFACE_WEBSOCKET_URL
+            )?.trim() ?: DEFAULT_INTIFACE_WEBSOCKET_URL,
+            intifaceConnectionEnabled = intifaceController.state.value.isSupported &&
+                prefs.getBoolean(PREF_INTIFACE_CONNECTION_ENABLED, false),
+            intifaceBackgroundMode = backgroundMode,
+            intifaceBackgroundVibration = IntifaceVibrationSettings(
+                strength = getDoublePref(PREF_INTIFACE_BACKGROUND_STRENGTH, 0.2).coerceIn(0.0, 1.0),
+                pattern = backgroundPattern,
+                pulseLengthSeconds = getDoublePref(PREF_INTIFACE_BACKGROUND_PULSE_LENGTH, 0.5).coerceIn(0.05, 10.0),
+                pulsePauseSeconds = getDoublePref(PREF_INTIFACE_BACKGROUND_PULSE_PAUSE, 0.5).coerceIn(0.05, 10.0)
+            ),
+            intifaceViolationMode = violationMode,
+            intifaceViolationVibration = IntifaceVibrationSettings(
+                strength = getDoublePref(PREF_INTIFACE_VIOLATION_STRENGTH, 0.7).coerceIn(0.0, 1.0),
+                pattern = violationPattern,
+                pulseLengthSeconds = getDoublePref(PREF_INTIFACE_VIOLATION_PULSE_LENGTH, 0.25).coerceIn(0.05, 10.0),
+                pulsePauseSeconds = getDoublePref(PREF_INTIFACE_VIOLATION_PULSE_PAUSE, 0.25).coerceIn(0.05, 10.0)
+            ),
+            intifaceViolationPauseSeconds =
+                getDoublePref(PREF_INTIFACE_VIOLATION_PAUSE_SECONDS, 1.0).coerceIn(0.05, 60.0)
         )
+    }
+
+    private inline fun <reified T : Enum<T>> enumPref(key: String, default: T): T =
+        runCatching { enumValueOf<T>(prefs.getString(key, default.name) ?: default.name) }.getOrDefault(default)
+
+    private fun getDoublePref(key: String, defaultValue: Double): Double =
+        if (prefs.contains(key)) Double.longBitsToDouble(prefs.getLong(key, 0L)) else defaultValue
+
+    private fun putDoublePref(key: String, value: Double) {
+        prefs.edit().putLong(key, java.lang.Double.doubleToRawLongBits(value)).apply()
     }
 
     private fun loadCustomTtsTemplates(): Map<TtsPhraseTemplate, String> =
@@ -762,6 +833,174 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         val normalized = value.trim()
         _gameSettings.value = _gameSettings.value.copy(intifaceWebSocketUrl = normalized)
         prefs.edit().putString(PREF_INTIFACE_WEBSOCKET_URL, normalized).apply()
+    }
+
+    fun updateIntifaceConnectionEnabled(enabled: Boolean) {
+        val effective = enabled && intifaceController.state.value.isSupported
+        _gameSettings.value = _gameSettings.value.copy(intifaceConnectionEnabled = effective)
+        prefs.edit().putBoolean(PREF_INTIFACE_CONNECTION_ENABLED, effective).apply()
+        if (!effective) disconnectIntiface()
+    }
+
+    fun updateIntifaceBackgroundMode(mode: IntifaceBackgroundMode) {
+        _gameSettings.value = _gameSettings.value.copy(intifaceBackgroundMode = mode)
+        prefs.edit().putString(PREF_INTIFACE_BACKGROUND_MODE, mode.name).apply()
+        restartIntifaceBackgroundIfNeeded()
+    }
+
+    fun updateIntifaceBackgroundVibration(settings: IntifaceVibrationSettings) {
+        val normalized = settings.normalized()
+        _gameSettings.value = _gameSettings.value.copy(intifaceBackgroundVibration = normalized)
+        putDoublePref(PREF_INTIFACE_BACKGROUND_STRENGTH, normalized.strength)
+        prefs.edit().putString(PREF_INTIFACE_BACKGROUND_PATTERN, normalized.pattern.name).apply()
+        putDoublePref(PREF_INTIFACE_BACKGROUND_PULSE_LENGTH, normalized.pulseLengthSeconds)
+        putDoublePref(PREF_INTIFACE_BACKGROUND_PULSE_PAUSE, normalized.pulsePauseSeconds)
+        restartIntifaceBackgroundIfNeeded()
+    }
+
+    fun updateIntifaceViolationMode(mode: IntifaceViolationMode) {
+        _gameSettings.value = _gameSettings.value.copy(intifaceViolationMode = mode)
+        prefs.edit().putString(PREF_INTIFACE_VIOLATION_MODE, mode.name).apply()
+    }
+
+    fun updateIntifaceViolationVibration(settings: IntifaceVibrationSettings) {
+        val normalized = settings.normalized()
+        _gameSettings.value = _gameSettings.value.copy(intifaceViolationVibration = normalized)
+        putDoublePref(PREF_INTIFACE_VIOLATION_STRENGTH, normalized.strength)
+        prefs.edit().putString(PREF_INTIFACE_VIOLATION_PATTERN, normalized.pattern.name).apply()
+        putDoublePref(PREF_INTIFACE_VIOLATION_PULSE_LENGTH, normalized.pulseLengthSeconds)
+        putDoublePref(PREF_INTIFACE_VIOLATION_PULSE_PAUSE, normalized.pulsePauseSeconds)
+    }
+
+    fun updateIntifaceViolationPauseSeconds(value: Double) {
+        val normalized = value.coerceIn(0.05, 60.0)
+        _gameSettings.value = _gameSettings.value.copy(intifaceViolationPauseSeconds = normalized)
+        putDoublePref(PREF_INTIFACE_VIOLATION_PAUSE_SECONDS, normalized)
+    }
+
+    fun searchIntifaceDevices(url: String) {
+        if (!_gameSettings.value.intifaceConnectionEnabled) return
+        updateIntifaceWebSocketUrl(url)
+        viewModelScope.launch { intifaceController.searchDevices(url) }
+    }
+
+    fun selectIntifaceDevice(device: IntifaceDeviceInfo) = intifaceController.selectDevice(device)
+
+    fun testIntifaceVibration() {
+        if (!_gameSettings.value.intifaceConnectionEnabled) return
+        viewModelScope.launch { intifaceController.testVibration() }
+    }
+
+    fun disconnectIntiface() {
+        stopIntifaceSessionSignals(disconnect = true)
+    }
+
+    private fun IntifaceVibrationSettings.normalized() = copy(
+        strength = strength.coerceIn(0.0, 1.0),
+        pulseLengthSeconds = pulseLengthSeconds.coerceIn(0.05, 10.0),
+        pulsePauseSeconds = pulsePauseSeconds.coerceIn(0.05, 10.0)
+    )
+
+    private fun isIntifaceRuntimeReady(settings: GameSettings = _gameSettings.value): Boolean {
+        val state = intifaceController.state.value
+        return state.isSupported && settings.intifaceConnectionEnabled &&
+            state.isConnected && state.selectedDevice != null
+    }
+
+    private fun startIntifaceSessionSignals() {
+        intifaceOverrideJob?.cancel()
+        intifaceOverrideJob = null
+        restartIntifaceBackgroundIfNeeded()
+    }
+
+    private fun stopIntifaceSessionSignals(disconnect: Boolean = false) {
+        intifaceBackgroundJob?.cancel()
+        intifaceBackgroundJob = null
+        intifaceOverrideJob?.cancel()
+        intifaceOverrideJob = null
+        viewModelScope.launch {
+            runCatching { intifaceController.stopVibration() }
+            if (disconnect) intifaceController.disconnect()
+        }
+    }
+
+    private fun restartIntifaceBackgroundIfNeeded() {
+        intifaceBackgroundJob?.cancel()
+        intifaceBackgroundJob = null
+        if (intifaceOverrideJob?.isActive == true) return
+        val settings = _gameSettings.value
+        if (_gameState.value != GameState.HoldingPose ||
+            settings.intifaceBackgroundMode != IntifaceBackgroundMode.Vibration ||
+            !isIntifaceRuntimeReady(settings)
+        ) {
+            viewModelScope.launch { runCatching { intifaceController.stopVibration() } }
+            return
+        }
+        intifaceBackgroundJob = viewModelScope.launch {
+            try {
+                runIntifaceVibrationPattern(settings.intifaceBackgroundVibration, RunMode.Background)
+            } finally {
+                runCatching { intifaceController.stopVibration() }
+            }
+        }
+    }
+
+    private fun triggerIntifaceViolationEffect() {
+        val settings = _gameSettings.value
+        if (settings.intifaceViolationMode == IntifaceViolationMode.Off || !isIntifaceRuntimeReady(settings)) return
+        intifaceBackgroundJob?.cancel()
+        intifaceBackgroundJob = null
+        intifaceOverrideJob?.cancel()
+        intifaceOverrideJob = viewModelScope.launch {
+            try {
+                when (settings.intifaceViolationMode) {
+                    IntifaceViolationMode.Off -> Unit
+                    IntifaceViolationMode.Pause -> {
+                        intifaceController.stopVibration()
+                        delay((settings.intifaceViolationPauseSeconds * 1000).toLong())
+                    }
+                    IntifaceViolationMode.Vibration ->
+                        runIntifaceVibrationPattern(settings.intifaceViolationVibration, RunMode.Violation)
+                }
+            } finally {
+                runCatching { intifaceController.stopVibration() }
+                intifaceOverrideJob = null
+                restartIntifaceBackgroundIfNeeded()
+            }
+        }
+    }
+
+    private suspend fun runIntifaceVibrationPattern(
+        settings: IntifaceVibrationSettings,
+        mode: RunMode
+    ) {
+        val normalized = settings.normalized()
+        if (normalized.pattern == IntifaceVibrationPattern.Constant) {
+            if (mode == RunMode.Background) {
+                while (_gameState.value == GameState.HoldingPose && isIntifaceRuntimeReady()) {
+                    intifaceController.setVibrationStrength(normalized.strength)
+                    delay(500)
+                }
+            } else {
+                intifaceController.setVibrationStrength(normalized.strength)
+                delay((INTIFACE_VIOLATION_EFFECT_SECONDS * 1000).toLong())
+                intifaceController.setVibrationStrength(0.0)
+            }
+            return
+        }
+        val startedAt = SystemClock.elapsedRealtime()
+        do {
+            intifaceController.setVibrationStrength(normalized.strength)
+            delay((normalized.pulseLengthSeconds * 1000).toLong())
+            intifaceController.setVibrationStrength(0.0)
+            delay((normalized.pulsePauseSeconds * 1000).toLong())
+        } while (
+            if (mode == RunMode.Background) {
+                _gameState.value == GameState.HoldingPose && isIntifaceRuntimeReady()
+            } else {
+                SystemClock.elapsedRealtime() - startedAt < (INTIFACE_VIOLATION_EFFECT_SECONDS * 1000).toLong()
+            }
+        )
     }
 
     fun updateAudioCueSettings(cue: AudioCue, settings: AudioCueSettings) {
@@ -1106,6 +1345,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         currentViolationCount += 1
         _violationCount.value = currentViolationCount
         updateRuleViolationCounts(type)
+        triggerIntifaceViolationEffect()
         if (currentViolationCount >= _gameSettings.value.maxViolations) {
             val defeatReason = when (type) {
                 RuleViolationType.Drift -> tr(R.string.defeat_drift)
@@ -1403,6 +1643,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             settings = sessionSettingsSnapshot
         )
         _gameState.value = GameState.Success
+        stopIntifaceSessionSignals()
         resetMovementGaugeState()
         _statusMessage.value = tr(R.string.victory)
         playAudioCue(AudioCue.TimeIsUp, ttsText(TtsPhraseTemplate.TimeIsUp))
@@ -1538,6 +1779,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             _gameState.value = GameState.HoldingPose
             _statusMessage.value = tr(R.string.time_started_hold_position)
             startTimerLoop()
+            startIntifaceSessionSignals()
             playAudioCue(
                 AudioCue.TimeStartedHoldPosition,
                 ttsText(TtsPhraseTemplate.TimeStartedHoldPosition)
@@ -1586,6 +1828,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         if (!tryReserveSessionDefeat()) {
             return
         }
+        stopIntifaceSessionSignals()
 
         startDelayJob?.cancel()
         timerJob?.cancel()
@@ -1646,6 +1889,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     fun dismissFinalScreen() {
         if (_gameState.value != GameState.Success && _gameState.value != GameState.Failed) return
+        stopIntifaceSessionSignals()
         startDelayJob?.cancel()
         timerJob?.cancel()
         stabilizationFallbackJob?.cancel()
@@ -1680,6 +1924,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     fun stopSession() {
+        stopIntifaceSessionSignals()
         startDelayJob?.cancel()
         timerJob?.cancel()
         stabilizationFallbackJob?.cancel()
@@ -1714,6 +1959,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
     override fun onCleared() {
         isCleared = true
+        intifaceBackgroundJob?.cancel()
+        intifaceOverrideJob?.cancel()
+        runCatching {
+            kotlinx.coroutines.runBlocking { intifaceController.stopVibration() }
+        }
+        intifaceController.disconnect()
         stabilizationFallbackJob?.cancel()
         stabilizationFallbackJob = null
         sensorManager.unregisterListener(this)
