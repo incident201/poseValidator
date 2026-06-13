@@ -37,11 +37,17 @@ jobs:
             keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      - name: Run Unit Tests
-        run: gradle :app:testOfflineDebugUnitTest :app:testOnlineDebugUnitTest --no-daemon
+      - name: Run Offline Unit Tests
+        run: gradle :app:testOfflineDebugUnitTest --no-daemon --stacktrace --info
 
-      - name: Build Debug APKs
-        run: gradle :app:assembleOfflineDebug :app:assembleOnlineDebug --no-daemon
+      - name: Run Online Unit Tests
+        run: gradle :app:testOnlineDebugUnitTest --no-daemon --stacktrace --info
+
+      - name: Build Offline Debug APK
+        run: gradle :app:assembleOfflineDebug --no-daemon --stacktrace --info
+
+      - name: Build Online Debug APK
+        run: gradle :app:assembleOnlineDebug --no-daemon --stacktrace --info
 
       - name: Rename APKs with Timestamp
         run: |

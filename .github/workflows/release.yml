@@ -46,12 +46,25 @@ jobs:
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
 
-      - name: Run Unit Tests
-        run: gradle :app:testOfflineDebugUnitTest :app:testOnlineDebugUnitTest --no-daemon
+      - name: Run Offline Unit Tests
+        run: gradle :app:testOfflineDebugUnitTest --no-daemon --stacktrace --info
 
-      - name: Build Release APKs
+      - name: Run Online Unit Tests
+        run: gradle :app:testOnlineDebugUnitTest --no-daemon --stacktrace --info
+
+      - name: Build Offline Release APK
         run: |
-          gradle :app:assembleOfflineRelease :app:assembleOnlineRelease --no-daemon \
+          gradle :app:assembleOfflineRelease --no-daemon --stacktrace --info \
+            -PVERSION_NAME="${{ inputs.version_name }}" \
+            -PVERSION_CODE="${{ inputs.version_code }}"
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Build Online Release APK
+        run: |
+          gradle :app:assembleOnlineRelease --no-daemon --stacktrace --info \
             -PVERSION_NAME="${{ inputs.version_name }}" \
             -PVERSION_CODE="${{ inputs.version_code }}"
         env:
