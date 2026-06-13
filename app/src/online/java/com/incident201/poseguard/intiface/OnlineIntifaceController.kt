@@ -192,12 +192,12 @@ internal class OnlineIntifaceController : IntifaceController {
             return
         }
         if (stopDevice) {
-            val zeroError = runCatching {
-                requireOk(awaitResponse(device.sendScalarVibrateCmd(0.0)))
-            }.exceptionOrNull()
-            val stopError = runCatching {
-                requireOk(awaitResponse(device.sendStopDeviceCmd()))
-            }.exceptionOrNull()
+            val zeroError = runCurrentCommand(activeClient, generation) {
+                device.sendScalarVibrateCmd(0.0)
+            }
+            val stopError = runCurrentCommand(activeClient, generation) {
+                device.sendStopDeviceCmd()
+            }
             val error = zeroError ?: stopError
             updateIfCurrent {
                 if (error != null) {
@@ -209,8 +209,12 @@ internal class OnlineIntifaceController : IntifaceController {
             return
         }
 
+        val future = currentCommandFutureOrNull(activeClient, generation) {
+            device.sendScalarVibrateCmd(strength)
+        } ?: return
+
         runCatching {
-            requireOk(awaitResponse(device.sendScalarVibrateCmd(strength)))
+            requireOk(awaitResponse(future))
         }.onSuccess {
             updateIfCurrent { it.copy(errorMessage = null) }
         }.onFailure { error ->
@@ -268,14 +272,19 @@ internal class OnlineIntifaceController : IntifaceController {
                 errorMessage = null
             )
             repeat(TEST_PULSE_COUNT) { pulseIndex ->
-                if (!isCurrent(activeClient, generation)) return
-                requireOk(awaitResponse(device.sendScalarVibrateCmd(TEST_VIBRATION_STRENGTH)))
+                val pulseFuture = currentCommandFutureOrNull(activeClient, generation) {
+                    device.sendScalarVibrateCmd(TEST_VIBRATION_STRENGTH)
+                } ?: return
+                requireOk(awaitResponse(pulseFuture))
                 delay(TEST_PULSE_DURATION_MS)
-                if (!isCurrent(activeClient, generation)) return
-                requireOk(awaitResponse(device.sendScalarVibrateCmd(0.0)))
+                
+                val zeroFuture = currentCommandFutureOrNull(activeClient, generation) {
+                    device.sendScalarVibrateCmd(0.0)
+                } ?: return
+                requireOk(awaitResponse(zeroFuture))
+                
                 if (pulseIndex < TEST_PULSE_COUNT - 1) {
                     delay(TEST_PULSE_PAUSE_MS)
-                    if (!isCurrent(activeClient, generation)) return
                 }
             }
             if (isCurrent(activeClient, generation)) {
@@ -294,8 +303,16 @@ internal class OnlineIntifaceController : IntifaceController {
             }
         } finally {
             deviceToStop?.let { selectedDevice ->
-                runCatching { requireOk(awaitResponse(selectedDevice.sendScalarVibrateCmd(0.0))) }
-                runCatching { requireOk(awaitResponse(selectedDevice.sendStopDeviceCmd())) }
+                currentCommandFutureOrNull(activeClient, generation) {
+                    selectedDevice.sendScalarVibrateCmd(0.0)
+                }?.let { future ->
+                    runCatching { requireOk(awaitResponse(future)) }
+                }
+                currentCommandFutureOrNull(activeClient, generation) {
+                    selectedDevice.sendStopDeviceCmd()
+                }?.let { future ->
+                    runCatching { requireOk(awaitResponse(future)) }
+                }
             }
             if (isCurrent(activeClient, generation)) {
                 mutableState.value = mutableState.value.copy(isTestingVibration = false)
@@ -417,6 +434,27 @@ internal class OnlineIntifaceController : IntifaceController {
 
     private fun isCurrent(candidate: ButtplugClientWSClient, generation: Long): Boolean =
         operationGeneration.get() == generation && synchronized(clientLock) { client === candidate }
+
+    private fun currentCommandFutureOrNull(
+        sourceClient: ButtplugClientWSClient,
+        generation: Long,
+        create: () -> Future<out ButtplugMessage>
+    ): Future<out ButtplugMessage>? = synchronized(clientLock) {
+        if (operationGeneration.get() == generation && client === sourceClient) {
+            create()
+        } else {
+            null
+        }
+    }
+
+    private fun runCurrentCommand(
+        sourceClient: ButtplugClientWSClient,
+        generation: Long,
+        create: () -> Future<out ButtplugMessage>
+    ): Throwable? {
+        val future = currentCommandFutureOrNull(sourceClient, generation, create) ?: return null
+        return runCatching { requireOk(awaitResponse(future)) }.exceptionOrNull()
+    }
 
     private fun parseWebSocketUri(value: String): URI? = runCatching {
         URI(value.trim()).takeIf { uri ->
