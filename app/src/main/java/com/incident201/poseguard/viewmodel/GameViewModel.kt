@@ -43,6 +43,7 @@ import com.incident201.poseguard.tracker.PoseOcclusionGuardConfig
 import com.incident201.poseguard.tracker.PoseSmoother
 import com.incident201.poseguard.tracker.landmark
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,6 +58,7 @@ import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.coroutineContext
 import kotlin.math.abs
 import kotlin.math.sqrt
 import kotlin.random.Random
@@ -945,13 +947,28 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         }
     }
 
-    private fun triggerIntifaceViolationEffect() {
+    private fun triggerIntifaceViolationEffect(
+        resumeBackgroundAfter: Boolean = true,
+        requireHoldingPose: Boolean = true
+    ) {
         val settings = _gameSettings.value
-        if (settings.intifaceViolationMode == IntifaceViolationMode.Off || !isIntifaceRuntimeReady(settings)) return
+        if (settings.intifaceViolationMode == IntifaceViolationMode.Off ||
+            !isIntifaceRuntimeReady(settings) ||
+            (requireHoldingPose && _gameState.value != GameState.HoldingPose)
+        ) {
+            return
+        }
         intifaceBackgroundJob?.cancel()
         intifaceBackgroundJob = null
-        intifaceOverrideJob?.cancel()
-        intifaceOverrideJob = viewModelScope.launch {
+        startIntifaceOverrideJob(settings, resumeBackgroundAfter)
+    }
+
+    private fun startIntifaceOverrideJob(
+        settings: GameSettings,
+        resumeBackgroundAfter: Boolean
+    ) {
+        val oldJob = intifaceOverrideJob
+        val newJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
                 when (settings.intifaceViolationMode) {
                     IntifaceViolationMode.Off -> Unit
@@ -964,10 +981,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 }
             } finally {
                 runCatching { intifaceController.stopVibration() }
-                intifaceOverrideJob = null
-                restartIntifaceBackgroundIfNeeded()
+                val currentJob = coroutineContext[Job]
+                if (intifaceOverrideJob === currentJob) {
+                    intifaceOverrideJob = null
+                    if (resumeBackgroundAfter) {
+                        restartIntifaceBackgroundIfNeeded()
+                    }
+                }
             }
         }
+        intifaceOverrideJob = newJob
+        oldJob?.cancel()
+        newJob.start()
     }
 
     private suspend fun runIntifaceVibrationPattern(
@@ -988,19 +1013,34 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             }
             return
         }
-        val startedAt = SystemClock.elapsedRealtime()
+        if (mode == RunMode.Violation) {
+            val deadlineMs = SystemClock.elapsedRealtime() +
+                (INTIFACE_VIOLATION_EFFECT_SECONDS * 1000).toLong()
+            while (true) {
+                var remainingMs = deadlineMs - SystemClock.elapsedRealtime()
+                if (remainingMs <= 0L) break
+                intifaceController.setVibrationStrength(normalized.strength)
+                delay(
+                    (normalized.pulseLengthSeconds * 1000).toLong()
+                        .coerceAtMost(remainingMs)
+                )
+                remainingMs = deadlineMs - SystemClock.elapsedRealtime()
+                intifaceController.setVibrationStrength(0.0)
+                if (remainingMs <= 0L) break
+                delay(
+                    (normalized.pulsePauseSeconds * 1000).toLong()
+                        .coerceAtMost(remainingMs)
+                )
+            }
+            runCatching { intifaceController.setVibrationStrength(0.0) }
+            return
+        }
         do {
             intifaceController.setVibrationStrength(normalized.strength)
             delay((normalized.pulseLengthSeconds * 1000).toLong())
             intifaceController.setVibrationStrength(0.0)
             delay((normalized.pulsePauseSeconds * 1000).toLong())
-        } while (
-            if (mode == RunMode.Background) {
-                _gameState.value == GameState.HoldingPose && isIntifaceRuntimeReady()
-            } else {
-                SystemClock.elapsedRealtime() - startedAt < (INTIFACE_VIOLATION_EFFECT_SECONDS * 1000).toLong()
-            }
-        )
+        } while (_gameState.value == GameState.HoldingPose && isIntifaceRuntimeReady())
     }
 
     fun updateAudioCueSettings(cue: AudioCue, settings: AudioCueSettings) {
@@ -1345,8 +1385,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         currentViolationCount += 1
         _violationCount.value = currentViolationCount
         updateRuleViolationCounts(type)
-        triggerIntifaceViolationEffect()
-        if (currentViolationCount >= _gameSettings.value.maxViolations) {
+        val isTerminalViolation = currentViolationCount >= _gameSettings.value.maxViolations
+        if (isTerminalViolation) {
             val defeatReason = when (type) {
                 RuleViolationType.Drift -> tr(R.string.defeat_drift)
                 RuleViolationType.Motion -> tr(R.string.defeat_motion)
@@ -1355,10 +1395,15 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                     tr(R.string.defeat_face_not_to_camera)
                 else tr(R.string.defeat_face_to_camera)
             }
-            triggerDefeat(defeatReason)
+            triggerIntifaceViolationEffect(
+                resumeBackgroundAfter = false,
+                requireHoldingPose = false
+            )
+            triggerDefeat(defeatReason, preserveIntifaceOverride = true)
             return true
         }
 
+        triggerIntifaceViolationEffect()
         applyPenalty(type, penaltyMinutesForViolation(currentViolationCount))
         lastPenaltyAtMs = now
         return false
@@ -1824,11 +1869,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private fun resetMovementGaugeState() { _movementGaugeState.value = MovementGaugeState() }
 
-    fun triggerDefeat(reason: String) {
+    fun triggerDefeat(reason: String, preserveIntifaceOverride: Boolean = false) {
         if (!tryReserveSessionDefeat()) {
             return
         }
-        stopIntifaceSessionSignals()
+        if (preserveIntifaceOverride) {
+            intifaceBackgroundJob?.cancel()
+            intifaceBackgroundJob = null
+        } else {
+            stopIntifaceSessionSignals()
+        }
 
         startDelayJob?.cancel()
         timerJob?.cancel()
@@ -1961,9 +2011,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         isCleared = true
         intifaceBackgroundJob?.cancel()
         intifaceOverrideJob?.cancel()
-        runCatching {
-            kotlinx.coroutines.runBlocking { intifaceController.stopVibration() }
-        }
         intifaceController.disconnect()
         stabilizationFallbackJob?.cancel()
         stabilizationFallbackJob = null

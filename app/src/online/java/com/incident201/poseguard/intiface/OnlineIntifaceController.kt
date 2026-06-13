@@ -19,6 +19,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.net.URI
+import java.util.concurrent.Future
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicLong
 
 internal class OnlineIntifaceController : IntifaceController {
@@ -180,8 +183,8 @@ internal class OnlineIntifaceController : IntifaceController {
             return
         }
         try {
-            requireOk(device.sendScalarVibrateCmd(strength).get())
-            if (stopDevice) requireOk(device.sendStopDeviceCmd().get())
+            requireOk(awaitResponse(device.sendScalarVibrateCmd(strength)))
+            if (stopDevice) requireOk(awaitResponse(device.sendStopDeviceCmd()))
         } catch (error: Throwable) {
             mutableState.value = mutableState.value.copy(
                 errorMessage = error.toSessionVibrationErrorMessage()
@@ -235,9 +238,9 @@ internal class OnlineIntifaceController : IntifaceController {
                 errorMessage = null
             )
             repeat(TEST_PULSE_COUNT) { pulseIndex ->
-                requireOk(device.sendScalarVibrateCmd(TEST_VIBRATION_STRENGTH).get())
+                requireOk(awaitResponse(device.sendScalarVibrateCmd(TEST_VIBRATION_STRENGTH)))
                 delay(TEST_PULSE_DURATION_MS)
-                requireOk(device.sendScalarVibrateCmd(0.0).get())
+                requireOk(awaitResponse(device.sendScalarVibrateCmd(0.0)))
                 if (pulseIndex < TEST_PULSE_COUNT - 1) {
                     delay(TEST_PULSE_PAUSE_MS)
                 }
@@ -254,8 +257,8 @@ internal class OnlineIntifaceController : IntifaceController {
             )
         } finally {
             deviceToStop?.let { selectedDevice ->
-                runCatching { requireOk(selectedDevice.sendScalarVibrateCmd(0.0).get()) }
-                runCatching { requireOk(selectedDevice.sendStopDeviceCmd().get()) }
+                runCatching { requireOk(awaitResponse(selectedDevice.sendScalarVibrateCmd(0.0))) }
+                runCatching { requireOk(awaitResponse(selectedDevice.sendStopDeviceCmd())) }
             }
             mutableState.value = mutableState.value.copy(isTestingVibration = false)
         }
@@ -411,6 +414,15 @@ internal class OnlineIntifaceController : IntifaceController {
         }
     }
 
+    private fun awaitResponse(future: Future<out ButtplugMessage>): ButtplugMessage {
+        return try {
+            future.get(COMMAND_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        } catch (timeout: TimeoutException) {
+            future.cancel(true)
+            throw timeout
+        }
+    }
+
     private fun Throwable.toVibrationErrorMessage(): IntifaceUiMessage {
         val detail = message?.takeIf { it.isNotBlank() }
             ?: cause?.message?.takeIf { it.isNotBlank() }
@@ -446,6 +458,7 @@ internal class OnlineIntifaceController : IntifaceController {
         const val TEST_VIBRATION_STRENGTH = 0.6
         const val TEST_PULSE_DURATION_MS = 180L
         const val TEST_PULSE_PAUSE_MS = 180L
+        const val COMMAND_TIMEOUT_MS = 750L
         const val COMMAND_REJECTED_FALLBACK = "Command rejected"
         const val UNEXPECTED_RESPONSE_PREFIX = "Unexpected response: "
     }
