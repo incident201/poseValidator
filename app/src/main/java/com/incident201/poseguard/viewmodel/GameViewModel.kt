@@ -58,6 +58,7 @@ import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.coroutineContext
 import kotlin.math.abs
 import kotlin.math.sqrt
@@ -359,6 +360,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     private var timerJob: Job? = null
     private var intifaceBackgroundJob: Job? = null
     private var intifaceOverrideJob: Job? = null
+    private val intifaceSignalGeneration = AtomicLong(0L)
 
     private enum class RunMode { Background, Violation }
 
@@ -910,12 +912,16 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     private fun startIntifaceSessionSignals() {
+        nextIntifaceSignalGeneration()
+        intifaceBackgroundJob?.cancel()
+        intifaceBackgroundJob = null
         intifaceOverrideJob?.cancel()
         intifaceOverrideJob = null
         restartIntifaceBackgroundIfNeeded()
     }
 
     private fun stopIntifaceSessionSignals(disconnect: Boolean = false) {
+        nextIntifaceSignalGeneration()
         intifaceBackgroundJob?.cancel()
         intifaceBackgroundJob = null
         intifaceOverrideJob?.cancel()
@@ -926,23 +932,33 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         }
     }
 
+    private fun nextIntifaceSignalGeneration(): Long =
+        intifaceSignalGeneration.incrementAndGet()
+
     private fun restartIntifaceBackgroundIfNeeded() {
         intifaceBackgroundJob?.cancel()
         intifaceBackgroundJob = null
         if (intifaceOverrideJob?.isActive == true) return
+        val generation = nextIntifaceSignalGeneration()
         val settings = _gameSettings.value
         if (_gameState.value != GameState.HoldingPose ||
             settings.intifaceBackgroundMode != IntifaceBackgroundMode.Vibration ||
             !isIntifaceRuntimeReady(settings)
         ) {
-            viewModelScope.launch { runCatching { intifaceController.stopVibration() } }
+            viewModelScope.launch {
+                if (intifaceSignalGeneration.get() == generation) {
+                    runCatching { intifaceController.stopVibration() }
+                }
+            }
             return
         }
         intifaceBackgroundJob = viewModelScope.launch {
             try {
                 runIntifaceVibrationPattern(settings.intifaceBackgroundVibration, RunMode.Background)
             } finally {
-                runCatching { intifaceController.stopVibration() }
+                if (intifaceSignalGeneration.get() == generation) {
+                    runCatching { intifaceController.stopVibration() }
+                }
             }
         }
     }
@@ -958,8 +974,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         ) {
             return
         }
-        intifaceBackgroundJob?.cancel()
-        intifaceBackgroundJob = null
         startIntifaceOverrideJob(settings, resumeBackgroundAfter)
     }
 
@@ -968,6 +982,9 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         resumeBackgroundAfter: Boolean
     ) {
         val oldJob = intifaceOverrideJob
+        val generation = nextIntifaceSignalGeneration()
+        intifaceBackgroundJob?.cancel()
+        intifaceBackgroundJob = null
         val newJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
                 when (settings.intifaceViolationMode) {
@@ -980,9 +997,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                         runIntifaceVibrationPattern(settings.intifaceViolationVibration, RunMode.Violation)
                 }
             } finally {
-                runCatching { intifaceController.stopVibration() }
                 val currentJob = coroutineContext[Job]
-                if (intifaceOverrideJob === currentJob) {
+                if (intifaceOverrideJob === currentJob &&
+                    intifaceSignalGeneration.get() == generation
+                ) {
+                    runCatching { intifaceController.stopVibration() }
                     intifaceOverrideJob = null
                     if (resumeBackgroundAfter) {
                         restartIntifaceBackgroundIfNeeded()
@@ -2009,6 +2028,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
     override fun onCleared() {
         isCleared = true
+        nextIntifaceSignalGeneration()
         intifaceBackgroundJob?.cancel()
         intifaceOverrideJob?.cancel()
         intifaceController.disconnect()

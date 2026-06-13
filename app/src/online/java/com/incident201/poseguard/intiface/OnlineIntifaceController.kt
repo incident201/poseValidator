@@ -182,10 +182,25 @@ internal class OnlineIntifaceController : IntifaceController {
             )
             return
         }
-        try {
+        if (stopDevice) {
+            val zeroError = runCatching {
+                requireOk(awaitResponse(device.sendScalarVibrateCmd(0.0)))
+            }.exceptionOrNull()
+            val stopError = runCatching {
+                requireOk(awaitResponse(device.sendStopDeviceCmd()))
+            }.exceptionOrNull()
+            val error = zeroError ?: stopError
+            if (error != null) {
+                mutableState.value = mutableState.value.copy(
+                    errorMessage = error.toSessionVibrationErrorMessage()
+                )
+            }
+            return
+        }
+
+        runCatching {
             requireOk(awaitResponse(device.sendScalarVibrateCmd(strength)))
-            if (stopDevice) requireOk(awaitResponse(device.sendStopDeviceCmd()))
-        } catch (error: Throwable) {
+        }.onFailure { error ->
             mutableState.value = mutableState.value.copy(
                 errorMessage = error.toSessionVibrationErrorMessage()
             )
