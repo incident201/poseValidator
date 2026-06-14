@@ -41,6 +41,8 @@ internal class OnlineIntifaceController : IntifaceController {
     private val operationGeneration = AtomicLong(0L)
     private var client: ButtplugClientWSClient? = null
     private var connectedUri: URI? = null
+    @Volatile
+    private var pendingClientDisconnectJob: Job? = null
 
     override suspend fun searchDevices(url: String) = withContext(Dispatchers.IO) {
         searchDevicesMutex.withLock {
@@ -83,6 +85,8 @@ internal class OnlineIntifaceController : IntifaceController {
                 return existingSession
             }
         }
+
+        awaitPendingClientDisconnect()
 
         return clientLifecycleMutex.withLock {
             val oldClient = takeAndInvalidateCurrentClient()
@@ -588,9 +592,15 @@ internal class OnlineIntifaceController : IntifaceController {
                     errorMessage = IntifaceUiMessage(IntifaceMessage.ServerError)
                 )
 
-                controllerScope.launch {
+                val disconnectJob = controllerScope.launch {
                     clientLifecycleMutex.withLock {
                         disconnectClient(clientToDisconnect)
+                    }
+                }
+                pendingClientDisconnectJob = disconnectJob
+                disconnectJob.invokeOnCompletion {
+                    if (pendingClientDisconnectJob === disconnectJob) {
+                        pendingClientDisconnectJob = null
                     }
                 }
             }
@@ -624,6 +634,10 @@ internal class OnlineIntifaceController : IntifaceController {
             connectedUri = null
             client.also { client = null }
         }
+    }
+
+    private suspend fun awaitPendingClientDisconnect() {
+        pendingClientDisconnectJob?.join()
     }
 
     private fun clearTransientMessagesInState() {
