@@ -245,7 +245,7 @@ internal class OnlineIntifaceController : IntifaceController {
                 }
             }
             if (clientToDisconnect != null) {
-                disconnectClient(clientToDisconnect)
+                launchPendingClientDisconnect(clientToDisconnect)
                 mutableState.value = mutableState.value.copy(
                     isConnected = false,
                     isScanning = false,
@@ -329,7 +329,7 @@ internal class OnlineIntifaceController : IntifaceController {
                 }
             }
             if (clientToDisconnect != null) {
-                disconnectClient(clientToDisconnect)
+                launchPendingClientDisconnect(clientToDisconnect)
                 mutableState.value = mutableState.value.copy(
                     isConnected = false,
                     isScanning = false,
