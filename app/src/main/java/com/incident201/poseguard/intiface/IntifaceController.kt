@@ -59,8 +59,16 @@ data class IntifaceUiMessage(
     val args: List<String> = emptyList()
 )
 
+enum class IntifaceOperation {
+    Idle,
+    Connecting,
+    Scanning,
+    Testing
+}
+
 data class IntifaceUiState(
     val isSupported: Boolean,
+    val operation: IntifaceOperation = IntifaceOperation.Idle,
     val isConnected: Boolean = false,
     val isScanning: Boolean = false,
     val isTestingVibration: Boolean = false,
@@ -68,7 +76,10 @@ data class IntifaceUiState(
     val selectedDevice: IntifaceDeviceInfo? = null,
     val statusMessage: IntifaceUiMessage? = null,
     val errorMessage: IntifaceUiMessage? = null
-)
+) {
+    val isBusy: Boolean
+        get() = operation != IntifaceOperation.Idle
+}
 
 interface IntifaceController {
     val state: StateFlow<IntifaceUiState>

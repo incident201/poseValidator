@@ -46,6 +46,7 @@ import com.incident201.poseguard.intiface.IntifaceBackgroundMode
 import com.incident201.poseguard.intiface.IntifaceMessage
 import com.incident201.poseguard.intiface.IntifaceUiMessage
 import com.incident201.poseguard.intiface.IntifaceUiState
+import com.incident201.poseguard.intiface.IntifaceOperation
 import com.incident201.poseguard.intiface.IntifaceVibrationPattern
 import com.incident201.poseguard.intiface.IntifaceVibrationSettings
 import com.incident201.poseguard.intiface.IntifaceViolationMode
@@ -720,28 +721,23 @@ private fun IntifaceConnectionCard(
 ) {
     var showDeviceDialog by remember { mutableStateOf(false) }
     var manualSearchDialogState by remember { mutableStateOf(ManualIntifaceSearchDialogState.Idle) }
-    var searchClickPending by remember { mutableStateOf(false) }
 
-    val intifaceInteractionBlocked = searchClickPending || state.isScanning || state.isTestingVibration
+    val intifaceInteractionBlocked = state.isBusy
 
-    LaunchedEffect(state.isScanning, state.errorMessage, state.statusMessage, state.devices) {
-        if (state.isScanning || state.errorMessage != null || state.devices.isNotEmpty()) {
-            searchClickPending = false
-        }
-    }
-
-    LaunchedEffect(manualSearchDialogState, state.isScanning, state.devices, state.errorMessage) {
+    LaunchedEffect(manualSearchDialogState, state.operation, state.errorMessage, state.devices) {
         when (manualSearchDialogState) {
             ManualIntifaceSearchDialogState.Idle -> Unit
         
             ManualIntifaceSearchDialogState.WaitingForScanStart -> {
-                if (state.isScanning) {
+                if (state.operation == IntifaceOperation.Scanning) {
                     manualSearchDialogState = ManualIntifaceSearchDialogState.WaitingForScanFinish
+                } else if (state.operation == IntifaceOperation.Idle && state.errorMessage != null) {
+                    manualSearchDialogState = ManualIntifaceSearchDialogState.Idle
                 }
             }
         
             ManualIntifaceSearchDialogState.WaitingForScanFinish -> {
-                if (!state.isScanning) {
+                if (state.operation == IntifaceOperation.Idle) {
                     manualSearchDialogState = ManualIntifaceSearchDialogState.Idle
                     if (state.errorMessage == null && state.devices.isNotEmpty()) {
                         showDeviceDialog = true
@@ -791,7 +787,6 @@ private fun IntifaceConnectionCard(
                 val hasActiveDevice = state.isConnected && state.selectedDevice != null
                 Button(
                     onClick = { 
-                        searchClickPending = true
                         manualSearchDialogState = ManualIntifaceSearchDialogState.WaitingForScanStart
                         onSearchDevices(settings.intifaceWebSocketUrl) 
                     },

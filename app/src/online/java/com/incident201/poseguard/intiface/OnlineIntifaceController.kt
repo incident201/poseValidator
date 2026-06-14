@@ -57,6 +57,14 @@ internal class OnlineIntifaceController : IntifaceController {
         try {
             runSearchDevicesLocked(url)
         } finally {
+            if (mutableState.value.operation == IntifaceOperation.Connecting ||
+                mutableState.value.operation == IntifaceOperation.Scanning
+            ) {
+                mutableState.value = mutableState.value.copy(
+                    operation = IntifaceOperation.Idle,
+                    isScanning = false
+                )
+            }
             searchDevicesMutex.unlock()
         }
     }
@@ -69,6 +77,14 @@ internal class OnlineIntifaceController : IntifaceController {
         try {
             runConnectToRememberedLocked(url, rememberedDevice)
         } finally {
+            if (mutableState.value.operation == IntifaceOperation.Connecting ||
+                mutableState.value.operation == IntifaceOperation.Scanning
+            ) {
+                mutableState.value = mutableState.value.copy(
+                    operation = IntifaceOperation.Idle,
+                    isScanning = false
+                )
+            }
             searchDevicesMutex.unlock()
         }
     }
@@ -117,6 +133,7 @@ internal class OnlineIntifaceController : IntifaceController {
 
             mutableState.value = IntifaceUiState(
                 isSupported = true,
+                operation = IntifaceOperation.Connecting,
                 isScanning = true,
                 statusMessage = IntifaceUiMessage(IntifaceMessage.Connecting)
             )
@@ -156,6 +173,7 @@ internal class OnlineIntifaceController : IntifaceController {
             if (clientToDisconnect != null) {
                 launchPendingClientDisconnect(clientToDisconnect)
                 mutableState.value = mutableState.value.copy(
+                    operation = IntifaceOperation.Idle,
                     isConnected = false,
                     isScanning = false,
                     devices = emptyList(),
@@ -189,6 +207,7 @@ internal class OnlineIntifaceController : IntifaceController {
 
     private suspend fun runSearchDevicesLocked(url: String) {
         mutableState.value = mutableState.value.copy(
+            operation = IntifaceOperation.Scanning,
             isScanning = true,
             statusMessage = IntifaceUiMessage(IntifaceMessage.Scanning),
             errorMessage = null
@@ -196,6 +215,7 @@ internal class OnlineIntifaceController : IntifaceController {
         val pair = ensureClientConnected(url, forceNewConnection = true)
         if (pair == null) {
             mutableState.value = mutableState.value.copy(
+                operation = IntifaceOperation.Idle,
                 isScanning = false,
                 statusMessage = null
             )
@@ -212,6 +232,7 @@ internal class OnlineIntifaceController : IntifaceController {
             if (!scanStarted) {
                 if (isCurrent(newClient, generation)) {
                     mutableState.value = mutableState.value.copy(
+                        operation = IntifaceOperation.Idle,
                         isScanning = false,
                         statusMessage = null,
                         errorMessage = IntifaceUiMessage(IntifaceMessage.ScanRejected)
@@ -231,6 +252,7 @@ internal class OnlineIntifaceController : IntifaceController {
             if (!isCurrent(newClient, generation)) return
 
             mutableState.value = mutableState.value.copy(
+                operation = IntifaceOperation.Idle,
                 isConnected = newClient.isConnected(),
                 isScanning = false,
                 devices = devices,
@@ -259,6 +281,7 @@ internal class OnlineIntifaceController : IntifaceController {
             if (clientToDisconnect != null) {
                 launchPendingClientDisconnect(clientToDisconnect)
                 mutableState.value = mutableState.value.copy(
+                    operation = IntifaceOperation.Idle,
                     isConnected = false,
                     isScanning = false,
                     devices = emptyList(),
@@ -277,6 +300,7 @@ internal class OnlineIntifaceController : IntifaceController {
 
         try {
             mutableState.value = mutableState.value.copy(
+                operation = IntifaceOperation.Connecting,
                 isConnected = true,
                 isScanning = true,
                 statusMessage = IntifaceUiMessage(IntifaceMessage.Connecting),
@@ -286,6 +310,7 @@ internal class OnlineIntifaceController : IntifaceController {
             if (!scanStarted) {
                 if (isCurrent(newClient, generation)) {
                     mutableState.value = mutableState.value.copy(
+                        operation = IntifaceOperation.Idle,
                         isScanning = false,
                         statusMessage = null,
                         errorMessage = IntifaceUiMessage(IntifaceMessage.ScanRejected)
@@ -310,6 +335,7 @@ internal class OnlineIntifaceController : IntifaceController {
 
             if (matchedDevice != null) {
                 mutableState.value = mutableState.value.copy(
+                    operation = IntifaceOperation.Idle,
                     isConnected = newClient.isConnected(),
                     isScanning = false,
                     devices = devices,
@@ -321,6 +347,7 @@ internal class OnlineIntifaceController : IntifaceController {
                 )
             } else {
                 mutableState.value = mutableState.value.copy(
+                    operation = IntifaceOperation.Idle,
                     isConnected = newClient.isConnected(),
                     isScanning = false,
                     devices = devices,
@@ -343,6 +370,7 @@ internal class OnlineIntifaceController : IntifaceController {
             if (clientToDisconnect != null) {
                 launchPendingClientDisconnect(clientToDisconnect)
                 mutableState.value = mutableState.value.copy(
+                    operation = IntifaceOperation.Idle,
                     isConnected = false,
                     isScanning = false,
                     devices = emptyList(),
@@ -495,6 +523,7 @@ internal class OnlineIntifaceController : IntifaceController {
             }
 
             mutableState.value = mutableState.value.copy(
+                operation = IntifaceOperation.Testing,
                 isTestingVibration = true,
                 statusMessage = IntifaceUiMessage(IntifaceMessage.TestVibration),
                 errorMessage = null
@@ -542,7 +571,10 @@ internal class OnlineIntifaceController : IntifaceController {
                 runStopDeviceIfCurrent(activeClient, generation, selectedDevice)
             }
             if (isCurrent(activeClient, generation)) {
-                mutableState.value = mutableState.value.copy(isTestingVibration = false)
+                mutableState.value = mutableState.value.copy(
+                    operation = IntifaceOperation.Idle,
+                    isTestingVibration = false
+                )
             }
         }
     }
@@ -563,8 +595,10 @@ internal class OnlineIntifaceController : IntifaceController {
         val clientToDisconnect = takeAndInvalidateCurrentClient()
         mutableState.value = IntifaceUiState(
             isSupported = true,
+            operation = IntifaceOperation.Idle,
             isConnected = false,
             isScanning = false,
+            isTestingVibration = false,
             devices = emptyList(),
             selectedDevice = null,
             statusMessage = IntifaceUiMessage(IntifaceMessage.Disconnected)
@@ -582,8 +616,10 @@ internal class OnlineIntifaceController : IntifaceController {
 
             mutableState.value = IntifaceUiState(
                 isSupported = true,
+                operation = IntifaceOperation.Idle,
                 isConnected = false,
                 isScanning = false,
+                isTestingVibration = false,
                 devices = emptyList(),
                 selectedDevice = null
             )
@@ -633,6 +669,7 @@ internal class OnlineIntifaceController : IntifaceController {
             if (clientToDisconnect != null) {
                 mutableState.value = IntifaceUiState(
                     isSupported = true,
+                    operation = IntifaceOperation.Idle,
                     isConnected = false,
                     isScanning = false,
                     isTestingVibration = false,
