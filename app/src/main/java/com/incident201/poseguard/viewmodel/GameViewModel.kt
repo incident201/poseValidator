@@ -918,6 +918,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     fun searchIntifaceDevices(url: String) {
         if (!_gameSettings.value.intifaceConnectionEnabled) return
+        if (intifaceController.state.value.isScanning || intifaceController.state.value.isTestingVibration) return
 
         val normalized = url.trim()
         updateIntifaceWebSocketUrl(normalized)

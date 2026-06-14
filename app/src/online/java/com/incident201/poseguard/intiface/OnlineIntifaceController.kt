@@ -50,14 +50,26 @@ internal class OnlineIntifaceController : IntifaceController {
     private var pendingClientDisconnectJob: Job? = null
 
     override suspend fun searchDevices(url: String) = withContext(Dispatchers.IO) {
-        searchDevicesMutex.withLock {
+        if (!searchDevicesMutex.tryLock()) {
+            return@withContext
+        }
+
+        try {
             runSearchDevicesLocked(url)
+        } finally {
+            searchDevicesMutex.unlock()
         }
     }
 
     override suspend fun connectToRememberedDevice(url: String, rememberedDevice: IntifaceRememberedDevice) = withContext(Dispatchers.IO) {
-        searchDevicesMutex.withLock {
+        if (!searchDevicesMutex.tryLock()) {
+            return@withContext
+        }
+
+        try {
             runConnectToRememberedLocked(url, rememberedDevice)
+        } finally {
+            searchDevicesMutex.unlock()
         }
     }
 

@@ -720,6 +720,15 @@ private fun IntifaceConnectionCard(
 ) {
     var showDeviceDialog by remember { mutableStateOf(false) }
     var manualSearchDialogState by remember { mutableStateOf(ManualIntifaceSearchDialogState.Idle) }
+    var searchClickPending by remember { mutableStateOf(false) }
+
+    val intifaceInteractionBlocked = searchClickPending || state.isScanning || state.isTestingVibration
+
+    LaunchedEffect(state.isScanning, state.errorMessage, state.statusMessage, state.devices) {
+        if (state.isScanning || state.errorMessage != null || state.devices.isNotEmpty()) {
+            searchClickPending = false
+        }
+    }
 
     LaunchedEffect(manualSearchDialogState, state.isScanning, state.devices, state.errorMessage) {
         when (manualSearchDialogState) {
@@ -769,7 +778,7 @@ private fun IntifaceConnectionCard(
                 value = settings.intifaceWebSocketUrl,
                 onValueChange = onUrlChanged,
                 modifier = Modifier.fillMaxWidth(),
-                enabled = enabled && !state.isScanning && !state.isTestingVibration,
+                enabled = enabled && !intifaceInteractionBlocked,
                 singleLine = true,
                 label = {
                     Text(localizedString(settings.language, R.string.intiface_websocket_url))
@@ -782,12 +791,12 @@ private fun IntifaceConnectionCard(
                 val hasActiveDevice = state.isConnected && state.selectedDevice != null
                 Button(
                     onClick = { 
+                        searchClickPending = true
                         manualSearchDialogState = ManualIntifaceSearchDialogState.WaitingForScanStart
                         onSearchDevices(settings.intifaceWebSocketUrl) 
                     },
                     enabled = enabled &&
-                        !state.isScanning &&
-                        !state.isTestingVibration &&
+                        !intifaceInteractionBlocked &&
                         settings.intifaceWebSocketUrl.isNotBlank()
                 ) {
                     Text(
@@ -806,7 +815,7 @@ private fun IntifaceConnectionCard(
                 if (state.isConnected) {
                     OutlinedButton(
                         onClick = onDisconnect,
-                        enabled = enabled && !state.isTestingVibration
+                        enabled = enabled && !intifaceInteractionBlocked
                     ) {
                         Text(localizedString(settings.language, R.string.intiface_disconnect))
                     }
@@ -856,8 +865,7 @@ private fun IntifaceConnectionCard(
                 enabled = enabled &&
                     state.isConnected &&
                     state.selectedDevice != null &&
-                    !state.isScanning &&
-                    !state.isTestingVibration
+                    !intifaceInteractionBlocked
             ) {
                 Text(
                     localizedString(
