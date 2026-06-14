@@ -2,25 +2,100 @@
 
 ## Project overview
 
-This repository contains an Android/Kotlin application for local pose validation. The app uses the device camera, MediaPipe Tasks Vision, body-landmark tracking, optional face-direction checks, gyroscope-based stabilization, penalties, voice prompts, and a timelapse recorder to verify that the user keeps a selected pose for a configured duration.
+This repository contains an Android/Kotlin application for local pose validation. The app uses the device camera, MediaPipe Tasks Vision, body-landmark tracking, optional face-direction checks, gyroscope-based stabilization, penalties, audio cues, optional Intiface Central device feedback, and a timelapse recorder to verify that the user keeps a selected pose for a configured duration.
 
-The app is intentionally local/on-device. Do not introduce cloud API calls, remote inference, analytics, account systems, or network-dependent validation unless the task explicitly asks for that.
+The core pose-validation flow is intentionally local/on-device. Do not introduce cloud inference, analytics, account systems, remote validation, or network-dependent validation unless the task explicitly asks for an online-only feature.
+
+The project has a strict connectivity flavor split:
+
+- `offline` must remain local/offline and must not depend on network-only libraries.
+- `online` may contain integrations that require network/runtime connectivity, such as Intiface Central / Buttplug WebSocket support.
+- Shared `main` code may define interfaces, state models, settings, and UI that can render unsupported/offline states, but it must not import online-only SDKs or require online-only runtime behavior.
 
 ## Repository shape
 
 The project is a single Android application module:
 
 - `settings.gradle.kts` includes only `:app`.
-- `app/build.gradle.kts` defines the Android app module.
+- `app/build.gradle.kts` defines the Android app module, build types, product flavors, dependencies, and packaging rules.
 - Main package: `com.incident201.poseguard`.
 - Main activity: `app/src/main/java/com/incident201/poseguard/MainActivity.kt`.
 - Main UI: `app/src/main/java/com/incident201/poseguard/ui/CameraScreen.kt`.
+- Settings UI: `app/src/main/java/com/incident201/poseguard/ui/SettingsScreen.kt`.
 - Main state coordinator: `app/src/main/java/com/incident201/poseguard/viewmodel/GameViewModel.kt`.
-- Pose, face, smoothing, identity, and movement logic: `app/src/main/java/com/incident201/poseguard/tracker/`.
+- Pose, face, smoothing, identity, crop, and movement logic: `app/src/main/java/com/incident201/poseguard/tracker/`.
+- Audio cue logic: `app/src/main/java/com/incident201/poseguard/audio/`.
+- Intiface shared contracts and state: `app/src/main/java/com/incident201/poseguard/intiface/`.
+- Intiface online implementation: `app/src/online/java/com/incident201/poseguard/intiface/`.
+- Intiface offline stub/factory: `app/src/offline/java/com/incident201/poseguard/intiface/`.
 - Timelapse recording: `app/src/main/java/com/incident201/poseguard/video/`.
 - Shared formatting helpers: `app/src/main/java/com/incident201/poseguard/util/`.
+- App resources and string resources: `app/src/main/res/`.
+- MediaPipe model assets: `app/src/main/assets/`.
+- Dependency versions: `gradle/libs.versions.toml`.
+- Release automation: `.github/workflows/release.yml`.
 
-The app uses Jetpack Compose, CameraX, MediaPipe Tasks Vision, Kotlin coroutines/flows, Android sensors, SharedPreferences, and Android media encoding APIs.
+The app uses Jetpack Compose, CameraX, MediaPipe Tasks Vision, Kotlin coroutines/flows, Android sensors, SharedPreferences, Android media encoding APIs, and flavor-scoped optional online dependencies.
+
+## Connectivity flavors
+
+The Android module defines a `connectivity` flavor dimension with two product flavors:
+
+- `offline`
+- `online`
+
+Keep this split intact.
+
+### Offline flavor rules
+
+The `offline` flavor must remain free of network-only dependencies and runtime network integrations.
+
+For `offline`:
+
+- Do not add WebSocket, HTTP, cloud, analytics, account, remote inference, or device-network SDK dependencies to `implementation`.
+- Do not add online-only dependencies to `offlineImplementation`.
+- Do not place imports for online-only SDKs in `app/src/main`.
+- Do not place imports for online-only SDKs in `app/src/offline`.
+- Do not make offline code instantiate online clients, sockets, or network services.
+- Do not make offline code require Intiface Central or any external server.
+- Use stubs that return an unsupported state or a no-op behavior for online-only features.
+- Keep offline behavior safe, deterministic, and local.
+
+The offline flavor may compile shared UI that mentions an online-only feature only when that UI reads shared state and can render an unavailable/unsupported state without referencing online-only classes.
+
+### Online flavor rules
+
+The `online` flavor may include optional network-dependent integrations.
+
+For `online`:
+
+- Put concrete online-only implementations under `app/src/online/java/...`.
+- Add online-only dependencies with `onlineImplementation(...)`.
+- Keep WebSocket/client SDK imports inside `app/src/online`.
+- Preserve shared interfaces in `app/src/main` so the rest of the app can work through common contracts.
+- Keep error handling and lifecycle cleanup robust, especially for long-lived clients, sockets, callbacks, and coroutine jobs.
+
+Current online-only integration:
+
+- Intiface Central / Buttplug WebSocket support.
+- The Buttplug dependency belongs to `onlineImplementation`.
+- The concrete controller is `OnlineIntifaceController`.
+- The offline flavor provides an `IntifaceController` stub that reports the feature as unsupported.
+
+### Adding a new online-only feature
+
+When adding another feature that requires network access, a server, an external device service, or a network SDK, follow this pattern:
+
+1. Put shared data models, UI state, and interfaces in `app/src/main`.
+2. Put the real implementation in `app/src/online`.
+3. Put a compile-safe unsupported/no-op stub in `app/src/offline`.
+4. Add the dependency only with `onlineImplementation`.
+5. Keep common UI dependent only on shared interfaces/state.
+6. Make offline UI render a clear unavailable/unsupported state.
+7. Do not introduce online-only imports into `main` or `offline`.
+8. Do not make offline flavor behavior depend on network availability.
+
+If a feature cannot be represented safely in shared UI without online-only dependencies, keep the feature-specific UI behind shared state/contracts or provide separate flavor-specific entry points.
 
 ## Agent workflow rules
 
@@ -30,7 +105,9 @@ Do not add instructions asking the user or another agent to run local Gradle bui
 
 Do not commit real secrets, keystores, `.env` files, signing passwords, generated APKs, or recorded videos.
 
-Do not rename the app package, Gradle module, MediaPipe model asset names, or SharedPreferences keys unless the task explicitly requires a migration.
+Do not rename the app package, Gradle module, MediaPipe model asset names, SharedPreferences keys, or flavor names unless the task explicitly requires a migration.
+
+Do not move code across `main`, `online`, and `offline` source sets casually. Source-set placement is part of the architecture.
 
 ## High-level runtime pipeline
 
@@ -47,8 +124,8 @@ After a MediaPipe pose result arrives, the ViewModel processes it on `mediaPipeR
 5. Build overlay state, including body crop and optional face detection crop.
 6. When the session is in `HoldingPose`, apply occlusion guard projection for tracking.
 7. Run `MovementTracker` against the reference pose.
-8. Apply face-direction rule if enabled.
-9. Update gauge state, violation counters, penalties, session result, and voice events.
+8. Apply the face-direction rule if enabled.
+9. Update gauge state, violation counters, penalties, session result, audio events, and optional Intiface feedback.
 
 Keep this order in mind. Many bugs in this project come from changing a later step while forgetting that earlier steps may already have transformed, held, smoothed, or rejected the pose.
 
@@ -62,7 +139,7 @@ Do not put feature logic here unless the task is specifically about Activity set
 
 ### `ui/CameraScreen.kt`
 
-`CameraScreen` is the main Compose screen. It owns UI composition around camera preview, permission handling, camera switching, pose overlay drawing, onboarding display, settings entry, voice announcements, debug UI, session controls, and timelapse UI.
+`CameraScreen` is the main Compose screen. It owns UI composition around camera preview, permission handling, camera switching, pose overlay drawing, onboarding display, settings entry, audio announcements, debug UI, session controls, and timelapse UI.
 
 This file bridges Android camera/bitmap work and Compose state. Keep heavy frame processing out of Composables and in the existing ViewModel/service pipeline.
 
@@ -75,19 +152,29 @@ Important details:
 - It passes frames and timestamps into `GameViewModel` so the ViewModel can match camera bitmaps with MediaPipe results.
 - It uses `TimelapseRecorder` during sessions when recording is enabled.
 - It draws pose skeleton connections using hardcoded MediaPipe landmark index pairs.
+- It passes Intiface state and callbacks to settings UI through shared ViewModel state.
 
 When changing UI text, use string resources and the existing localization approach.
 
 ### `ui/SettingsScreen.kt`
 
-Settings UI for validation behavior and tuning. Most settings are persisted and applied through `GameViewModel`, not stored directly in the Composable.
+`SettingsScreen` is the Compose settings UI for validation behavior, tuning, audio cues, timelapse options, debug controls, and optional Intiface Central controls.
+
+Most settings are persisted and applied through `GameViewModel`, not stored directly in the Composable.
 
 When adding a new setting:
 
-- Add it to `GameSettings` if it affects validation or UI state.
+- Add it to `GameSettings` if it affects validation, persisted configuration, or UI state.
 - Load and save it in `GameViewModel`.
 - Apply it to the relevant engine in `applySettingsToEngines()` or an existing update method.
 - Add localized labels/descriptions in string resources.
+- Keep online-only settings behind shared state so offline flavor can render unavailable/unsupported behavior without importing online-only classes.
+
+### `ui/IntifaceUiText.kt`
+
+`IntifaceUiText.kt` maps shared `IntifaceUiMessage` values to localized user-facing text.
+
+Keep Intiface message localization here rather than hardcoding visible status/error strings in the controller or settings UI.
 
 ### `ui/OnboardingScreen.kt`
 
@@ -110,7 +197,8 @@ First-run onboarding and language setup. It is shown by `CameraScreen` based on 
 - Movement validation.
 - Face visibility rule validation.
 - Violation counters, penalties, defeat/success transitions.
-- Voice event emission.
+- Audio event emission.
+- Optional Intiface state coordination through the shared `IntifaceController` interface.
 - Cleanup on stop, defeat, final-screen dismissal, and `onCleared()`.
 
 Important internal rules:
@@ -123,8 +211,63 @@ Important internal rules:
 - Occlusion calibration happens during the final seconds of `StartingDelay`.
 - The reference pose for `MovementTracker` is built after occlusion calibration.
 - Movement and face violations are handled only while `GameState.HoldingPose`.
+- Intiface settings are persisted in the same settings store, but the concrete Intiface implementation is flavor-specific.
 
 Be careful when changing this file. Prefer small changes that preserve the existing state transitions and lock boundaries.
+
+## Intiface Central integration
+
+Intiface support is a flavor-scoped optional feature.
+
+Shared files:
+
+- `app/src/main/java/com/incident201/poseguard/intiface/IntifaceController.kt`
+- `app/src/main/java/com/incident201/poseguard/ui/IntifaceUiText.kt`
+- Intiface-related state and settings in `GameViewModel.kt`
+- Intiface settings UI in `SettingsScreen.kt`
+
+Online-only files:
+
+- `app/src/online/java/com/incident201/poseguard/intiface/OnlineIntifaceController.kt`
+- `app/src/online/java/com/incident201/poseguard/intiface/IntifaceControllerFactory.kt`
+
+Offline-only files:
+
+- `app/src/offline/java/com/incident201/poseguard/intiface/IntifaceControllerFactory.kt`
+
+Architecture rules:
+
+- `IntifaceController` is the shared interface used by `GameViewModel`.
+- `OnlineIntifaceController` is the only place that should import Buttplug/Intiface WebSocket client classes.
+- The offline factory must return a compile-safe unsupported controller.
+- Shared UI must rely on `IntifaceUiState` and `IntifaceUiMessage`, not online SDK classes.
+- The Buttplug dependency must remain `onlineImplementation`.
+- Do not add Buttplug, WebSocket, or Intiface SDK dependencies to `implementation` or `offlineImplementation`.
+
+Current behavior expectations:
+
+- Default Intiface WebSocket URL is `ws://127.0.0.1:12345`.
+- The legacy default `ws://10.0.2.2:12345/buttplug` may be migrated by ViewModel preference loading logic.
+- User-provided URLs such as `ws://127.0.0.1:12345/buttplug` should remain allowed.
+- Manual device search should create a fresh connection and should not reuse a stale client after an error.
+- Server-error cleanup must invalidate stale callbacks and avoid racing a new connection against old-client disconnect.
+- Offline flavor must show the feature as unavailable/online-only, not attempt to connect.
+
+When editing this integration, preserve the controller lifecycle, generation checks, callback invalidation, and mutex boundaries.
+
+## Audio package
+
+Audio cue logic lives under `app/src/main/java/com/incident201/poseguard/audio/`.
+
+Important files include:
+
+- `AudioCue.kt`
+- `AudioCuePlayer.kt`
+- `PcmSignalPlayer.kt`
+
+Audio cues are local app behavior and are separate from Intiface feedback. Keep audio cue settings, phrase templates, PCM patterns, and playback lifecycle coordinated through `GameViewModel`.
+
+Do not mix Android audio playback logic with Intiface device feedback. They are separate output channels.
 
 ## Tracker package map
 
@@ -180,9 +323,6 @@ It creates a `PoseLandmarker` with:
 - model asset: `pose_landmarker_heavy.task`
 - running mode: `LIVE_STREAM`
 - one pose: `setNumPoses(1)`
-- pose detection confidence: `0.70`
-- pose presence confidence: `0.70`
-- tracking confidence: `0.75`
 
 `detectLiveStreamFrame()` converts a `Bitmap` to a MediaPipe image and calls `detectAsync()` with the timestamp.
 
@@ -202,13 +342,6 @@ Change this file when the requested behavior is about MediaPipe pose model optio
 ### `FaceDetectorService.kt`
 
 This is the MediaPipe Face Detector wrapper used on a cropped face candidate bitmap, not on the full camera frame.
-
-It creates a `FaceDetector` with:
-
-- model asset: `blaze_face_short_range.tflite`
-- delegate: CPU
-- running mode: `IMAGE`
-- configurable minimum detection confidence, clamped to `0.5..0.95`
 
 The detector is recreated when confidence changes.
 
@@ -233,19 +366,13 @@ This object calculates a body crop rectangle from the full set of pose landmarks
 - ignores non-finite landmark coordinates
 - clamps normalized landmark positions to `0..1`
 - converts normalized landmarks to bitmap pixels
-- requires at least 6 valid points
+- requires enough valid points
 - computes the min/max landmark bounding box
 - rejects degenerate boxes
 - adds horizontal and vertical padding
 - enforces a minimum padding in pixels
 - clamps the final rectangle to bitmap bounds
 - returns `null` when no safe crop can be produced
-
-Default padding:
-
-- horizontal padding factor: `0.30`
-- vertical padding factor: `0.15`
-- minimum padding: `32px`
 
 `cropAroundPose()` creates a bitmap crop when possible and returns the original bitmap when no crop rectangle can be calculated.
 
@@ -255,22 +382,9 @@ Change this file when body crop geometry, padding, fallback behavior, or overlay
 
 This object estimates the square crop that should be sent to `FaceDetectorService`.
 
-`calculateFaceCandidateRect()` needs:
+It uses face landmarks when they are available and falls back to shoulders when face landmarks are not usable.
 
-- full bitmap width/height
-- current `PoseLandmarks`
-- body crop rectangle from `PoseFrameCropper`
-
-It first tries to use face landmarks `0..10`. If at least two valid face landmarks are available, it builds a crop around their bbox. Crop size is based on:
-
-- face landmark width times `3.2`
-- face landmark height times `4.0`
-- shoulder width times `1.15`
-- minimum size `160px`
-
-If face landmarks are not usable, it falls back to shoulders 11 and 12. In that case, it places the crop above the shoulder midpoint and uses shoulder width times `1.45`, with a minimum size of `180px`.
-
-After choosing a candidate square, it fits the square first into the body crop bounds and then into the full bitmap bounds. It rejects crops smaller than `96x96`.
+After choosing a candidate square, it fits the square first into the body crop bounds and then into the full bitmap bounds. It rejects crops that are too small.
 
 Change this file when face detection misses because the detector input crop is wrong, too small, too high/low, or clipped incorrectly.
 
@@ -280,23 +394,12 @@ This class smooths landmark coordinates using a One Euro Filter per landmark and
 
 It tracks filters by landmark index. Each landmark has separate filters for `x`, `y`, and `z`. `visibility` and `presence` are passed through unchanged.
 
-Default config:
-
-- `minCutoff = 0.35`
-- `beta = 0.025`
-- `derivativeCutoff = 1.0`
-
-Config ranges:
-
-- cutoff: `0.01..5.0`
-- beta: `0.0..1.0`
-
 Behavior:
 
 - empty landmark lists reset the smoother
 - the first pose initializes filters
-- gaps longer than `1200ms` reset the smoother
-- delta time is clamped to `1/120s..0.25s`
+- long gaps reset the smoother
+- delta time is clamped
 - changing config resets all filters
 
 Change this file when the task concerns landmark jitter, smoothing aggressiveness, lag, or filter reset behavior.
@@ -312,22 +415,9 @@ It guards these indices:
 - knees: 25, 26
 - ankles: 27, 28
 
-Calibration:
-
-- calibration window is `2000ms`
-- frames are collected during the end of `StartingDelay`
-- `finishCalibration()` computes local coordinates relative to body center and body scale
-- for each guarded landmark it calculates median visibility, p10 visibility, median local position, median z, and p90 jitter
-- a landmark is frozen when it is effectively invisible or unstable with low visibility
+Calibration collects frames during the end of `StartingDelay`, computes local coordinates relative to body center and body scale, and identifies landmarks that should be frozen because they are effectively invisible or unstable.
 
 Frozen landmarks are stored in local body coordinates, not raw screen coordinates. During tracking, the guard projects each frozen landmark back into the current body coordinate system using current body center and scale.
-
-Reacquisition:
-
-- raw tracking can resume when visibility is high enough and the landmark is stable for several frames
-- if the raw point is close to the frozen point, it switches directly back to raw tracking
-- if the raw point is visible but far from the frozen point, it blends from frozen to raw over a short handoff
-- if visibility drops again, it falls back to frozen projection
 
 Change this file when the task concerns occluded elbows/wrists/knees/ankles, false movement caused by invisible limbs, frozen overlay points, reacquisition, or handoff behavior.
 
@@ -342,26 +432,7 @@ For each valid frame it compares:
 - the raw pose as-is (`Direct`)
 - a version with left/right MediaPipe landmark pairs swapped (`Swapped`)
 
-The score is a weighted normalized distance to the previous stable pose. Core landmarks have higher weights:
-
-- shoulders 11, 12: weight 3.0
-- hips 23, 24: weight 3.0
-- elbows 13, 14: weight 1.2
-- knees 25, 26: weight 1.2
-
-It normalizes points around the body center and scale derived from shoulder width, hip width, and torso length.
-
-It chooses `Direct` or `Swapped` only when one score wins by `SWITCH_MARGIN`. If the scores are too close, it keeps the previous transform and marks the result as ambiguous.
-
-It rejects or freezes outliers based on:
-
-- score threshold
-- hard score threshold
-- core scale ratio
-- shoulder/hip width ratio
-- torso length ratio
-- non-finite core landmarks
-- invalid initial identity core
+It chooses `Direct` or `Swapped` only when one score wins by the configured margin. If the scores are too close, it keeps the previous transform and marks the result as ambiguous.
 
 Short outlier bursts are frozen by returning the previous stable pose. After too many consecutive outliers, the stabilizer accepts the candidate to recover from real large movement or viewpoint changes.
 
@@ -383,12 +454,7 @@ It uses:
 - frame copy/recycle discipline
 - a generation counter to ignore stale frames after start/stop/discard/release
 
-Frames are sampled every `100ms`, encoded at `30fps`, and presentation timestamps are compressed by speed factor `10`.
-
-Each encoded frame is drawn into the video size and gets two overlay badges:
-
-- elapsed timer text
-- violation count text
+Each encoded frame is drawn into the video size and gets overlay badges such as elapsed timer text and violation count text.
 
 The recorder has explicit `start()`, `startTimer()`, `offerFrame()`, `stop()`, `discard()`, and `release()` paths. Preserve generation checks and cleanup behavior when editing this file.
 
@@ -418,11 +484,13 @@ Important setting groups:
 - wrist drift weight
 - pose smoother config
 - debug mode
+- audio cue settings
+- Intiface connection/settings
 - onboarding completion
 
 When adding settings, keep default values, load logic, update methods, persistence keys, and engine application in sync.
 
-Be careful with old preference keys. Some sensitivity values already have migration/normalization logic.
+Be careful with old preference keys. Some values already have migration/normalization logic. If changing a default that may already be persisted, add an explicit migration instead of silently overwriting user choices.
 
 ## Localization
 
@@ -436,6 +504,8 @@ When adding user-facing text:
 - keep Russian and English behavior aligned
 - avoid hardcoded visible UI strings
 - keep hardcoded strings only for debug-only messages when appropriate
+
+For Intiface messages, use `IntifaceUiMessage` and `localizedIntifaceMessage()` instead of building visible text in controller code.
 
 ## State machine notes
 
@@ -453,7 +523,8 @@ Session start flow:
 10. State becomes `HoldingPose`.
 11. Timer loop starts.
 12. Movement and face rules can now create penalties or defeat.
-13. Timer reaching zero creates success.
+13. Optional audio and Intiface feedback may be emitted according to settings.
+14. Timer reaching zero creates success.
 
 Defeat, stop, final-screen dismissal, and ViewModel clearing all reset or invalidate processing state. Preserve this behavior when editing session logic.
 
@@ -486,7 +557,7 @@ The person-disappeared rule does not increment the public drift/motion/face coun
 
 ## Concurrency and lifecycle rules
 
-This project processes camera frames, MediaPipe callbacks, UI state, and video encoding concurrently. Preserve existing concurrency boundaries.
+This project processes camera frames, MediaPipe callbacks, UI state, audio playback, optional Intiface device callbacks, and video encoding concurrently. Preserve existing concurrency boundaries.
 
 Important patterns:
 
@@ -494,11 +565,14 @@ Important patterns:
 - `GameViewModel` uses `processingLock` for tracker state and processing generation.
 - `processingGeneration` invalidates stale frame results.
 - `mediaPipeResultExecutor` serializes MediaPipe result handling.
-- `PoseLandmarkerService` uses `lifecycleLock`.
+- `PoseLandmarkerService` uses lifecycle locking.
 - `FaceDetectorService` synchronizes detector recreation and detection.
 - `TimelapseRecorder` uses a single-thread executor, a lock, a stop mutex, and recording generations.
+- `OnlineIntifaceController` uses mutexes/generation checks to avoid stale client callbacks and reconnect races.
 
-Avoid introducing shared mutable state that is not protected by the existing locks or confined to the existing executors.
+Avoid introducing shared mutable state that is not protected by existing locks, mutexes, generations, or confined executors.
+
+For Intiface/client integrations, do not reuse a client after server errors unless the current controller logic explicitly proves it is still valid. Prefer generation checks and fresh reconnect for manual device search.
 
 ## Bitmap ownership rules
 
@@ -512,6 +586,23 @@ Several paths create temporary bitmaps. Be careful with ownership.
 
 Before recycling a bitmap, confirm that the current code owns that instance.
 
+## Dependency rules
+
+General dependency rules:
+
+- Keep shared local dependencies in `implementation`.
+- Keep online-only dependencies in `onlineImplementation`.
+- Do not add network-only dependencies to `implementation`.
+- Do not add network-only dependencies to `offlineImplementation`.
+- Update dependency versions in `gradle/libs.versions.toml`.
+- Keep optional future dependencies commented only when there is a clear project reason.
+
+For Intiface/Buttplug:
+
+- The Buttplug WebSocket client dependency belongs only in `onlineImplementation`.
+- The shared `main` source set must not import Buttplug classes.
+- The offline source set must not import Buttplug classes.
+
 ## Where to make common changes
 
 Use this map before editing:
@@ -519,7 +610,11 @@ Use this map before editing:
 - Main UI layout, overlays, buttons, camera-facing UI: `ui/CameraScreen.kt`
 - Settings UI: `ui/SettingsScreen.kt`
 - First-run flow: `ui/OnboardingScreen.kt`
+- Intiface localized UI text: `ui/IntifaceUiText.kt`
 - App state, timers, penalties, preferences, gyroscope stabilization, processing pipeline: `viewmodel/GameViewModel.kt`
+- Shared Intiface contracts/state: `intiface/IntifaceController.kt`
+- Online Intiface implementation: `app/src/online/java/com/incident201/poseguard/intiface/OnlineIntifaceController.kt`
+- Offline Intiface stub/factory: `app/src/offline/java/com/incident201/poseguard/intiface/IntifaceControllerFactory.kt`
 - Drift/motion scoring and movement violations: `tracker/MovementTracker.kt`
 - Pose inference setup and landmark extraction: `tracker/PoseLandmarkerService.kt`
 - Face detector setup and result mapping: `tracker/FaceDetectorService.kt`
@@ -528,10 +623,11 @@ Use this map before editing:
 - Landmark jitter smoothing: `tracker/PoseSmoother.kt`
 - Occluded limb freezing/reacquisition: `tracker/PoseOcclusionGuard.kt`
 - Left/right identity swaps and outlier rejection: `tracker/PoseIdentityStabilizer.kt`
+- Audio cue definitions/playback: `audio/`
 - Timelapse recording and video overlays: `video/TimelapseRecorder.kt`
 - Duration formatting: `util/DurationFormat.kt`
 - Dependency versions: `gradle/libs.versions.toml`
-- Android module config: `app/build.gradle.kts`
+- Android module config, flavors, and dependencies: `app/build.gradle.kts`
 - Release automation: `.github/workflows/release.yml`
 
 ## Tests
@@ -544,6 +640,12 @@ Tests live under:
 
 When changing deterministic tracker logic, update or add JVM tests near the affected tracker class. When changing UI screenshots, update the relevant Roborazzi test or golden files if the repository uses them.
 
+When changing flavor-specific code, keep both source sets compile-safe:
+
+- shared interface changes require both online and offline implementations to be updated
+- online-only dependency changes must stay scoped to online
+- offline stubs must remain dependency-free and compile-safe
+
 Do not ask the user to run tests locally. Build and test execution is handled by GitHub Actions.
 
 ## Final response expectations for coding agents
@@ -552,7 +654,8 @@ When completing a task in this repository, report:
 
 - which behavior changed
 - which files were touched
-- any relevant state-machine, tracker, or asset implications
+- whether the change affects `main`, `online`, `offline`, or all flavors
+- any relevant state-machine, tracker, lifecycle, dependency, or asset implications
 - whether GitHub Actions should cover the verification
 
 Do not include local Gradle build commands as required next steps.
