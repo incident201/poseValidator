@@ -393,6 +393,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     init {
         applySettingsToEngines(_gameSettings.value)
+        autoConnectIntifaceIfRememberedOnStartup()
         _statusMessage.value = tr(R.string.status_initial)
     }
 
@@ -941,6 +942,22 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         restartIntifaceBackgroundIfNeeded()
     }
 
+    private fun autoConnectIntifaceIfRememberedOnStartup() {
+        val settings = _gameSettings.value
+        if (!settings.intifaceConnectionEnabled) return
+        if (settings.intifaceSelectedDeviceName.isBlank() && settings.intifaceSelectedDeviceDisplayName.isBlank()) return
+
+        val rememberedDevice = com.incident201.poseguard.intiface.IntifaceRememberedDevice(
+            name = settings.intifaceSelectedDeviceName,
+            displayName = settings.intifaceSelectedDeviceDisplayName,
+            index = settings.intifaceSelectedDeviceIndex
+        )
+
+        viewModelScope.launch {
+            intifaceController.connectToRememberedDevice(settings.intifaceWebSocketUrl, rememberedDevice)
+            restartIntifaceBackgroundIfNeeded()
+        }
+    }
 
 
     fun testIntifaceVibration() {
