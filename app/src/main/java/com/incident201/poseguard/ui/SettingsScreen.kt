@@ -797,7 +797,7 @@ private fun IntifaceConnectionCard(
                     Text(
                         localizedString(
                             settings.language,
-                            if (state.isScanning) {
+                            if (state.operation == IntifaceOperation.Connecting || state.operation == IntifaceOperation.Scanning) {
                                 R.string.intiface_searching
                             } else if (hasActiveDevice) {
                                 R.string.intiface_change_device
@@ -819,7 +819,8 @@ private fun IntifaceConnectionCard(
             
             val statusRes = when {
                 state.errorMessage != null && state.errorMessage.message == IntifaceMessage.SavedDeviceNotFound -> R.string.intiface_status_saved_device_not_found
-                state.isScanning -> R.string.intiface_status_connecting
+                state.operation == IntifaceOperation.Connecting ||
+                state.operation == IntifaceOperation.Scanning -> R.string.intiface_status_connecting
                 state.isConnected && state.selectedDevice != null -> R.string.intiface_status_connected
                 else -> R.string.intiface_status_disconnected
             }

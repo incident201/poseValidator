@@ -226,7 +226,11 @@ internal class OnlineIntifaceController : IntifaceController {
 
         try {
             mutableState.value = mutableState.value.copy(
-                isConnected = true
+                operation = IntifaceOperation.Scanning,
+                isConnected = true,
+                isScanning = true,
+                statusMessage = IntifaceUiMessage(IntifaceMessage.Scanning),
+                errorMessage = null
             )
             val scanStarted = newClient.startScanning()
             if (!scanStarted) {
@@ -300,10 +304,10 @@ internal class OnlineIntifaceController : IntifaceController {
 
         try {
             mutableState.value = mutableState.value.copy(
-                operation = IntifaceOperation.Connecting,
+                operation = IntifaceOperation.Scanning,
                 isConnected = true,
                 isScanning = true,
-                statusMessage = IntifaceUiMessage(IntifaceMessage.Connecting),
+                statusMessage = IntifaceUiMessage(IntifaceMessage.Scanning),
                 errorMessage = null
             )
             val scanStarted = newClient.startScanning()
@@ -651,8 +655,11 @@ internal class OnlineIntifaceController : IntifaceController {
             }
         })
         newClient.setScanningFinished {
-            if (isCurrent(newClient, generation)) {
-                mutableState.value = mutableState.value.copy(isScanning = false)
+            if (isCurrent(newClient, generation) && mutableState.value.operation == IntifaceOperation.Scanning) {
+                mutableState.value = mutableState.value.copy(
+                    operation = IntifaceOperation.Idle,
+                    isScanning = false
+                )
             }
         }
         newClient.setErrorReceived {
