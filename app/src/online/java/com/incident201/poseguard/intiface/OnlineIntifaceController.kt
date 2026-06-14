@@ -22,6 +22,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.URI
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -65,10 +66,10 @@ internal class OnlineIntifaceController : IntifaceController {
         forceNewConnection: Boolean = false
     ): Pair<ButtplugClientWSClient, Long>? {
         val uri = parseWebSocketUri(url) ?: run {
-            clientLifecycleMutex.withLock {
-                val oldClient = takeAndInvalidateCurrentClient()
-                disconnectClient(oldClient)
+            val oldClient = clientLifecycleMutex.withLock {
+                takeAndInvalidateCurrentClient()
             }
+            launchPendingClientDisconnect(oldClient)
             mutableState.value = IntifaceUiState(
                 isSupported = true,
                 errorMessage = IntifaceUiMessage(IntifaceMessage.InvalidUrl)
@@ -92,10 +93,14 @@ internal class OnlineIntifaceController : IntifaceController {
 
         awaitPendingClientDisconnect()
 
-        val session = clientLifecycleMutex.withLock {
-            val oldClient = takeAndInvalidateCurrentClient()
-            disconnectClient(oldClient)
+        val oldClient = clientLifecycleMutex.withLock {
+            takeAndInvalidateCurrentClient()
+        }
 
+        launchPendingClientDisconnect(oldClient)
+        awaitPendingClientDisconnect()
+
+        val session = clientLifecycleMutex.withLock {
             val generation = operationGeneration.get()
 
             mutableState.value = IntifaceUiState(
@@ -137,7 +142,7 @@ internal class OnlineIntifaceController : IntifaceController {
             }
 
             if (clientToDisconnect != null) {
-                disconnectClient(clientToDisconnect)
+                launchPendingClientDisconnect(clientToDisconnect)
                 mutableState.value = mutableState.value.copy(
                     isConnected = false,
                     isScanning = false,
@@ -544,33 +549,22 @@ internal class OnlineIntifaceController : IntifaceController {
 
     override fun disconnect() {
         val clientToDisconnect = takeAndInvalidateCurrentClient()
-        val disconnectedState = IntifaceUiState(
+        mutableState.value = IntifaceUiState(
             isSupported = true,
             statusMessage = IntifaceUiMessage(IntifaceMessage.Disconnected)
         )
-        mutableState.value = disconnectedState
-        val generation = operationGeneration.get()
-
-        controllerScope.launch {
-            clientLifecycleMutex.withLock {
-                disconnectClient(clientToDisconnect)
-            }
-
-            val stillCurrent = operationGeneration.get() == generation &&
-                synchronized(clientLock) { client == null }
-            if (stillCurrent) {
-                mutableState.value = disconnectedState
-            }
-        }
+        launchPendingClientDisconnect(clientToDisconnect)
     }
 
     override suspend fun resetConnection() = withContext(Dispatchers.IO) {
         searchDevicesMutex.withLock {
-            clientLifecycleMutex.withLock {
-                val oldClient = takeAndInvalidateCurrentClient()
-                disconnectClient(oldClient)
-                mutableState.value = IntifaceUiState(isSupported = true)
+            val oldClient = clientLifecycleMutex.withLock {
+                takeAndInvalidateCurrentClient()
             }
+
+            launchPendingClientDisconnect(oldClient)
+
+            mutableState.value = IntifaceUiState(isSupported = true)
         }
     }
 
@@ -626,17 +620,7 @@ internal class OnlineIntifaceController : IntifaceController {
                     errorMessage = IntifaceUiMessage(IntifaceMessage.ServerError)
                 )
 
-                val disconnectJob = controllerScope.launch {
-                    clientLifecycleMutex.withLock {
-                        disconnectClient(clientToDisconnect)
-                    }
-                }
-                pendingClientDisconnectJob = disconnectJob
-                disconnectJob.invokeOnCompletion {
-                    if (pendingClientDisconnectJob === disconnectJob) {
-                        pendingClientDisconnectJob = null
-                    }
-                }
+                launchPendingClientDisconnect(clientToDisconnect)
             }
         }
         newClient.setOnConnected {
@@ -671,7 +655,26 @@ internal class OnlineIntifaceController : IntifaceController {
     }
 
     private suspend fun awaitPendingClientDisconnect() {
-        pendingClientDisconnectJob?.join()
+        val job = pendingClientDisconnectJob ?: return
+        withTimeoutOrNull(DISCONNECT_TIMEOUT_MS) {
+            job.join()
+        }
+    }
+
+    private fun launchPendingClientDisconnect(targetClient: ButtplugClientWSClient?) {
+        if (targetClient == null) return
+
+        val disconnectJob = controllerScope.launch {
+            disconnectClient(targetClient)
+        }
+
+        pendingClientDisconnectJob = disconnectJob
+
+        disconnectJob.invokeOnCompletion {
+            if (pendingClientDisconnectJob === disconnectJob) {
+                pendingClientDisconnectJob = null
+            }
+        }
     }
 
     private fun clearTransientMessagesInState() {
@@ -811,6 +814,7 @@ internal class OnlineIntifaceController : IntifaceController {
     private companion object {
         const val SCAN_DURATION_MS = 5_000L
         const val CONNECT_TIMEOUT_MS = 8_000L
+        const val DISCONNECT_TIMEOUT_MS = 1_500L
         const val TEST_PULSE_COUNT = 3
         const val TEST_VIBRATION_STRENGTH = 0.6
         const val TEST_PULSE_DURATION_MS = 180L
