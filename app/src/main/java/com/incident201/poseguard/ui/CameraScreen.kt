@@ -152,6 +152,19 @@ internal fun localizedString(language: AppLanguage, @StringRes id: Int): String 
     return context.createConfigurationContext(config).resources.getString(id)
 }
 
+@Composable
+internal fun localizedFormatString(
+    language: AppLanguage,
+    @StringRes id: Int,
+    vararg args: Any
+): String {
+    val context = LocalContext.current
+    val locale = if (language == AppLanguage.Russian) Locale("ru", "RU") else Locale.US
+    val config = android.content.res.Configuration(context.resources.configuration)
+    config.setLocale(locale)
+    return context.createConfigurationContext(config).resources.getString(id, *args)
+}
+
 private fun cameraSelectorFor(lensFacing: Int): CameraSelector {
     return when (lensFacing) {
         CameraSelector.LENS_FACING_FRONT -> CameraSelector.DEFAULT_FRONT_CAMERA
@@ -217,6 +230,21 @@ fun CameraScreen(
             modifier = modifier
         )
         return
+    }
+
+    val intifaceState by viewModel.intifaceState.collectAsState()
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                viewModel.pauseIntifaceSessionSignals()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.pauseIntifaceSessionSignals()
+        }
     }
 
     AudioCueAnnouncer(viewModel = viewModel, settings = gameSettings)
@@ -646,6 +674,18 @@ fun CameraScreen(
             onTtsVoiceModeChanged = viewModel::updateTtsVoiceMode,
             onTtsPhraseTemplateChanged = viewModel::updateTtsPhraseTemplate,
             onAudioCueSettingsChanged = viewModel::updateAudioCueSettings,
+            intifaceState = intifaceState,
+            onIntifaceConnectionEnabledChanged = viewModel::updateIntifaceConnectionEnabled,
+            onIntifaceBackgroundModeChanged = viewModel::updateIntifaceBackgroundMode,
+            onIntifaceBackgroundVibrationChanged = viewModel::updateIntifaceBackgroundVibration,
+            onIntifaceViolationModeChanged = viewModel::updateIntifaceViolationMode,
+            onIntifaceViolationVibrationChanged = viewModel::updateIntifaceViolationVibration,
+            onIntifaceViolationPauseSecondsChanged = viewModel::updateIntifaceViolationPauseSeconds,
+            onIntifaceWebSocketUrlChanged = viewModel::updateIntifaceWebSocketUrl,
+            onIntifaceSearchDevices = viewModel::searchIntifaceDevices,
+            onIntifaceDeviceSelected = viewModel::selectIntifaceDevice,
+            onIntifaceTestVibration = viewModel::testIntifaceVibration,
+            onIntifaceDisconnect = viewModel::disconnectIntiface,
             onShowInstructions = {
                 showSettings = false
                 showOnboarding = true
@@ -827,6 +867,21 @@ fun CameraScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 12.dp)
                         .zIndex(3f)
+                )
+            }
+
+            val showIntifaceOverlay = !showFinalScreen && intifaceState.isSupported &&
+                (gameState == GameState.Idle || gameState == GameState.Failed || gameState == GameState.Success)
+
+            if (showIntifaceOverlay) {
+                IntifacePreviewStatusOverlay(
+                    state = intifaceState,
+                    language = gameSettings.language,
+                    enabled = gameSettings.intifaceConnectionEnabled,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 12.dp)
+                        .zIndex(4f)
                 )
             }
         }
@@ -2353,5 +2408,37 @@ private fun normalizeSoftwareArgb8888(bitmap: Bitmap): Bitmap {
         normalized
     } else {
         bitmap
+    }
+}
+
+@Composable
+private fun IntifacePreviewStatusOverlay(
+    state: com.incident201.poseguard.intiface.IntifaceUiState,
+    language: AppLanguage,
+    enabled: Boolean,
+    modifier: Modifier = Modifier
+) {
+    if (!state.isSupported) return
+    if (!enabled) return
+
+    val statusText = when {
+        state.errorMessage != null -> localizedIntifaceMessage(language, state.errorMessage)
+        state.isScanning -> localizedString(language, R.string.intiface_overlay_connecting)
+        state.isConnected && state.selectedDevice != null -> localizedFormatString(language, R.string.intiface_overlay_connected, state.selectedDevice.displayName)
+        state.isConnected && state.selectedDevice == null -> localizedString(language, R.string.intiface_overlay_device_not_selected)
+        else -> null
+    }
+
+    if (statusText != null) {
+        Text(
+            text = statusText,
+            modifier = modifier
+                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
