@@ -237,6 +237,7 @@
     <string name="intiface_pattern">Pattern</string>
     <string name="intiface_pattern_constant">Constant</string>
     <string name="intiface_pattern_pulse">Pulse</string>
+    <string name="intiface_vibration_duration_seconds">Duration, seconds</string>
     <string name="intiface_pulse_length_seconds">Pulse length, seconds</string>
     <string name="intiface_pulse_pause_seconds">Pause, seconds</string>
     <string name="intiface_pause_duration_seconds">Pause duration (seconds)</string>

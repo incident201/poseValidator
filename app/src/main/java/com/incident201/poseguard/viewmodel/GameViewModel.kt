@@ -119,9 +119,9 @@ private const val PREF_INTIFACE_VIOLATION_PATTERN = "intiface_violation_pattern"
 private const val PREF_INTIFACE_VIOLATION_PULSE_LENGTH = "intiface_violation_pulse_length"
 private const val PREF_INTIFACE_VIOLATION_PULSE_PAUSE = "intiface_violation_pulse_pause"
 private const val PREF_INTIFACE_VIOLATION_PAUSE_SECONDS = "intiface_violation_pause_seconds"
+private const val PREF_INTIFACE_VIOLATION_DURATION = "intiface_violation_duration"
 private const val DEFAULT_INTIFACE_WEBSOCKET_URL = "ws://127.0.0.1:12345"
 private const val LEGACY_INTIFACE_WEBSOCKET_URL = "ws://10.0.2.2:12345/buttplug"
-private const val INTIFACE_VIOLATION_EFFECT_SECONDS = 1.0
 
 enum class GameState {
     Idle,
@@ -187,6 +187,7 @@ data class GameSettings(
     val intifaceViolationVibration: IntifaceVibrationSettings = IntifaceVibrationSettings(
         strength = 0.7,
         pattern = IntifaceVibrationPattern.Pulse,
+        durationSeconds = 1.0,
         pulseLengthSeconds = 0.25,
         pulsePauseSeconds = 0.25
     ),
@@ -495,6 +496,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             intifaceViolationVibration = IntifaceVibrationSettings(
                 strength = getDoublePref(PREF_INTIFACE_VIOLATION_STRENGTH, 0.7).coerceIn(0.0, 1.0),
                 pattern = violationPattern,
+                durationSeconds = getDoublePref(PREF_INTIFACE_VIOLATION_DURATION, 1.0).coerceIn(0.05, 60.0),
                 pulseLengthSeconds = getDoublePref(PREF_INTIFACE_VIOLATION_PULSE_LENGTH, 0.25).coerceIn(0.05, 10.0),
                 pulsePauseSeconds = getDoublePref(PREF_INTIFACE_VIOLATION_PULSE_PAUSE, 0.25).coerceIn(0.05, 10.0)
             ),
@@ -906,6 +908,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         _gameSettings.value = _gameSettings.value.copy(intifaceViolationVibration = normalized)
         putDoublePref(PREF_INTIFACE_VIOLATION_STRENGTH, normalized.strength)
         prefs.edit().putString(PREF_INTIFACE_VIOLATION_PATTERN, normalized.pattern.name).apply()
+        putDoublePref(PREF_INTIFACE_VIOLATION_DURATION, normalized.durationSeconds)
         putDoublePref(PREF_INTIFACE_VIOLATION_PULSE_LENGTH, normalized.pulseLengthSeconds)
         putDoublePref(PREF_INTIFACE_VIOLATION_PULSE_PAUSE, normalized.pulsePauseSeconds)
     }
@@ -976,6 +979,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private fun IntifaceVibrationSettings.normalized() = copy(
         strength = strength.coerceIn(0.0, 1.0),
+        durationSeconds = durationSeconds.coerceIn(0.05, 60.0),
         pulseLengthSeconds = pulseLengthSeconds.coerceIn(0.05, 10.0),
         pulsePauseSeconds = pulsePauseSeconds.coerceIn(0.05, 10.0)
     )
@@ -1159,14 +1163,15 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
                 }
             } else {
                 if (!setIntifaceStrengthIfSignalCurrent(generation, normalized.strength)) return
-                delay((INTIFACE_VIOLATION_EFFECT_SECONDS * 1000).toLong())
+                val effectDurationMs = (normalized.durationSeconds * 1000).toLong()
+                delay(effectDurationMs)
                 setIntifaceStrengthIfSignalCurrent(generation, 0.0)
             }
             return
         }
         if (mode == RunMode.Violation) {
-            val deadlineMs = SystemClock.elapsedRealtime() +
-                (INTIFACE_VIOLATION_EFFECT_SECONDS * 1000).toLong()
+            val effectDurationMs = (normalized.durationSeconds * 1000).toLong()
+            val deadlineMs = SystemClock.elapsedRealtime() + effectDurationMs
             while (true) {
                 var remainingMs = deadlineMs - SystemClock.elapsedRealtime()
                 if (remainingMs <= 0L) break

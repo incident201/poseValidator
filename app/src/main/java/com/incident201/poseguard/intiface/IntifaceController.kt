@@ -11,6 +11,7 @@ enum class IntifaceVibrationPattern { Constant, Pulse }
 data class IntifaceVibrationSettings(
     val strength: Double = 0.5,
     val pattern: IntifaceVibrationPattern = IntifaceVibrationPattern.Constant,
+    val durationSeconds: Double = 1.0,
     val pulseLengthSeconds: Double = 0.25,
     val pulsePauseSeconds: Double = 0.25
 )

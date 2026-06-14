@@ -639,7 +639,7 @@ private fun IntifaceCentralSettingsScreen(
             if (settings.intifaceBackgroundMode == IntifaceBackgroundMode.Vibration) {
                 IntifaceVibrationSettingsEditor(
                     settings.language, settings.intifaceBackgroundVibration,
-                    onBackgroundVibrationChanged, enabled
+                    onBackgroundVibrationChanged, enabled, false
                 )
             }
         }
@@ -663,7 +663,7 @@ private fun IntifaceCentralSettingsScreen(
                 IntifaceViolationMode.Off -> Unit
                 IntifaceViolationMode.Vibration -> IntifaceVibrationSettingsEditor(
                     settings.language, settings.intifaceViolationVibration,
-                    onViolationVibrationChanged, enabled
+                    onViolationVibrationChanged, enabled, true
                 )
                 IntifaceViolationMode.Pause -> DoubleSettingField(
                     localizedString(settings.language, R.string.intiface_pause_duration_seconds),
@@ -1872,7 +1872,8 @@ private fun IntifaceVibrationSettingsEditor(
     language: AppLanguage,
     settings: IntifaceVibrationSettings,
     onChanged: (IntifaceVibrationSettings) -> Unit,
-    enabled: Boolean
+    enabled: Boolean,
+    showDuration: Boolean = false
 ) {
     DoubleSettingField(
         localizedString(language, R.string.intiface_strength),
@@ -1900,6 +1901,14 @@ private fun IntifaceVibrationSettingsEditor(
                 )
             )
         }
+    }
+    if (showDuration) {
+        DoubleSettingField(
+            localizedString(language, R.string.intiface_vibration_duration_seconds),
+            settings.durationSeconds,
+            { onChanged(settings.copy(durationSeconds = it)) },
+            0.05, 60.0, 2, enabled
+        )
     }
     if (settings.pattern == IntifaceVibrationPattern.Pulse) {
         DoubleSettingField(
