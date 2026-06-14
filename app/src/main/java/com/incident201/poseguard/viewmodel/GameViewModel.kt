@@ -859,9 +859,14 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     fun updateIntifaceWebSocketUrl(value: String) {
         val normalized = value.trim()
+        val oldValue = _gameSettings.value.intifaceWebSocketUrl
+
         _gameSettings.value = _gameSettings.value.copy(intifaceWebSocketUrl = normalized)
         prefs.edit().putString(PREF_INTIFACE_WEBSOCKET_URL, normalized).apply()
-        intifaceController.clearTransientMessages()
+
+        if (normalized != oldValue) {
+            intifaceController.clearTransientMessages()
+        }
     }
 
     fun updateIntifaceConnectionEnabled(enabled: Boolean) {

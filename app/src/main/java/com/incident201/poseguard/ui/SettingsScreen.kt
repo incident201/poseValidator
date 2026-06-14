@@ -550,7 +550,11 @@ private fun CompactIntifaceCard(
                     fontWeight = FontWeight.Medium
                 )
             }
-            OutlinedButton(onClick = onConfigureClick, enabled = supported) {
+            FilledTonalButton(
+                onClick = onConfigureClick,
+                enabled = supported,
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Text(localizedString(settings.language, R.string.intiface_configure))
             }
         }

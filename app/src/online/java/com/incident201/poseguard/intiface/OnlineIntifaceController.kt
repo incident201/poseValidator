@@ -7,6 +7,8 @@ import io.github.blackspherefollower.buttplug4j.protocol.ButtplugMessage
 import io.github.blackspherefollower.buttplug4j.protocol.messages.Error
 import io.github.blackspherefollower.buttplug4j.protocol.messages.Ok
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,6 +21,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.net.URI
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -89,7 +92,7 @@ internal class OnlineIntifaceController : IntifaceController {
 
         awaitPendingClientDisconnect()
 
-        return clientLifecycleMutex.withLock {
+        val session = clientLifecycleMutex.withLock {
             val oldClient = takeAndInvalidateCurrentClient()
             disconnectClient(oldClient)
 
@@ -108,32 +111,62 @@ internal class OnlineIntifaceController : IntifaceController {
             }
             registerCallbacks(newClient, generation)
 
-            try {
-                newClient.connect(uri)
-                if (!isCurrent(newClient, generation)) return@withLock null
-                Pair(newClient, generation)
-            } catch (error: Throwable) {
-                val clientToDisconnect = synchronized(clientLock) {
-                    if (operationGeneration.get() == generation && client === newClient) {
-                        connectedUri = null
-                        client.also { client = null }
-                    } else {
-                        null
-                    }
-                }
-                if (clientToDisconnect != null) {
-                    disconnectClient(clientToDisconnect)
-                    mutableState.value = mutableState.value.copy(
-                        isConnected = false,
-                        isScanning = false,
-                        devices = emptyList(),
-                        selectedDevice = null,
-                        statusMessage = null,
-                        errorMessage = error.toConnectionErrorMessage()
-                    )
-                }
-                null
+            Pair(newClient, generation)
+        }
+
+        val newClient = session.first
+        val generation = session.second
+
+        try {
+            connectClientWithTimeout(newClient, uri)
+
+            if (!isCurrent(newClient, generation)) {
+                return null
             }
+
+            return Pair(newClient, generation)
+        } catch (error: Throwable) {
+            val clientToDisconnect = synchronized(clientLock) {
+                if (operationGeneration.get() == generation && client === newClient) {
+                    operationGeneration.incrementAndGet()
+                    connectedUri = null
+                    client.also { client = null }
+                } else {
+                    null
+                }
+            }
+
+            if (clientToDisconnect != null) {
+                disconnectClient(clientToDisconnect)
+                mutableState.value = mutableState.value.copy(
+                    isConnected = false,
+                    isScanning = false,
+                    devices = emptyList(),
+                    selectedDevice = null,
+                    statusMessage = null,
+                    errorMessage = error.toConnectionErrorMessage()
+                )
+            }
+
+            return null
+        }
+    }
+
+    private suspend fun connectClientWithTimeout(
+        targetClient: ButtplugClientWSClient,
+        uri: URI
+    ) {
+        val connectJob = controllerScope.async {
+            targetClient.connect(uri)
+        }
+
+        try {
+            withTimeout(CONNECT_TIMEOUT_MS) {
+                connectJob.await()
+            }
+        } catch (timeout: TimeoutCancellationException) {
+            connectJob.cancel()
+            throw timeout
         }
     }
 
@@ -777,6 +810,7 @@ internal class OnlineIntifaceController : IntifaceController {
 
     private companion object {
         const val SCAN_DURATION_MS = 5_000L
+        const val CONNECT_TIMEOUT_MS = 8_000L
         const val TEST_PULSE_COUNT = 3
         const val TEST_VIBRATION_STRENGTH = 0.6
         const val TEST_PULSE_DURATION_MS = 180L
