@@ -655,12 +655,9 @@ internal class OnlineIntifaceController : IntifaceController {
             }
         })
         newClient.setScanningFinished {
-            if (isCurrent(newClient, generation) && mutableState.value.operation == IntifaceOperation.Scanning) {
-                mutableState.value = mutableState.value.copy(
-                    operation = IntifaceOperation.Idle,
-                    isScanning = false
-                )
-            }
+            // The active search/connect flow owns operation completion.
+            // Do not set operation = Idle here, because this callback may fire
+            // before requestDeviceList()/getDevices() updates the state.
         }
         newClient.setErrorReceived {
             val clientToDisconnect = synchronized(clientLock) {
