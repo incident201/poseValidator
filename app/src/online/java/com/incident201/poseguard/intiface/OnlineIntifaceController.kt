@@ -37,6 +37,7 @@ internal class OnlineIntifaceController : IntifaceController {
     private val clientLock = Any()
     private val searchDevicesMutex = Mutex()
     private val vibrationCommandMutex = Mutex()
+    private val clientLifecycleMutex = Mutex()
     private val operationGeneration = AtomicLong(0L)
     private var client: ButtplugClientWSClient? = null
     private var connectedUri: URI? = null
@@ -53,8 +54,15 @@ internal class OnlineIntifaceController : IntifaceController {
         }
     }
 
-    private suspend fun ensureClientConnected(url: String): Pair<ButtplugClientWSClient, Long>? {
+    private suspend fun ensureClientConnected(
+        url: String,
+        forceNewConnection: Boolean = false
+    ): Pair<ButtplugClientWSClient, Long>? {
         val uri = parseWebSocketUri(url) ?: run {
+            clientLifecycleMutex.withLock {
+                val oldClient = takeAndInvalidateCurrentClient()
+                disconnectClient(oldClient)
+            }
             mutableState.value = IntifaceUiState(
                 isSupported = true,
                 errorMessage = IntifaceUiMessage(IntifaceMessage.InvalidUrl)
@@ -62,59 +70,65 @@ internal class OnlineIntifaceController : IntifaceController {
             return null
         }
 
-        val existingSession = synchronized(clientLock) {
-            val c = client
-            if (c != null && c.isConnected() && connectedUri == uri) {
-                Pair(c, operationGeneration.get())
-            } else {
-                null
-            }
-        }
-        if (existingSession != null) {
-            return existingSession
-        }
-
-        val generation = operationGeneration.incrementAndGet()
-        disconnectCurrentClient()
-
-        mutableState.value = IntifaceUiState(
-            isSupported = true,
-            isScanning = true,
-            statusMessage = IntifaceUiMessage(IntifaceMessage.Connecting)
-        )
-
-        val newClient = ButtplugClientWSClient("Pose Guard")
-        synchronized(clientLock) {
-            client = newClient
-            connectedUri = uri
-        }
-        registerCallbacks(newClient, generation)
-
-        try {
-            newClient.connect(uri)
-            if (!isCurrent(newClient, generation)) return null
-            return Pair(newClient, generation)
-        } catch (error: Throwable) {
-            val clientToDisconnect = synchronized(clientLock) {
-                if (operationGeneration.get() == generation && client === newClient) {
-                    connectedUri = null
-                    client.also { client = null }
+        if (!forceNewConnection) {
+            val existingSession = synchronized(clientLock) {
+                val c = client
+                if (c != null && c.isConnected() && connectedUri == uri) {
+                    Pair(c, operationGeneration.get())
                 } else {
                     null
                 }
             }
-            if (clientToDisconnect != null) {
-                disconnectClient(clientToDisconnect)
-                mutableState.value = mutableState.value.copy(
-                    isConnected = false,
-                    isScanning = false,
-                    devices = emptyList(),
-                    selectedDevice = null,
-                    statusMessage = null,
-                    errorMessage = error.toConnectionErrorMessage()
-                )
+            if (existingSession != null) {
+                return existingSession
             }
-            return null
+        }
+
+        return clientLifecycleMutex.withLock {
+            val oldClient = takeAndInvalidateCurrentClient()
+            disconnectClient(oldClient)
+
+            val generation = operationGeneration.get()
+
+            mutableState.value = IntifaceUiState(
+                isSupported = true,
+                isScanning = true,
+                statusMessage = IntifaceUiMessage(IntifaceMessage.Connecting)
+            )
+
+            val newClient = ButtplugClientWSClient("Pose Guard")
+            synchronized(clientLock) {
+                client = newClient
+                connectedUri = uri
+            }
+            registerCallbacks(newClient, generation)
+
+            try {
+                newClient.connect(uri)
+                if (!isCurrent(newClient, generation)) return@withLock null
+                Pair(newClient, generation)
+            } catch (error: Throwable) {
+                val clientToDisconnect = synchronized(clientLock) {
+                    if (operationGeneration.get() == generation && client === newClient) {
+                        connectedUri = null
+                        client.also { client = null }
+                    } else {
+                        null
+                    }
+                }
+                if (clientToDisconnect != null) {
+                    disconnectClient(clientToDisconnect)
+                    mutableState.value = mutableState.value.copy(
+                        isConnected = false,
+                        isScanning = false,
+                        devices = emptyList(),
+                        selectedDevice = null,
+                        statusMessage = null,
+                        errorMessage = error.toConnectionErrorMessage()
+                    )
+                }
+                null
+            }
         }
     }
 
@@ -124,7 +138,7 @@ internal class OnlineIntifaceController : IntifaceController {
             statusMessage = IntifaceUiMessage(IntifaceMessage.Scanning),
             errorMessage = null
         )
-        val pair = ensureClientConnected(url)
+        val pair = ensureClientConnected(url, forceNewConnection = true)
         if (pair == null) {
             mutableState.value = mutableState.value.copy(
                 isScanning = false,
@@ -491,16 +505,18 @@ internal class OnlineIntifaceController : IntifaceController {
     }
 
     override fun disconnect() {
-        val generation = operationGeneration.incrementAndGet()
-        val clientToDisconnect = takeCurrentClient()
+        val clientToDisconnect = takeAndInvalidateCurrentClient()
         val disconnectedState = IntifaceUiState(
             isSupported = true,
             statusMessage = IntifaceUiMessage(IntifaceMessage.Disconnected)
         )
         mutableState.value = disconnectedState
+        val generation = operationGeneration.get()
 
         controllerScope.launch {
-            disconnectClient(clientToDisconnect)
+            clientLifecycleMutex.withLock {
+                disconnectClient(clientToDisconnect)
+            }
 
             val stillCurrent = operationGeneration.get() == generation &&
                 synchronized(clientLock) { client == null }
@@ -508,6 +524,20 @@ internal class OnlineIntifaceController : IntifaceController {
                 mutableState.value = disconnectedState
             }
         }
+    }
+
+    override suspend fun resetConnection() = withContext(Dispatchers.IO) {
+        searchDevicesMutex.withLock {
+            clientLifecycleMutex.withLock {
+                val oldClient = takeAndInvalidateCurrentClient()
+                disconnectClient(oldClient)
+                mutableState.value = IntifaceUiState(isSupported = true)
+            }
+        }
+    }
+
+    override fun clearTransientMessages() {
+        clearTransientMessagesInState()
     }
 
     private fun registerCallbacks(newClient: ButtplugClientWSClient, generation: Long) {
@@ -538,12 +568,14 @@ internal class OnlineIntifaceController : IntifaceController {
         newClient.setErrorReceived {
             val clientToDisconnect = synchronized(clientLock) {
                 if (operationGeneration.get() == generation && client === newClient) {
+                    operationGeneration.incrementAndGet()
                     connectedUri = null
                     client.also { client = null }
                 } else {
                     null
                 }
             }
+
             if (clientToDisconnect != null) {
                 mutableState.value = IntifaceUiState(
                     isSupported = true,
@@ -555,8 +587,11 @@ internal class OnlineIntifaceController : IntifaceController {
                     statusMessage = null,
                     errorMessage = IntifaceUiMessage(IntifaceMessage.ServerError)
                 )
+
                 controllerScope.launch {
-                    disconnectClient(clientToDisconnect)
+                    clientLifecycleMutex.withLock {
+                        disconnectClient(clientToDisconnect)
+                    }
                 }
             }
         }
@@ -583,20 +618,25 @@ internal class OnlineIntifaceController : IntifaceController {
         mutableState.value = mutableState.value.copy(devices = devices, selectedDevice = selected)
     }
 
-    private fun takeCurrentClient(): ButtplugClientWSClient? =
-        synchronized(clientLock) {
+    private fun takeAndInvalidateCurrentClient(): ButtplugClientWSClient? {
+        operationGeneration.incrementAndGet()
+        return synchronized(clientLock) {
             connectedUri = null
             client.also { client = null }
         }
+    }
+
+    private fun clearTransientMessagesInState() {
+        mutableState.value = mutableState.value.copy(
+            statusMessage = null,
+            errorMessage = null
+        )
+    }
 
     private fun disconnectClient(targetClient: ButtplugClientWSClient?) {
         if (targetClient == null) return
         runCatching { targetClient.stopAllDevices() }
         runCatching { targetClient.disconnect() }
-    }
-
-    private fun disconnectCurrentClient() {
-        disconnectClient(takeCurrentClient())
     }
 
     private fun isCurrent(candidate: ButtplugClientWSClient, generation: Long): Boolean =

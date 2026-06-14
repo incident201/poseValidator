@@ -42,4 +42,15 @@ private class OfflineIntifaceController : IntifaceController {
     override fun selectDevice(device: IntifaceDeviceInfo) = Unit
 
     override fun disconnect() = Unit
+
+    override suspend fun resetConnection() {
+        mutableState.value = IntifaceUiState(isSupported = false, statusMessage = onlineOnlyMessage)
+    }
+
+    override fun clearTransientMessages() {
+        mutableState.value = mutableState.value.copy(
+            statusMessage = onlineOnlyMessage,
+            errorMessage = null
+        )
+    }
 }

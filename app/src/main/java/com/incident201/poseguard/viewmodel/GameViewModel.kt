@@ -119,7 +119,8 @@ private const val PREF_INTIFACE_VIOLATION_PATTERN = "intiface_violation_pattern"
 private const val PREF_INTIFACE_VIOLATION_PULSE_LENGTH = "intiface_violation_pulse_length"
 private const val PREF_INTIFACE_VIOLATION_PULSE_PAUSE = "intiface_violation_pulse_pause"
 private const val PREF_INTIFACE_VIOLATION_PAUSE_SECONDS = "intiface_violation_pause_seconds"
-private const val DEFAULT_INTIFACE_WEBSOCKET_URL = "ws://10.0.2.2:12345/buttplug"
+private const val DEFAULT_INTIFACE_WEBSOCKET_URL = "ws://127.0.0.1:12345"
+private const val LEGACY_INTIFACE_WEBSOCKET_URL = "ws://10.0.2.2:12345/buttplug"
 private const val INTIFACE_VIOLATION_EFFECT_SECONDS = 1.0
 
 enum class GameState {
@@ -477,10 +478,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             ttsVoiceMode = ttsVoiceMode,
             customTtsTemplates = loadCustomTtsTemplates(),
             audioCueSettings = loadAudioCueSettings(),
-            intifaceWebSocketUrl = prefs.getString(
-                PREF_INTIFACE_WEBSOCKET_URL,
-                DEFAULT_INTIFACE_WEBSOCKET_URL
-            )?.trim() ?: DEFAULT_INTIFACE_WEBSOCKET_URL,
+            intifaceWebSocketUrl = loadIntifaceWebSocketUrl(),
             intifaceConnectionEnabled = intifaceController.state.value.isSupported &&
                 prefs.getBoolean(PREF_INTIFACE_CONNECTION_ENABLED, false),
             intifaceSelectedDeviceName = prefs.getString(PREF_INTIFACE_SELECTED_DEVICE_NAME, "")?.trim().orEmpty(),
@@ -513,6 +511,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private fun putDoublePref(key: String, value: Double) {
         prefs.edit().putLong(key, java.lang.Double.doubleToRawLongBits(value)).apply()
+    }
+
+    private fun loadIntifaceWebSocketUrl(): String {
+        val saved = prefs.getString(PREF_INTIFACE_WEBSOCKET_URL, null)?.trim()
+        return when {
+            saved == null -> DEFAULT_INTIFACE_WEBSOCKET_URL
+            saved == LEGACY_INTIFACE_WEBSOCKET_URL -> {
+                prefs.edit().putString(PREF_INTIFACE_WEBSOCKET_URL, DEFAULT_INTIFACE_WEBSOCKET_URL).apply()
+                DEFAULT_INTIFACE_WEBSOCKET_URL
+            }
+            else -> saved
+        }
     }
 
     private fun loadCustomTtsTemplates(): Map<TtsPhraseTemplate, String> =
@@ -849,8 +859,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     fun updateIntifaceWebSocketUrl(value: String) {
         val normalized = value.trim()
+        val oldValue = _gameSettings.value.intifaceWebSocketUrl
+
         _gameSettings.value = _gameSettings.value.copy(intifaceWebSocketUrl = normalized)
         prefs.edit().putString(PREF_INTIFACE_WEBSOCKET_URL, normalized).apply()
+
+        intifaceController.clearTransientMessages()
+
+        if (normalized != oldValue) {
+            viewModelScope.launch {
+                intifaceController.resetConnection()
+            }
+        }
     }
 
     fun updateIntifaceConnectionEnabled(enabled: Boolean) {
@@ -902,8 +922,13 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     fun searchIntifaceDevices(url: String) {
         if (!_gameSettings.value.intifaceConnectionEnabled) return
-        updateIntifaceWebSocketUrl(url)
-        viewModelScope.launch { intifaceController.searchDevices(url) }
+
+        val normalized = url.trim()
+        updateIntifaceWebSocketUrl(normalized)
+
+        viewModelScope.launch {
+            intifaceController.searchDevices(normalized)
+        }
     }
 
     fun selectIntifaceDevice(device: IntifaceDeviceInfo) {

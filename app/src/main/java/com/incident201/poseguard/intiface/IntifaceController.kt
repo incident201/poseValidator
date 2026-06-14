@@ -80,4 +80,7 @@ interface IntifaceController {
     suspend fun stopVibration()
     fun selectDevice(device: IntifaceDeviceInfo)
     fun disconnect()
+    suspend fun resetConnection()
+    fun clearTransientMessages()
 }
+
