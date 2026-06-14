@@ -779,7 +779,7 @@ private fun IntifaceConnectionCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                val hasRememberedDevice = settings.intifaceSelectedDeviceName.isNotBlank() || settings.intifaceSelectedDeviceDisplayName.isNotBlank()
+                val hasActiveDevice = state.isConnected && state.selectedDevice != null
                 Button(
                     onClick = { 
                         manualSearchDialogState = ManualIntifaceSearchDialogState.WaitingForScanStart
@@ -795,7 +795,7 @@ private fun IntifaceConnectionCard(
                             settings.language,
                             if (state.isScanning) {
                                 R.string.intiface_searching
-                            } else if (hasRememberedDevice) {
+                            } else if (hasActiveDevice) {
                                 R.string.intiface_change_device
                             } else {
                                 R.string.intiface_search_devices
@@ -838,13 +838,13 @@ private fun IntifaceConnectionCard(
                     color = colorScheme.error
                 )
             }
-            val displayedDeviceName = state.selectedDevice?.displayName ?: settings.intifaceSelectedDeviceDisplayName.takeIf { it.isNotBlank() } ?: settings.intifaceSelectedDeviceName
-            if (displayedDeviceName.isNotBlank()) {
+            val activeDeviceName = state.selectedDevice?.displayName
+            if (state.isConnected && !activeDeviceName.isNullOrBlank()) {
                 Text(
                     text = localizedFormatString(
                         settings.language,
                         R.string.intiface_selected_device,
-                        displayedDeviceName
+                        activeDeviceName
                     ),
                     color = colorScheme.primary,
                     fontWeight = FontWeight.Medium

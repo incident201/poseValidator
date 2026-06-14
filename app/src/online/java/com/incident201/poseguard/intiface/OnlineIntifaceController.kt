@@ -551,6 +551,10 @@ internal class OnlineIntifaceController : IntifaceController {
         val clientToDisconnect = takeAndInvalidateCurrentClient()
         mutableState.value = IntifaceUiState(
             isSupported = true,
+            isConnected = false,
+            isScanning = false,
+            devices = emptyList(),
+            selectedDevice = null,
             statusMessage = IntifaceUiMessage(IntifaceMessage.Disconnected)
         )
         launchPendingClientDisconnect(clientToDisconnect)
@@ -564,7 +568,13 @@ internal class OnlineIntifaceController : IntifaceController {
 
             launchPendingClientDisconnect(oldClient)
 
-            mutableState.value = IntifaceUiState(isSupported = true)
+            mutableState.value = IntifaceUiState(
+                isSupported = true,
+                isConnected = false,
+                isScanning = false,
+                devices = emptyList(),
+                selectedDevice = null
+            )
         }
     }
 

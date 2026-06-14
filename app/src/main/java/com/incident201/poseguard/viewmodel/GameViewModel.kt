@@ -393,7 +393,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     init {
         applySettingsToEngines(_gameSettings.value)
-        autoConnectIntifaceIfRemembered()
         _statusMessage.value = tr(R.string.status_initial)
     }
 
@@ -866,6 +865,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
         if (normalized != oldValue) {
             intifaceController.clearTransientMessages()
+            intifaceController.disconnect()
         }
     }
 
@@ -873,9 +873,8 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         val effective = enabled && intifaceController.state.value.isSupported
         _gameSettings.value = _gameSettings.value.copy(intifaceConnectionEnabled = effective)
         prefs.edit().putBoolean(PREF_INTIFACE_CONNECTION_ENABLED, effective).apply()
-        if (effective) {
-            autoConnectIntifaceIfRemembered()
-        } else {
+
+        if (!effective) {
             disconnectIntiface()
         }
     }
@@ -942,21 +941,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         restartIntifaceBackgroundIfNeeded()
     }
 
-    private fun autoConnectIntifaceIfRemembered() {
-        val settings = _gameSettings.value
-        if (!settings.intifaceConnectionEnabled) return
-        if (settings.intifaceSelectedDeviceName.isBlank() && settings.intifaceSelectedDeviceDisplayName.isBlank()) return
 
-        val rememberedDevice = com.incident201.poseguard.intiface.IntifaceRememberedDevice(
-            name = settings.intifaceSelectedDeviceName,
-            displayName = settings.intifaceSelectedDeviceDisplayName,
-            index = settings.intifaceSelectedDeviceIndex
-        )
-        viewModelScope.launch {
-            intifaceController.connectToRememberedDevice(settings.intifaceWebSocketUrl, rememberedDevice)
-            restartIntifaceBackgroundIfNeeded()
-        }
-    }
 
     fun testIntifaceVibration() {
         if (!_gameSettings.value.intifaceConnectionEnabled) return
