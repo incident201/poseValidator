@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.incident201.poseguard.R
 import com.incident201.poseguard.viewmodel.AppLanguage
 import kotlinx.coroutines.launch
