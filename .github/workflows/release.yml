@@ -36,6 +36,11 @@ jobs:
         with:
           gradle-version: "9.4.1"
 
+      - name: Install Android SDK API 37
+        run: |
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
+          yes | sdkmanager --licenses >/dev/null
+
       - name: Create empty .env
         run: |
           echo "# Release build does not require cloud API keys" > .env
