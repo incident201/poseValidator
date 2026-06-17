@@ -113,6 +113,9 @@ private const val DEMO_FRAME_DELAY_MS = 40L
 
 private enum class TimelapseUiState { Preparing, Ready, Saving, Saved, Unavailable, Disabled }
 
+private fun localeFor(language: AppLanguage): Locale =
+    if (language == AppLanguage.Russian) Locale.forLanguageTag("ru-RU") else Locale.US
+
 private val POSE_CONNECTIONS = listOf(
     11 to 12,
     11 to 13,
@@ -146,7 +149,7 @@ private val POSE_CONNECTIONS = listOf(
 @Composable
 internal fun localizedString(language: AppLanguage, @StringRes id: Int): String {
     val context = LocalContext.current
-    val locale = if (language == AppLanguage.Russian) Locale("ru", "RU") else Locale.US
+    val locale = localeFor(language)
     val config = android.content.res.Configuration(context.resources.configuration)
     config.setLocale(locale)
     return context.createConfigurationContext(config).resources.getString(id)
@@ -159,7 +162,7 @@ internal fun localizedFormatString(
     vararg args: Any
 ): String {
     val context = LocalContext.current
-    val locale = if (language == AppLanguage.Russian) Locale("ru", "RU") else Locale.US
+    val locale = localeFor(language)
     val config = android.content.res.Configuration(context.resources.configuration)
     config.setLocale(locale)
     return context.createConfigurationContext(config).resources.getString(id, *args)
@@ -1634,7 +1637,7 @@ private fun AudioCueAnnouncer(viewModel: GameViewModel, settings: GameSettings) 
     }
 
     LaunchedEffect(player, settings.language, settings.ttsVoiceMode) {
-        val locale = if (settings.language == AppLanguage.Russian) Locale("ru", "RU") else Locale.US
+        val locale = localeFor(settings.language)
         player.setTtsConfig(locale, settings.ttsVoiceMode)
     }
 
@@ -1642,11 +1645,7 @@ private fun AudioCueAnnouncer(viewModel: GameViewModel, settings: GameSettings) 
     DisposableEffect(lifecycleOwner, player, settings.language, settings.ttsVoiceMode) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                val locale = if (settings.language == AppLanguage.Russian) {
-                    Locale("ru", "RU")
-                } else {
-                    Locale.US
-                }
+                val locale = localeFor(settings.language)
                 player.setTtsConfig(locale, settings.ttsVoiceMode)
                 player.refreshTtsEngineIfSystemDefaultChanged()
             }
