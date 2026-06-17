@@ -22,15 +22,19 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: |
+            tools
+            platform-tools
+            platforms;android-37.0
+            build-tools;37.0.0
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.4.1' # Совместимая версия для AGP 9.2.x в окружении сборки
-
-      - name: Install Android SDK API 37
-        run: |
-          sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
-          yes | sdkmanager --licenses >/dev/null
 
       - name: Restore or Generate Debug Keystore
         run: |
