@@ -137,8 +137,8 @@ class PoseIdentityStabilizer {
         }
         val chosenScore = when {
             !scoresAvailable -> Float.POSITIVE_INFINITY
-            chosenTransform == PoseIdentityTransform.Direct -> directScore!!
-            else -> swappedScore!!
+            chosenTransform == PoseIdentityTransform.Direct -> directScore
+            else -> swappedScore
         }
         val coreRatios = CoreGeometryRatios.from(candidatePose, previousPose)
         val geometryOutlierReason = buildGeometryOutlierReason(coreRatios)
