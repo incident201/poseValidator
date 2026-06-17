@@ -215,8 +215,8 @@ class AudioCuePlayer(
             if (applied) return true
         }
 
-        val defaultLanguage = runCatching { engine.defaultLanguage }.getOrNull()
-        return defaultLanguage != null && setTtsLanguage(engine, defaultLanguage)
+        val fallbackLocale = defaultVoice?.locale
+        return fallbackLocale != null && setTtsLanguage(engine, fallbackLocale)
     }
 
     private fun setTtsLanguage(engine: TextToSpeech, locale: Locale): Boolean {

@@ -385,7 +385,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
 
     private fun tr(resId: Int, vararg args: Any): String {
-        val locale = if (_gameSettings.value.language == AppLanguage.Russian) Locale("ru", "RU") else Locale.US
+        val locale = if (_gameSettings.value.language == AppLanguage.Russian) Locale.forLanguageTag("ru-RU") else Locale.US
         val config = android.content.res.Configuration(getApplication<Application>().resources.configuration)
         config.setLocale(locale)
         val res = getApplication<Application>().createConfigurationContext(config).resources
