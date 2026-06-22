@@ -1,5 +1,7 @@
 -dontwarn javax.naming.**
 -dontwarn org.eclipse.jetty.xml.XmlConfiguration
+-dontwarn com.google.mediapipe.proto.CalculatorProfileProto$CalculatorProfile
+-dontwarn com.google.mediapipe.proto.GraphTemplateProto$CalculatorGraphTemplate
 -dontobfuscate
 
 # MediaPipe Tasks / Framework / native bridge
