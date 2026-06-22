@@ -117,7 +117,7 @@ jobs:
           gh release create "${TAG}" "${OFFLINE_APK_PATH}" "${ONLINE_APK_PATH}" \
             --title "${TAG}" \
             --notes "Stable manual release snapshot ${TAG}" \
-            --target "${GITHUB_SHA}"
-             --draft
+            --target "${GITHUB_SHA}" \
+            --draft
         env:
           GH_TOKEN: ${{ github.token }}
