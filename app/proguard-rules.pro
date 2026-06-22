@@ -1,1 +1,2 @@
-#
+-dontwarn javax.naming.**
+-dontwarn org.eclipse.jetty.xml.XmlConfiguration
