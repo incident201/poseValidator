@@ -105,7 +105,7 @@ jobs:
           echo "ONLINE_APK_NAME=${ONLINE_APK_NAME}" >> $GITHUB_ENV
 
       - name: Upload release APK artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: poseValidator_${{ env.TAG }}_release_apks
           path: |
