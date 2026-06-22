@@ -86,6 +86,8 @@ import com.incident201.poseguard.viewmodel.SessionSummary
 import com.incident201.poseguard.viewmodel.TimerMode
 import com.incident201.poseguard.video.TimelapseRecorder
 import com.incident201.poseguard.util.formatDurationHms
+import com.incident201.poseguard.util.hasRequiredLocalNetworkPermission
+import com.incident201.poseguard.util.shouldRequestLocalNetworkPermission
 import com.incident201.poseguard.R
 import java.io.File
 import java.text.SimpleDateFormat
@@ -344,6 +346,121 @@ fun CameraScreen(
     LaunchedEffect(Unit) {
         if (!hasCameraPermission) {
             permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+
+    val localNetworkPermissionDeniedText = localizedString(
+        gameSettings.language,
+        R.string.intiface_local_network_permission_required
+    )
+    var enableIntifaceAfterLocalNetworkGrant by remember { mutableStateOf(false) }
+    var pendingIntifaceSearchUrl by remember { mutableStateOf<String?>(null) }
+    var testIntifaceAfterLocalNetworkGrant by remember { mutableStateOf(false) }
+    var startupLocalNetworkPermissionHandled by rememberSaveable { mutableStateOf(false) }
+
+    fun showLocalNetworkPermissionDeniedMessage() {
+        Toast.makeText(context, localNetworkPermissionDeniedText, Toast.LENGTH_SHORT).show()
+    }
+
+    fun enableIntifaceAfterLocalNetworkPermissionGranted() {
+        viewModel.updateIntifaceConnectionEnabled(true)
+        viewModel.autoConnectIntifaceIfRemembered()
+    }
+
+    val localNetworkPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { granted ->
+            val shouldEnable = enableIntifaceAfterLocalNetworkGrant
+            val searchUrl = pendingIntifaceSearchUrl
+            val shouldTest = testIntifaceAfterLocalNetworkGrant
+            enableIntifaceAfterLocalNetworkGrant = false
+            pendingIntifaceSearchUrl = null
+            testIntifaceAfterLocalNetworkGrant = false
+
+            if (granted) {
+                if (shouldEnable) {
+                    enableIntifaceAfterLocalNetworkPermissionGranted()
+                }
+                if (searchUrl != null) {
+                    viewModel.searchIntifaceDevices(searchUrl)
+                }
+                if (shouldTest) {
+                    viewModel.testIntifaceVibration()
+                }
+            } else {
+                if (shouldEnable) {
+                    viewModel.updateIntifaceConnectionEnabled(false)
+                }
+                showLocalNetworkPermissionDeniedMessage()
+            }
+        }
+    )
+
+    fun requestLocalNetworkPermissionForIntiface(
+        enableAfterGrant: Boolean,
+        searchUrlAfterGrant: String? = null,
+        testAfterGrant: Boolean = false
+    ) {
+        enableIntifaceAfterLocalNetworkGrant = enableAfterGrant
+        pendingIntifaceSearchUrl = searchUrlAfterGrant
+        testIntifaceAfterLocalNetworkGrant = testAfterGrant
+        localNetworkPermissionLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+    }
+
+    fun enableIntifaceWithLocalNetworkPermissionIfNeeded() {
+        if (hasRequiredLocalNetworkPermission(context)) {
+            enableIntifaceAfterLocalNetworkPermissionGranted()
+        } else if (shouldRequestLocalNetworkPermission()) {
+            requestLocalNetworkPermissionForIntiface(enableAfterGrant = true)
+        } else {
+            viewModel.updateIntifaceConnectionEnabled(false)
+            showLocalNetworkPermissionDeniedMessage()
+        }
+    }
+
+    fun searchIntifaceDevicesWithLocalNetworkPermissionIfNeeded(url: String) {
+        if (hasRequiredLocalNetworkPermission(context)) {
+            viewModel.searchIntifaceDevices(url)
+        } else if (shouldRequestLocalNetworkPermission()) {
+            requestLocalNetworkPermissionForIntiface(enableAfterGrant = false, searchUrlAfterGrant = url)
+        } else {
+            showLocalNetworkPermissionDeniedMessage()
+        }
+    }
+
+
+    fun testIntifaceVibrationWithLocalNetworkPermissionIfNeeded() {
+        if (hasRequiredLocalNetworkPermission(context)) {
+            viewModel.testIntifaceVibration()
+        } else if (shouldRequestLocalNetworkPermission()) {
+            requestLocalNetworkPermissionForIntiface(enableAfterGrant = false, testAfterGrant = true)
+        } else {
+            showLocalNetworkPermissionDeniedMessage()
+        }
+    }
+
+    val onIntifaceConnectionEnabledChanged: (Boolean) -> Unit = { enabled ->
+        if (enabled) {
+            enableIntifaceWithLocalNetworkPermissionIfNeeded()
+        } else {
+            viewModel.updateIntifaceConnectionEnabled(false)
+        }
+    }
+
+    LaunchedEffect(gameSettings.intifaceConnectionEnabled, intifaceState.isSupported) {
+        if (!startupLocalNetworkPermissionHandled &&
+            gameSettings.intifaceConnectionEnabled &&
+            intifaceState.isSupported
+        ) {
+            startupLocalNetworkPermissionHandled = true
+            if (hasRequiredLocalNetworkPermission(context)) {
+                viewModel.autoConnectIntifaceIfRemembered()
+            } else if (shouldRequestLocalNetworkPermission()) {
+                requestLocalNetworkPermissionForIntiface(enableAfterGrant = true)
+            } else {
+                viewModel.updateIntifaceConnectionEnabled(false)
+            }
         }
     }
 
@@ -678,16 +795,16 @@ fun CameraScreen(
             onTtsPhraseTemplateChanged = viewModel::updateTtsPhraseTemplate,
             onAudioCueSettingsChanged = viewModel::updateAudioCueSettings,
             intifaceState = intifaceState,
-            onIntifaceConnectionEnabledChanged = viewModel::updateIntifaceConnectionEnabled,
+            onIntifaceConnectionEnabledChanged = onIntifaceConnectionEnabledChanged,
             onIntifaceBackgroundModeChanged = viewModel::updateIntifaceBackgroundMode,
             onIntifaceBackgroundVibrationChanged = viewModel::updateIntifaceBackgroundVibration,
             onIntifaceViolationModeChanged = viewModel::updateIntifaceViolationMode,
             onIntifaceViolationVibrationChanged = viewModel::updateIntifaceViolationVibration,
             onIntifaceViolationPauseSecondsChanged = viewModel::updateIntifaceViolationPauseSeconds,
             onIntifaceWebSocketUrlChanged = viewModel::updateIntifaceWebSocketUrl,
-            onIntifaceSearchDevices = viewModel::searchIntifaceDevices,
+            onIntifaceSearchDevices = { url -> searchIntifaceDevicesWithLocalNetworkPermissionIfNeeded(url) },
             onIntifaceDeviceSelected = viewModel::selectIntifaceDevice,
-            onIntifaceTestVibration = viewModel::testIntifaceVibration,
+            onIntifaceTestVibration = { testIntifaceVibrationWithLocalNetworkPermissionIfNeeded() },
             onIntifaceDisconnect = viewModel::disconnectIntiface,
             onShowInstructions = {
                 showSettings = false

@@ -11,7 +11,7 @@ android {
   defaultConfig {
     applicationId = "com.incident201.poseguard"
     minSdk = 30
-    targetSdk = 36
+    targetSdk = 37
     versionCode = (project.findProperty("VERSION_CODE") as String?)?.toInt() ?: 1
     versionName = (project.findProperty("VERSION_NAME") as String?) ?: "1.0"
 
@@ -38,9 +38,11 @@ android {
   productFlavors {
     create("offline") {
       dimension = "connectivity"
+      buildConfigField("boolean", "HAS_NETWORK_FEATURES", "false")
     }
     create("online") {
       dimension = "connectivity"
+      buildConfigField("boolean", "HAS_NETWORK_FEATURES", "true")
     }
   }
 

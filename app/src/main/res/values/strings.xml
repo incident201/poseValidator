@@ -255,4 +255,5 @@
     <string name="intiface_saved_device_not_found">Saved device not found</string>
     <string name="intiface_connection_disabled_hint">Enable Intiface Central Connection to connect a device.</string>
     <string name="intiface_rules_disabled_until_enabled">Connection and session rules are disabled until Intiface Central Connection is enabled.</string>
+    <string name="intiface_local_network_permission_required">Local network permission is required to connect to Intiface Central on Android 17.</string>
 </resources>
