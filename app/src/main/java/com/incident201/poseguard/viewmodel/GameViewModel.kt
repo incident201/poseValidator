@@ -394,7 +394,6 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     init {
         applySettingsToEngines(_gameSettings.value)
-        autoConnectIntifaceIfRememberedOnStartup()
         _statusMessage.value = tr(R.string.status_initial)
     }
 
@@ -946,10 +945,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         restartIntifaceBackgroundIfNeeded()
     }
 
-    private fun autoConnectIntifaceIfRememberedOnStartup() {
+    fun autoConnectIntifaceIfRemembered() {
         val settings = _gameSettings.value
         if (!settings.intifaceConnectionEnabled) return
         if (settings.intifaceSelectedDeviceName.isBlank() && settings.intifaceSelectedDeviceDisplayName.isBlank()) return
+        if (!intifaceController.state.value.isSupported) return
+        if (intifaceController.state.value.isBusy) return
 
         val rememberedDevice = com.incident201.poseguard.intiface.IntifaceRememberedDevice(
             name = settings.intifaceSelectedDeviceName,

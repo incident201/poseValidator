@@ -255,4 +255,5 @@
     <string name="intiface_saved_device_not_found">Сохранённое устройство не найдено</string>
     <string name="intiface_connection_disabled_hint">Включите подключение Intiface Central для соединения с устройством.</string>
     <string name="intiface_rules_disabled_until_enabled">Подключение и правила сессии недоступны, пока Intiface Central выключен.</string>
+    <string name="intiface_local_network_permission_required">Для подключения к Intiface Central на Android 17 нужен доступ к локальной сети.</string>
 </resources>
