@@ -118,5 +118,6 @@ jobs:
             --title "${TAG}" \
             --notes "Stable manual release snapshot ${TAG}" \
             --target "${GITHUB_SHA}"
+             --draft
         env:
           GH_TOKEN: ${{ github.token }}
