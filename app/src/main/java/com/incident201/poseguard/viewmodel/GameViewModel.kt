@@ -42,6 +42,7 @@ import com.incident201.poseguard.tracker.PoseOcclusionGuard
 import com.incident201.poseguard.tracker.PoseOcclusionGuardConfig
 import com.incident201.poseguard.tracker.PoseSmoother
 import com.incident201.poseguard.tracker.landmark
+import com.incident201.poseguard.util.hasRequiredLocalNetworkPermission
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.delay
@@ -920,6 +921,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     fun searchIntifaceDevices(url: String) {
         if (!_gameSettings.value.intifaceConnectionEnabled) return
+        if (!hasIntifaceLocalNetworkPermission()) {
+            handleMissingIntifaceLocalNetworkPermission()
+            return
+        }
         if (intifaceController.state.value.isBusy) return
 
         val normalized = url.trim()
@@ -948,6 +953,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     fun autoConnectIntifaceIfRemembered() {
         val settings = _gameSettings.value
         if (!settings.intifaceConnectionEnabled) return
+        if (!hasIntifaceLocalNetworkPermission()) {
+            handleMissingIntifaceLocalNetworkPermission()
+            return
+        }
         if (settings.intifaceSelectedDeviceName.isBlank() && settings.intifaceSelectedDeviceDisplayName.isBlank()) return
         if (!intifaceController.state.value.isSupported) return
         if (intifaceController.state.value.isBusy) return
@@ -967,6 +976,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     fun testIntifaceVibration() {
         if (!_gameSettings.value.intifaceConnectionEnabled) return
+        if (!hasIntifaceLocalNetworkPermission()) {
+            handleMissingIntifaceLocalNetworkPermission()
+            return
+        }
         viewModelScope.launch { intifaceController.testVibration() }
     }
 
@@ -985,7 +998,23 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         pulsePauseSeconds = pulsePauseSeconds.coerceIn(0.05, 10.0)
     )
 
+    private fun hasIntifaceLocalNetworkPermission(): Boolean =
+        hasRequiredLocalNetworkPermission(getApplication<Application>().applicationContext)
+
+    private fun handleMissingIntifaceLocalNetworkPermission() {
+        nextIntifaceSignalGeneration()
+        intifaceBackgroundJob?.cancel()
+        intifaceBackgroundJob = null
+        intifaceOverrideJob?.cancel()
+        intifaceOverrideJob = null
+        intifaceController.disconnect()
+    }
+
     private fun isIntifaceRuntimeReady(settings: GameSettings = _gameSettings.value): Boolean {
+        if (!hasIntifaceLocalNetworkPermission()) {
+            handleMissingIntifaceLocalNetworkPermission()
+            return false
+        }
         val state = intifaceController.state.value
         return state.isSupported && settings.intifaceConnectionEnabled &&
             state.isConnected && state.selectedDevice != null
@@ -1019,6 +1048,10 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
     }
 
     private fun shouldRunIntifaceBestEffortStop(): Boolean {
+        if (!hasIntifaceLocalNetworkPermission()) {
+            handleMissingIntifaceLocalNetworkPermission()
+            return false
+        }
         val state = intifaceController.state.value
         val settings = _gameSettings.value
         return state.isSupported &&

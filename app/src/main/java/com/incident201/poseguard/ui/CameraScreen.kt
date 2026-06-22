@@ -356,6 +356,7 @@ fun CameraScreen(
     )
     var enableIntifaceAfterLocalNetworkGrant by remember { mutableStateOf(false) }
     var pendingIntifaceSearchUrl by remember { mutableStateOf<String?>(null) }
+    var testIntifaceAfterLocalNetworkGrant by remember { mutableStateOf(false) }
     var startupLocalNetworkPermissionHandled by rememberSaveable { mutableStateOf(false) }
 
     fun showLocalNetworkPermissionDeniedMessage() {
@@ -372,8 +373,10 @@ fun CameraScreen(
         onResult = { granted ->
             val shouldEnable = enableIntifaceAfterLocalNetworkGrant
             val searchUrl = pendingIntifaceSearchUrl
+            val shouldTest = testIntifaceAfterLocalNetworkGrant
             enableIntifaceAfterLocalNetworkGrant = false
             pendingIntifaceSearchUrl = null
+            testIntifaceAfterLocalNetworkGrant = false
 
             if (granted) {
                 if (shouldEnable) {
@@ -381,6 +384,9 @@ fun CameraScreen(
                 }
                 if (searchUrl != null) {
                     viewModel.searchIntifaceDevices(searchUrl)
+                }
+                if (shouldTest) {
+                    viewModel.testIntifaceVibration()
                 }
             } else {
                 if (shouldEnable) {
@@ -391,9 +397,14 @@ fun CameraScreen(
         }
     )
 
-    fun requestLocalNetworkPermissionForIntiface(enableAfterGrant: Boolean, searchUrlAfterGrant: String? = null) {
+    fun requestLocalNetworkPermissionForIntiface(
+        enableAfterGrant: Boolean,
+        searchUrlAfterGrant: String? = null,
+        testAfterGrant: Boolean = false
+    ) {
         enableIntifaceAfterLocalNetworkGrant = enableAfterGrant
         pendingIntifaceSearchUrl = searchUrlAfterGrant
+        testIntifaceAfterLocalNetworkGrant = testAfterGrant
         localNetworkPermissionLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
     }
 
@@ -413,6 +424,17 @@ fun CameraScreen(
             viewModel.searchIntifaceDevices(url)
         } else if (shouldRequestLocalNetworkPermission()) {
             requestLocalNetworkPermissionForIntiface(enableAfterGrant = false, searchUrlAfterGrant = url)
+        } else {
+            showLocalNetworkPermissionDeniedMessage()
+        }
+    }
+
+
+    fun testIntifaceVibrationWithLocalNetworkPermissionIfNeeded() {
+        if (hasRequiredLocalNetworkPermission(context)) {
+            viewModel.testIntifaceVibration()
+        } else if (shouldRequestLocalNetworkPermission()) {
+            requestLocalNetworkPermissionForIntiface(enableAfterGrant = false, testAfterGrant = true)
         } else {
             showLocalNetworkPermissionDeniedMessage()
         }
@@ -782,7 +804,7 @@ fun CameraScreen(
             onIntifaceWebSocketUrlChanged = viewModel::updateIntifaceWebSocketUrl,
             onIntifaceSearchDevices = { url -> searchIntifaceDevicesWithLocalNetworkPermissionIfNeeded(url) },
             onIntifaceDeviceSelected = viewModel::selectIntifaceDevice,
-            onIntifaceTestVibration = viewModel::testIntifaceVibration,
+            onIntifaceTestVibration = { testIntifaceVibrationWithLocalNetworkPermissionIfNeeded() },
             onIntifaceDisconnect = viewModel::disconnectIntiface,
             onShowInstructions = {
                 showSettings = false
