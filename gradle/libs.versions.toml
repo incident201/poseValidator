@@ -28,7 +28,7 @@ datastorePreferences = "1.2.1"
 robolectric = "4.16.1"
 roborazzi = "1.64.0"
 mediapipeTasksVision = "0.20230731"
-buttplug4j = "3.1.180"
+buttplug4j = "4.0.278"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
