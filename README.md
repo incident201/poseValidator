@@ -1,4 +1,4 @@
-# PoseGuard
+# PoseGuard — Offline Cornertime App for Android with Pose Tracking
 
 **PoseGuard** is an Android application for monitoring whether a person can hold a static pose for a configured amount of time.
 
