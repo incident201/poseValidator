@@ -69,8 +69,8 @@ jobs:
           OFFLINE_ORIGINAL_PATH="app/build/outputs/apk/offline/debug/app-offline-debug.apk"
           ONLINE_ORIGINAL_PATH="app/build/outputs/apk/online/debug/app-online-debug.apk"
 
-          OFFLINE_APK_NAME="poseValidator_${TIMESTAMP}_offline_debug.apk"
-          ONLINE_APK_NAME="poseValidator_${TIMESTAMP}_online_debug.apk"
+          OFFLINE_APK_NAME="poseGuard_${TIMESTAMP}_offline_debug.apk"
+          ONLINE_APK_NAME="poseGuard_${TIMESTAMP}_online_debug.apk"
 
           OFFLINE_APK_PATH="app/build/outputs/apk/offline/debug/${OFFLINE_APK_NAME}"
           ONLINE_APK_PATH="app/build/outputs/apk/online/debug/${ONLINE_APK_NAME}"
@@ -80,7 +80,7 @@ jobs:
 
           echo "OFFLINE_APK_PATH=${OFFLINE_APK_PATH}" >> $GITHUB_ENV
           echo "ONLINE_APK_PATH=${ONLINE_APK_PATH}" >> $GITHUB_ENV
-          echo "ARTIFACT_NAME=poseValidator_${TIMESTAMP}_debug_apks" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME=poseGuard_${TIMESTAMP}_debug_apks" >> $GITHUB_ENV
 
       - name: Upload Build Artifacts (Debug APKs)
         uses: actions/upload-artifact@v7
