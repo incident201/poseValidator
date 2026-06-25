@@ -89,8 +89,8 @@ jobs:
           OFFLINE_ORIGINAL_PATH="app/build/outputs/apk/offline/release/app-offline-release.apk"
           ONLINE_ORIGINAL_PATH="app/build/outputs/apk/online/release/app-online-release.apk"
 
-          OFFLINE_APK_NAME="poseValidator_${TAG}_offline_release.apk"
-          ONLINE_APK_NAME="poseValidator_${TAG}_online_release.apk"
+          OFFLINE_APK_NAME="poseGuard_${TAG}_offline_release.apk"
+          ONLINE_APK_NAME="poseGuard_${TAG}_online_release.apk"
 
           OFFLINE_APK_PATH="app/build/outputs/apk/offline/release/${OFFLINE_APK_NAME}"
           ONLINE_APK_PATH="app/build/outputs/apk/online/release/${ONLINE_APK_NAME}"
@@ -107,7 +107,7 @@ jobs:
       - name: Upload release APK artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: poseValidator_${{ env.TAG }}_release_apks
+          name: poseGuard_${{ env.TAG }}_release_apks
           path: |
             ${{ env.OFFLINE_APK_PATH }}
             ${{ env.ONLINE_APK_PATH }}
