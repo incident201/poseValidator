@@ -26,7 +26,7 @@ cameraView = "1.6.1"
 cameraCore = "1.6.1"
 datastorePreferences = "1.2.1"
 robolectric = "4.16.1"
-roborazzi = "1.70.0"
+roborazzi = "1.71.0"
 mediapipeTasksVision = "1.0.0"
 buttplug4j = "3.1.180"
 
