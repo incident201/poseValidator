@@ -13,8 +13,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
         
+        <!-- Keep direct libOpenCL access disabled. On Pixel 10's PowerVR driver it blocks
+             MediaPipe GPU initialization; the delegate then uses its working GL/ICD path. -->
         <uses-native-library android:name="libvndksupport.so" android:required="false"/>
-        <uses-native-library android:name="libOpenCL.so" android:required="false"/>
 
         <activity
             android:name=".MainActivity"

@@ -50,6 +50,7 @@ import com.incident201.poseguard.intiface.IntifaceOperation
 import com.incident201.poseguard.intiface.IntifaceVibrationPattern
 import com.incident201.poseguard.intiface.IntifaceVibrationSettings
 import com.incident201.poseguard.intiface.IntifaceViolationMode
+import com.incident201.poseguard.tracker.AccelerationMode
 import com.incident201.poseguard.viewmodel.AppLanguage
 import com.incident201.poseguard.viewmodel.FaceCheckMode
 import com.incident201.poseguard.viewmodel.GameSettings
@@ -71,6 +72,7 @@ internal fun SettingsScreen(
     onThirdViolationPenaltyChanged: (Int) -> Unit,
     onSubsequentViolationPenaltyChanged: (Int) -> Unit,
     onLanguageChanged: (AppLanguage) -> Unit,
+    onAccelerationModeChanged: (AccelerationMode) -> Unit,
     onTimelapseRecordingEnabledChanged: (Boolean) -> Unit,
     onDebugModeEnabledChanged: (Boolean) -> Unit,
     onOcclusionFreezeVisibilityAlwaysChanged: (Float) -> Unit,
@@ -456,6 +458,46 @@ internal fun SettingsScreen(
                         Switch(
                             checked = settings.debugModeEnabled,
                             onCheckedChange = onDebugModeEnabledChanged
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
+            Column(Modifier.padding(16.dp)) {
+                Text(
+                    localizedString(settings.language, R.string.acceleration),
+                    color = colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    localizedString(settings.language, R.string.acceleration_description),
+                    color = colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall
+                )
+                AccelerationMode.entries.forEach { mode ->
+                    val labelRes = when (mode) {
+                        AccelerationMode.Auto -> R.string.acceleration_auto
+                        AccelerationMode.Gpu -> R.string.acceleration_gpu
+                        AccelerationMode.Cpu -> R.string.acceleration_cpu
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onAccelerationModeChanged(mode) }
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = settings.accelerationMode == mode,
+                            onClick = { onAccelerationModeChanged(mode) }
+                        )
+                        Text(
+                            localizedString(settings.language, labelRes),
+                            color = colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }

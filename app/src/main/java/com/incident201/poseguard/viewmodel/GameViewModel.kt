@@ -12,6 +12,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.incident201.poseguard.BuildConfig
 import com.incident201.poseguard.R
 import com.incident201.poseguard.audio.AudioCue
 import com.incident201.poseguard.audio.AudioCueEvent
@@ -29,6 +30,7 @@ import com.incident201.poseguard.intiface.IntifaceVibrationPattern
 import com.incident201.poseguard.intiface.IntifaceVibrationSettings
 import com.incident201.poseguard.intiface.IntifaceViolationMode
 import com.incident201.poseguard.intiface.createIntifaceController
+import com.incident201.poseguard.tracker.AccelerationMode
 import com.incident201.poseguard.tracker.FaceDetectionStatus
 import com.incident201.poseguard.tracker.FaceCandidateCropper
 import com.incident201.poseguard.tracker.FaceDetectorService
@@ -80,6 +82,9 @@ private const val DEFAULT_OCCLUSION_FREEZE_VIS_SOFT = 0.1f
 private const val DEFAULT_OCCLUSION_JITTER_FREEZE_THRESHOLD = 0.01f
 private const val DEFAULT_WRIST_DRIFT_WEIGHT = 0.7f
 private const val PREF_DEBUG_MODE_ENABLED = "debug_mode_enabled"
+private const val PREF_ACCELERATION_MODE = "acceleration_mode"
+private const val PREF_ACCELERATION_MODE_AUTO_RESOLVED = "acceleration_mode_auto_resolved"
+private const val PREF_ACCELERATION_MODE_VERSION_CODE = "acceleration_mode_version_code"
 private const val PREF_ONBOARDING_COMPLETED = "onboarding_completed"
 private const val PREF_POSE_SMOOTHER_MIN_CUTOFF = "pose_smoother_min_cutoff"
 private const val PREF_POSE_SMOOTHER_BETA = "pose_smoother_beta"
@@ -146,8 +151,21 @@ enum class FaceCheckMode {
 
 enum class AppLanguage { Russian, English }
 
+internal fun accelerationModeAfterAppUpdate(
+    savedMode: AccelerationMode,
+    wasAutomaticallyResolved: Boolean,
+    savedVersionCode: Int,
+    currentVersionCode: Int
+): AccelerationMode =
+    if (wasAutomaticallyResolved && savedVersionCode != currentVersionCode) {
+        AccelerationMode.Auto
+    } else {
+        savedMode
+    }
+
 data class GameSettings(
     val language: AppLanguage = AppLanguage.English,
+    val accelerationMode: AccelerationMode = AccelerationMode.Auto,
     val faceCheckMode: FaceCheckMode = FaceCheckMode.Disabled,
     val faceDetectionConfidence: Float = 0.8f,
     val driftThresholdFactor: Float = 0.160f,
@@ -444,6 +462,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         val violationPattern = enumPref(PREF_INTIFACE_VIOLATION_PATTERN, IntifaceVibrationPattern.Pulse)
         return GameSettings(
             language = language,
+            accelerationMode = loadAccelerationMode(),
             faceCheckMode = mode,
             faceDetectionConfidence = 0.8f,
             driftThresholdFactor = driftThresholdFactor,
@@ -507,6 +526,26 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
 
     private inline fun <reified T : Enum<T>> enumPref(key: String, default: T): T =
         runCatching { enumValueOf<T>(prefs.getString(key, default.name) ?: default.name) }.getOrDefault(default)
+
+    private fun loadAccelerationMode(): AccelerationMode {
+        val savedMode = enumPref(PREF_ACCELERATION_MODE, AccelerationMode.Auto)
+        val wasAutomaticallyResolved = prefs.getBoolean(PREF_ACCELERATION_MODE_AUTO_RESOLVED, false)
+        val savedVersionCode = prefs.getInt(PREF_ACCELERATION_MODE_VERSION_CODE, -1)
+        val mode = accelerationModeAfterAppUpdate(
+            savedMode = savedMode,
+            wasAutomaticallyResolved = wasAutomaticallyResolved,
+            savedVersionCode = savedVersionCode,
+            currentVersionCode = BuildConfig.VERSION_CODE
+        )
+        if (mode == AccelerationMode.Auto && savedMode != AccelerationMode.Auto) {
+            prefs.edit()
+                .putString(PREF_ACCELERATION_MODE, AccelerationMode.Auto.name)
+                .putBoolean(PREF_ACCELERATION_MODE_AUTO_RESOLVED, false)
+                .remove(PREF_ACCELERATION_MODE_VERSION_CODE)
+                .apply()
+        }
+        return mode
+    }
 
     private fun getDoublePref(key: String, defaultValue: Double): Double =
         if (prefs.contains(key)) java.lang.Double.longBitsToDouble(prefs.getLong(key, 0L)) else defaultValue
@@ -811,6 +850,29 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         if (_gameState.value == GameState.Idle) {
             _statusMessage.value = tr(R.string.status_initial)
         }
+    }
+
+    fun updateAccelerationMode(mode: AccelerationMode) {
+        _gameSettings.value = _gameSettings.value.copy(accelerationMode = mode)
+        prefs.edit()
+            .putString(PREF_ACCELERATION_MODE, mode.name)
+            .putBoolean(PREF_ACCELERATION_MODE_AUTO_RESOLVED, false)
+            .remove(PREF_ACCELERATION_MODE_VERSION_CODE)
+            .apply()
+    }
+
+    fun resolveAccelerationMode(mode: AccelerationMode) {
+        if (mode == AccelerationMode.Gpu &&
+            _gameSettings.value.accelerationMode != AccelerationMode.Auto
+        ) {
+            return
+        }
+        _gameSettings.value = _gameSettings.value.copy(accelerationMode = mode)
+        prefs.edit()
+            .putString(PREF_ACCELERATION_MODE, mode.name)
+            .putBoolean(PREF_ACCELERATION_MODE_AUTO_RESOLVED, true)
+            .putInt(PREF_ACCELERATION_MODE_VERSION_CODE, BuildConfig.VERSION_CODE)
+            .apply()
     }
 
     fun markOnboardingCompleted() {

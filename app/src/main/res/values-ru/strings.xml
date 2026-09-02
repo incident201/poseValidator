@@ -98,6 +98,11 @@
     <string name="wrist_drift_weight_range">0.000–1.000, по умолчанию 0.700</string>
     <string name="debug_mode">Режим отладки</string>
     <string name="record_timelapse_video">Записывать Timelapse видео</string>
+    <string name="acceleration">Ускорение</string>
+    <string name="acceleration_description">Авто определяет и запоминает доступное ускорение.</string>
+    <string name="acceleration_auto">Авто</string>
+    <string name="acceleration_gpu">GPU</string>
+    <string name="acceleration_cpu">CPU</string>
     <string name="movement_gauge_drift">Смещение</string>
     <string name="movement_gauge_motion">Движение</string>
     <string name="violation_count_face">Лицо</string>
