@@ -39,6 +39,7 @@ import com.incident201.poseguard.tracker.Point3D
 import com.incident201.poseguard.tracker.PoseFrameCropper
 import com.incident201.poseguard.tracker.PoseIdentityStabilizationResult
 import com.incident201.poseguard.tracker.PoseIdentityStabilizer
+import com.incident201.poseguard.tracker.PoseLandmarkerModel
 import com.incident201.poseguard.tracker.PoseLandmarks
 import com.incident201.poseguard.tracker.PoseOcclusionGuard
 import com.incident201.poseguard.tracker.PoseOcclusionGuardConfig
@@ -85,6 +86,7 @@ private const val PREF_DEBUG_MODE_ENABLED = "debug_mode_enabled"
 private const val PREF_ACCELERATION_MODE = "acceleration_mode"
 private const val PREF_ACCELERATION_MODE_AUTO_RESOLVED = "acceleration_mode_auto_resolved"
 private const val PREF_ACCELERATION_MODE_VERSION_CODE = "acceleration_mode_version_code"
+private const val PREF_POSE_LANDMARKER_MODEL = "pose_landmarker_model"
 private const val PREF_ONBOARDING_COMPLETED = "onboarding_completed"
 private const val PREF_POSE_SMOOTHER_MIN_CUTOFF = "pose_smoother_min_cutoff"
 private const val PREF_POSE_SMOOTHER_BETA = "pose_smoother_beta"
@@ -166,6 +168,7 @@ internal fun accelerationModeAfterAppUpdate(
 data class GameSettings(
     val language: AppLanguage = AppLanguage.English,
     val accelerationMode: AccelerationMode = AccelerationMode.Auto,
+    val poseLandmarkerModel: PoseLandmarkerModel = PoseLandmarkerModel.Heavy,
     val faceCheckMode: FaceCheckMode = FaceCheckMode.Disabled,
     val faceDetectionConfidence: Float = 0.8f,
     val driftThresholdFactor: Float = 0.160f,
@@ -463,6 +466,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
         return GameSettings(
             language = language,
             accelerationMode = loadAccelerationMode(),
+            poseLandmarkerModel = enumPref(PREF_POSE_LANDMARKER_MODEL, PoseLandmarkerModel.Heavy),
             faceCheckMode = mode,
             faceDetectionConfidence = 0.8f,
             driftThresholdFactor = driftThresholdFactor,
@@ -859,6 +863,11 @@ class GameViewModel(application: Application) : AndroidViewModel(application), S
             .putBoolean(PREF_ACCELERATION_MODE_AUTO_RESOLVED, false)
             .remove(PREF_ACCELERATION_MODE_VERSION_CODE)
             .apply()
+    }
+
+    fun updatePoseLandmarkerModel(model: PoseLandmarkerModel) {
+        _gameSettings.value = _gameSettings.value.copy(poseLandmarkerModel = model)
+        prefs.edit().putString(PREF_POSE_LANDMARKER_MODEL, model.name).apply()
     }
 
     fun resolveAccelerationMode(mode: AccelerationMode) {

@@ -500,10 +500,15 @@ fun CameraScreen(
         }
     }
 
-    LaunchedEffect(context) {
+    LaunchedEffect(context, gameSettings.poseLandmarkerModel) {
+        val previousService = landmarkerService
+        landmarkerService = null
+        previousService?.close()
+        viewModel.resetPoseInputContinuity()
         landmarkerService = PoseLandmarkerService(
             context,
             gameSettings.accelerationMode,
+            gameSettings.poseLandmarkerModel,
             object : PoseLandmarkerService.LandmarkerListener {
             override fun onError(error: String) {
                 Log.e("CameraScreen", "MediaPipe Error: $error")
@@ -809,6 +814,7 @@ fun CameraScreen(
             onSubsequentViolationPenaltyChanged = viewModel::updateSubsequentViolationPenaltyMinutes,
             onLanguageChanged = viewModel::updateLanguage,
             onAccelerationModeChanged = viewModel::updateAccelerationMode,
+            onPoseLandmarkerModelChanged = viewModel::updatePoseLandmarkerModel,
             onTimelapseRecordingEnabledChanged = viewModel::updateTimelapseRecordingEnabled,
             onDebugModeEnabledChanged = viewModel::updateDebugModeEnabled,
             onOcclusionFreezeVisibilityAlwaysChanged = viewModel::updateOcclusionFreezeVisibilityAlways,
