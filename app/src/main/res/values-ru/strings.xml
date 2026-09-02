@@ -103,6 +103,9 @@
     <string name="acceleration_auto">Авто</string>
     <string name="acceleration_gpu">GPU</string>
     <string name="acceleration_cpu">CPU</string>
+    <string name="pose_landmarker_model">Модель PoseLandmarker</string>
+    <string name="pose_landmarker_model_heavy">Heavy (лучшая точность)</string>
+    <string name="pose_landmarker_model_full">Full (быстрее)</string>
     <string name="movement_gauge_drift">Смещение</string>
     <string name="movement_gauge_motion">Движение</string>
     <string name="violation_count_face">Лицо</string>

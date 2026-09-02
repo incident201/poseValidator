@@ -51,6 +51,7 @@ import com.incident201.poseguard.intiface.IntifaceVibrationPattern
 import com.incident201.poseguard.intiface.IntifaceVibrationSettings
 import com.incident201.poseguard.intiface.IntifaceViolationMode
 import com.incident201.poseguard.tracker.AccelerationMode
+import com.incident201.poseguard.tracker.PoseLandmarkerModel
 import com.incident201.poseguard.viewmodel.AppLanguage
 import com.incident201.poseguard.viewmodel.FaceCheckMode
 import com.incident201.poseguard.viewmodel.GameSettings
@@ -73,6 +74,7 @@ internal fun SettingsScreen(
     onSubsequentViolationPenaltyChanged: (Int) -> Unit,
     onLanguageChanged: (AppLanguage) -> Unit,
     onAccelerationModeChanged: (AccelerationMode) -> Unit,
+    onPoseLandmarkerModelChanged: (PoseLandmarkerModel) -> Unit,
     onTimelapseRecordingEnabledChanged: (Boolean) -> Unit,
     onDebugModeEnabledChanged: (Boolean) -> Unit,
     onOcclusionFreezeVisibilityAlwaysChanged: (Float) -> Unit,
@@ -206,6 +208,40 @@ internal fun SettingsScreen(
                             label,
                             color = colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = colorScheme.surfaceVariant)) {
+            Column(Modifier.padding(16.dp)) {
+                Text(
+                    localizedString(settings.language, R.string.pose_landmarker_model),
+                    color = colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold
+                )
+                PoseLandmarkerModel.entries.forEach { model ->
+                    val labelRes = when (model) {
+                        PoseLandmarkerModel.Heavy -> R.string.pose_landmarker_model_heavy
+                        PoseLandmarkerModel.Full -> R.string.pose_landmarker_model_full
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onPoseLandmarkerModelChanged(model) }
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = settings.poseLandmarkerModel == model,
+                            onClick = { onPoseLandmarkerModelChanged(model) }
+                        )
+                        Text(
+                            localizedString(settings.language, labelRes),
+                            color = colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }

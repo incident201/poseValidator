@@ -23,6 +23,11 @@ enum class AccelerationMode {
     Cpu
 }
 
+enum class PoseLandmarkerModel(val assetPath: String) {
+    Heavy("pose_landmarker_heavy.task"),
+    Full("pose_landmarker_full.task")
+}
+
 sealed interface AccelerationState {
     data object InitializingCpu : AccelerationState
     data object Cpu : AccelerationState
@@ -35,6 +40,7 @@ sealed interface AccelerationState {
 class PoseLandmarkerService(
     context: Context,
     initialAccelerationMode: AccelerationMode,
+    private val model: PoseLandmarkerModel,
     private val listener: LandmarkerListener
 ) {
     private val appContext = context.applicationContext
@@ -172,7 +178,7 @@ class PoseLandmarkerService(
         if (existing != null && !existing.isClosing) return
 
         gpuAttempted = true
-        Log.i(TAG, "gpu_probe_start activeDelegate=${activeBackend?.delegate} model=$MODEL_ASSET_PATH")
+        Log.i(TAG, "gpu_probe_start activeDelegate=${activeBackend?.delegate} model=${model.assetPath}")
         notifyAccelerationState(AccelerationState.InitializingGpu())
         LandmarkerBackend(Delegate.GPU).also { backend ->
             gpuBackend = backend
@@ -377,10 +383,10 @@ class PoseLandmarkerService(
         Log.i(
             TAG,
             "delegate_init_start delegate=${backend.delegate} mode=$accelerationMode " +
-                "thread=${Thread.currentThread().name} model=$MODEL_ASSET_PATH gpuCache=disabled"
+                "thread=${Thread.currentThread().name} model=${model.assetPath} gpuCache=disabled"
         )
         val baseOptionsBuilder = BaseOptions.builder()
-            .setModelAssetPath(MODEL_ASSET_PATH)
+            .setModelAssetPath(model.assetPath)
             .setDelegate(backend.delegate)
 
         val options = PoseLandmarker.PoseLandmarkerOptions.builder()
@@ -520,7 +526,7 @@ class PoseLandmarkerService(
     }
 
     private fun currentGpuCompatibilitySignature(): String =
-        "${Build.FINGERPRINT}|$GPU_PROBE_VERSION"
+        "${Build.FINGERPRINT}|$GPU_PROBE_VERSION|${model.assetPath}"
 
     fun close() {
         val backends = synchronized(stateLock) {
@@ -658,7 +664,6 @@ class PoseLandmarkerService(
 
     private companion object {
         const val TAG = "PoseLandmarkerService"
-        const val MODEL_ASSET_PATH = "pose_landmarker_heavy.task"
         const val GPU_INITIALIZATION_TIMEOUT_SECONDS = 15L
         val GPU_WATCHDOG_LOG_SECONDS = listOf(3L, 5L, 10L)
         const val ACCELERATION_PREFS_NAME = "pose_landmarker_acceleration"
@@ -667,6 +672,6 @@ class PoseLandmarkerService(
         const val PREF_GPU_FAILURE_REASON = "gpu_failure_reason"
         const val GPU_RESULT_SUPPORTED = "supported"
         const val GPU_RESULT_UNAVAILABLE = "unavailable"
-        const val GPU_PROBE_VERSION = "mediapipe-1.0.0|pose-landmarker-heavy|no-direct-opencl-v1"
+        const val GPU_PROBE_VERSION = "mediapipe-1.0.0|no-direct-opencl-v1"
     }
 }

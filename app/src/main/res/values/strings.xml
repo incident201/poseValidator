@@ -103,6 +103,9 @@
     <string name="acceleration_auto">Auto</string>
     <string name="acceleration_gpu">GPU</string>
     <string name="acceleration_cpu">CPU</string>
+    <string name="pose_landmarker_model">PoseLandmarker Model</string>
+    <string name="pose_landmarker_model_heavy">Heavy (Best Accuracy)</string>
+    <string name="pose_landmarker_model_full">Full (Faster)</string>
     <string name="movement_gauge_drift">Drift</string>
     <string name="movement_gauge_motion">Motion</string>
     <string name="violation_count_face">Face</string>
