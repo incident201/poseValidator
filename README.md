@@ -83,10 +83,12 @@ When face tracking is enabled, the app can also monitor whether the subject turn
 
 Recommended:
 
-- 8 GB RAM or more
-- A reasonably powerful CPU/GPU
+- 8 GB RAM or more (~1.5 free RAM needed during the session)
+- Powerful CPU (ARM64, 8 cores)
+- OpenGL ES 3.1+ support for GPU acceleration
 - Good lighting
 - A stable device/camera position
+
 
 Performance depends on the device, camera resolution, lighting conditions, and selected tracking options.
 
