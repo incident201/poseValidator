@@ -72,6 +72,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.incident201.poseguard.audio.AudioCuePlaybackSettings
 import com.incident201.poseguard.audio.AudioCuePlayer
+import com.incident201.poseguard.tracker.AccelerationMode
+import com.incident201.poseguard.tracker.AccelerationState
 import com.incident201.poseguard.tracker.Point3D
 import com.incident201.poseguard.tracker.PoseLandmarkerService
 import com.incident201.poseguard.viewmodel.AppLanguage
@@ -473,6 +475,9 @@ fun CameraScreen(
     var availableLensFacings by remember { mutableStateOf<List<Int>>(emptyList()) }
     var selectedLensFacing by rememberSaveable { mutableStateOf(CameraSelector.LENS_FACING_BACK) }
     var landmarkerService by remember { mutableStateOf<PoseLandmarkerService?>(null) }
+    var landmarkerAccelerationState by remember {
+        mutableStateOf<AccelerationState>(AccelerationState.InitializingCpu)
+    }
     var isDemoMode by rememberSaveable { mutableStateOf(false) }
     var demoBitmap by remember { mutableStateOf<Bitmap?>(null) }
     val demoImagePickerLauncher = rememberLauncherForActivityResult(
@@ -496,7 +501,10 @@ fun CameraScreen(
     }
 
     LaunchedEffect(context) {
-        landmarkerService = PoseLandmarkerService(context, object : PoseLandmarkerService.LandmarkerListener {
+        landmarkerService = PoseLandmarkerService(
+            context,
+            gameSettings.accelerationMode,
+            object : PoseLandmarkerService.LandmarkerListener {
             override fun onError(error: String) {
                 Log.e("CameraScreen", "MediaPipe Error: $error")
             }
@@ -504,7 +512,28 @@ fun CameraScreen(
             override fun onResults(result: com.incident201.poseguard.tracker.PoseLandmarks, imageWidth: Int, imageHeight: Int, timestampMs: Long) {
                 viewModel.processMediaPipeResults(result, timestampMs, imageWidth, imageHeight)
             }
+
+            override fun onFrameDropped(timestampMs: Long) {
+                viewModel.dropCameraFrame(timestampMs, recycle = true)
+            }
+
+            override fun onAccelerationStateChanged(state: AccelerationState) {
+                ContextCompat.getMainExecutor(context).execute {
+                    landmarkerAccelerationState = state
+                    when (state) {
+                        AccelerationState.Gpu ->
+                            viewModel.resolveAccelerationMode(AccelerationMode.Gpu)
+                        is AccelerationState.CpuFallback ->
+                            viewModel.resolveAccelerationMode(AccelerationMode.Cpu)
+                        else -> Unit
+                    }
+                }
+            }
         })
+    }
+
+    LaunchedEffect(gameSettings.accelerationMode, landmarkerService) {
+        landmarkerService?.setAccelerationMode(gameSettings.accelerationMode)
     }
 
     // Clean up
@@ -779,6 +808,7 @@ fun CameraScreen(
             onThirdViolationPenaltyChanged = viewModel::updateThirdViolationPenaltyMinutes,
             onSubsequentViolationPenaltyChanged = viewModel::updateSubsequentViolationPenaltyMinutes,
             onLanguageChanged = viewModel::updateLanguage,
+            onAccelerationModeChanged = viewModel::updateAccelerationMode,
             onTimelapseRecordingEnabledChanged = viewModel::updateTimelapseRecordingEnabled,
             onDebugModeEnabledChanged = viewModel::updateDebugModeEnabled,
             onOcclusionFreezeVisibilityAlwaysChanged = viewModel::updateOcclusionFreezeVisibilityAlways,
@@ -947,6 +977,17 @@ fun CameraScreen(
                 )
             }
 
+            if (!showFinalScreen && debugModeEnabled) {
+                AccelerationDebugIndicator(
+                    state = landmarkerAccelerationState,
+                    mode = gameSettings.accelerationMode,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 10.dp)
+                        .zIndex(4f)
+                )
+            }
+
             if (!showFinalScreen && gameState == GameState.StartingDelay && startDelayRemainingSeconds >= 0) {
                 PreviewCountdownOverlay(
                     seconds = startDelayRemainingSeconds,
@@ -1042,6 +1083,55 @@ fun CameraScreen(
 }
 
 
+
+@Composable
+private fun AccelerationDebugIndicator(
+    state: AccelerationState,
+    mode: AccelerationMode,
+    modifier: Modifier = Modifier
+) {
+    val (label, detail) = when (state) {
+        AccelerationState.InitializingCpu -> "CPU…" to "initializing"
+        AccelerationState.Cpu -> "CPU" to null
+        is AccelerationState.InitializingGpu -> {
+            val elapsedSeconds = state.elapsedMs / 1000L
+            val label = if (mode == AccelerationMode.Gpu) "GPU…" else "CPU → GPU…"
+            label to if (elapsedSeconds > 0L) "${elapsedSeconds}s" else "initializing"
+        }
+        AccelerationState.Gpu -> "GPU" to null
+        is AccelerationState.CpuFallback -> "CPU" to "GPU fallback: ${state.reason}"
+        is AccelerationState.Error -> "ERROR" to state.reason
+    }
+
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = Color.Black.copy(alpha = 0.68f),
+        contentColor = Color.White
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = label,
+                fontSize = 13.sp,
+                lineHeight = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+            detail?.let {
+                Text(
+                    text = it,
+                    fontSize = 10.sp,
+                    lineHeight = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = Color.White.copy(alpha = 0.82f)
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun PreviewCountdownOverlay(

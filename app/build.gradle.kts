@@ -13,6 +13,7 @@ java {
 android {
   namespace = "com.incident201.poseguard"
   compileSdk = 37
+  buildToolsVersion = "37.0.0"
 
   defaultConfig {
     applicationId = "com.incident201.poseguard"
